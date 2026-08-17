@@ -281,10 +281,12 @@ PRD V3 需要把 Research Insight → Experiment → Build，Build 步接入外�
 |---|---|---|
 | headless 执行 | ✅ `claude -p` 直接返回输出 | ⚠️ `codex exec` 需 `--skip-git-repo-check` |
 | 本环境可用 | ✅ **实测通过**（走现有网关 ANTHROPIC_BASE_URL+token，模型 deepseek-v4-flash） | ❌ **实测失败**：绑定 chatgpt.com 云认证（`/backend-api/wham/apps`），本环境不可达、反复重连 |
-| 鉴权 | 复用已有网关 / Anthropic Key / Pro OAuth | 需单独 ChatGPT 登录或 OpenAI 兼容端点配置 |
+| **开源许可** | ❌ 闭源（Anthropic 专有 ToS，不可再分发/内嵌） | ✅ **Apache-2.0 开源**（本机包实测 `@openai/codex` 0.139.0，仓库 `github.com/openai/codex`）——可 fork/内嵌/审计 |
+| 鉴权 | 复用已有网关 / Anthropic Key / Pro OAuth | 需单独 ChatGPT 登录或 OpenAI 兼容端点（`OPENAI_BASE_URL`+key）配置 |
 | 可参数化 | `--model / --permission-mode / --output-format json` | `--model` 等 |
-| 与 Lodestar 契合 | 高（同一网关、JSON 输出好解析、用户日常工具） | 低（当前环境不可达，需额外配置） |
+| 与 Lodestar 契合 | 高（同一网关、JSON 输出好解析、用户日常工具） | 条件性高（配好端点即用，且可随项目开源分发） |
 
-**结论：选 Claude Code CLI 为主 executor，Codex 留作可插拔备选。**
-理由：① 本环境实测可用且复用同一网关（零额外鉴权）；② `--output-format json` 便于程序解析；③ 与用户日常 Agent 栈一致。
-Codex 仅当后续拿到可用的 OpenAI 兼容端点（或登录态）时再启用（`--executor codex` 一行切换）。
+**结论（修正版）：分场景选，两个都留可插拔。**
+- **个人日常使用、现在就可用** → **Claude Code**（本环境实测通过、复用同一网关、JSON 好解析）。
+- **若目标是开源/可再分发的独立工具**（Lodestar 未来上 GitHub）→ **Codex 更优**：Apache-2.0 可 fork/内嵌/随包分发，Claude Code 闭源不可再分发。Codex 需配 OpenAI 兼容端点（`OPENAI_BASE_URL` + `OPENAI_API_KEY`）即可切 `--executor codex`。
+- 结论不变的是：**选型由「当前可用性」与「许可/分发目标」共同决定**，抽象层已支持一行切换，不锁死。

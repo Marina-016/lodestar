@@ -1,7 +1,9 @@
 """Codex CLI executor（headless `codex exec`）。
 
-注意：本环境实测 codex 绑定 ChatGPT 云认证（chatgpt.com 不可达）而失败；
-需在配置了 OpenAI 兼容端点（OPENAI_BASE_URL + OPENAI_API_KEY）或已登录的环境才可用。
+Codex CLI 是 **Apache-2.0 开源**（github.com/openai/codex）——可 fork/内嵌/随项目分发，
+适合作为 Lodestar 开源化时的 Build executor。本环境实测 codex 绑定 ChatGPT 云认证
+（chatgpt.com 不可达）而失败；配置 OpenAI 兼容端点（OPENAI_BASE_URL + OPENAI_API_KEY）
+或完成登录后，`python -m lodestar build "<prompt>" --executor codex` 即可用。
 """
 from __future__ import annotations
 

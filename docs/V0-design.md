@@ -286,7 +286,11 @@ PRD V3 需要把 Research Insight → Experiment → Build，Build 步接入外�
 | 可参数化 | `--model / --permission-mode / --output-format json` | `--model` 等 |
 | 与 Lodestar 契合 | 高（同一网关、JSON 输出好解析、用户日常工具） | 条件性高（配好端点即用，且可随项目开源分发） |
 
-**结论（修正版）：分场景选，两个都留可插拔。**
-- **个人日常使用、现在就可用** → **Claude Code**（本环境实测通过、复用同一网关、JSON 好解析）。
-- **若目标是开源/可再分发的独立工具**（Lodestar 未来上 GitHub）→ **Codex 更优**：Apache-2.0 可 fork/内嵌/随包分发，Claude Code 闭源不可再分发。Codex 需配 OpenAI 兼容端点（`OPENAI_BASE_URL` + `OPENAI_API_KEY`）即可切 `--executor codex`。
-- 结论不变的是：**选型由「当前可用性」与「许可/分发目标」共同决定**，抽象层已支持一行切换，不锁死。
+**结论（v0.1.7 最终版）：Codex 转正为主 executor（开源 + 已实测经网关可用）。**
+- **Codex 已能在本环境工作**（v0.1.7 实测）：codex 0.139 走 OpenAI **Responses API**（`wire_api="chat"` 已弃用）；
+  网关 sh-dtrouter 恰好支持 `/v1/responses`，用自定义 provider 注入即可：
+  `-c model_providers.<name>.{name,base_url,wire_api="responses",env_key="OPENAI_API_KEY"}`，
+  key 走 `LODESTAR_CODEX_API_KEY`。chatgpt.com 云同步的 MCP worker 报错是无害噪音。
+- 用法：`LODESTAR_CODEX_BASE_URL=<gw>/v1` + `LODESTAR_CODEX_API_KEY=<token>` → `python -m lodestar build "<prompt>"`（默认 executor=codex）。
+- **Claude Code 保留为备选**（`--executor claude` / `LODESTAR_BUILD_EXECUTOR=claude`），在无 codex 的环境兜底。
+- 许可维度：Codex Apache-2.0 可随 Lodestar 开源分发；Claude Code 闭源仅运行时依赖。

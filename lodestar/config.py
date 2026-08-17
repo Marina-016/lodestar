@@ -49,6 +49,12 @@ class Config:
     pdf_cache_dir: Path = WORKSPACE_DIR / "pdfs_cache"   # PDF 下载缓存（gitignore）
     full_text_enabled: bool = False       # 默认关：全文读取成本高；开启后仅 Top N 源读全文
     full_text_max_sources: int = 2        # 开启时最多几个来源读全文（token 预算守护）
+    # --- V3：Build executor（Coding Agent CLI）---
+    build_executor: str = "codex"         # codex | claude | auto（选型见 docs §七）
+    codex_model: str = "deepseek-v4-flash"
+    codex_provider_name: str = "lodestar-gw"
+    codex_base_url: str = ""              # 空=用用户自带 codex 配置（ChatGPT 登录）；设了则走内网网关（Responses API）
+    # codex 网关模式的 key 走 LODESTAR_CODEX_API_KEY（.env，gitignore），不在代码里
     # --- 存储 ---
     db_path: Path = DEFAULT_DB_PATH
     workspace_dir: Path = WORKSPACE_DIR
@@ -76,6 +82,9 @@ def load_config() -> Config:
     c.full_text_enabled = os.getenv("LODESTAR_FULL_TEXT", str(c.full_text_enabled)).lower() in {"1", "true", "yes", "on"}
     if os.getenv("LODESTAR_FULL_TEXT_MAX_SOURCES"):
         c.full_text_max_sources = int(os.environ["LODESTAR_FULL_TEXT_MAX_SOURCES"])
+    c.build_executor = os.getenv("LODESTAR_BUILD_EXECUTOR", c.build_executor)
+    c.codex_model = os.getenv("LODESTAR_CODEX_MODEL", c.codex_model)
+    c.codex_base_url = os.getenv("LODESTAR_CODEX_BASE_URL", c.codex_base_url)
     if os.getenv("LODESTAR_VENUE_PROVIDERS"):
         c.venue_providers = tuple(p.strip() for p in os.environ["LODESTAR_VENUE_PROVIDERS"].split(",") if p.strip())
     if os.getenv("LODESTAR_VENUE_USER_AGENT"):

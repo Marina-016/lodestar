@@ -127,14 +127,21 @@ def cmd_feedback(args, cfg):
 
 
 def cmd_build(args, cfg):
-    """V3 种子：把 prompt 交给外部 coding agent CLI 执行（Claude Code / Codex）。"""
+    """V3：把 prompt 交给外部 coding agent CLI 执行（默认 codex，可切 claude）。"""
     from lodestar.build import get_executor
+    name = args.executor or cfg.build_executor
     try:
-        ex = get_executor(args.executor)
+        if name == "codex" and cfg.codex_base_url:
+            from lodestar.build.codex import CodexExecutor
+            ex = CodexExecutor(model=cfg.codex_model, provider=cfg.codex_provider_name,
+                               base_url=cfg.codex_base_url)
+        else:
+            ex = get_executor(name)
     except (ValueError, RuntimeError) as e:
         print(f"[error] {e}")
         sys.exit(1)
-    print(f"executor: {ex.name}  available={ex.available()}")
+    print(f"executor: {ex.name}  available={ex.available()}"
+          + (f"  → 网关 {cfg.codex_base_url}" if name == "codex" and cfg.codex_base_url else ""))
     if not ex.available():
         print("[error] 该 CLI 未安装或不可用")
         sys.exit(1)
@@ -197,9 +204,9 @@ def main(argv=None):
     pf = sub.add_parser("feedback", help="列出用户反馈")
     pf.set_defaults(fn=cmd_feedback)
 
-    pb = sub.add_parser("build", help="V3 种子：调 coding agent CLI 执行 prompt（claude/codex）")
+    pb = sub.add_parser("build", help="V3：调 coding agent CLI 执行 prompt（默认 codex，可切 claude）")
     pb.add_argument("prompt", help="要执行的指令")
-    pb.add_argument("--executor", default="auto", help="claude | codex | auto")
+    pb.add_argument("--executor", default=None, help="claude | codex | auto（缺省用 config.build_executor）")
     pb.add_argument("--timeout", type=int, default=300)
     pb.set_defaults(fn=cmd_build)
 

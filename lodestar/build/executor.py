@@ -30,15 +30,20 @@ class BuildExecutor:
     def run(self, prompt: str, cwd: str = ".", timeout: int = 300) -> ExecutorResult:
         raise NotImplementedError
 
-    def _exec(self, cmd: list[str], cwd: str, timeout: int) -> ExecutorResult:
+    def _exec(self, cmd: list[str], cwd: str, timeout: int, env: dict | None = None) -> ExecutorResult:
         # Windows 上 npm 的 shim（如 codex）无扩展名，subprocess 解析不了 → 用 which 解析后的全路径
         bin_path = shutil.which(self._binary())
         if not bin_path:
             return ExecutorResult(ok=False, error=f"找不到 CLI：{self._binary()}（未安装或不在 PATH）")
         cmd[0] = bin_path
+        full_env = None
+        if env:
+            import os
+            full_env = {**os.environ, **env}
         try:
             r = subprocess.run(cmd, capture_output=True, text=True,
-                               cwd=cwd, timeout=timeout, encoding="utf-8", errors="replace")
+                               cwd=cwd, timeout=timeout, encoding="utf-8", errors="replace",
+                               env=full_env)
             out = (r.stdout or "").strip()
             err = (r.stderr or "").strip()
             return ExecutorResult(ok=r.returncode == 0, output=out, error=err)

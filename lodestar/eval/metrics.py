@@ -98,6 +98,9 @@ def compute_metrics(cfg, case: GoldenCase, task: dict, brief: str, sources: list
     metrics["venue_resolved"] = sum(1 for s in papers if s.get("venue"))
     metrics["venue_coverage"] = round(metrics["venue_resolved"] / len(papers), 2) if papers else None
 
+    # ---- V1-R2：PDF 全文读取覆盖 ----
+    metrics["full_text_sources"] = sum(1 for s in sources if s.get("read_depth") == "full")
+
     # ---- 质量指标：Judge-LLM ----
     if brief and sources:
         goal = case.goal

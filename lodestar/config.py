@@ -45,6 +45,10 @@ class Config:
     venue_enrich_limit: int = 10     # 单次任务最多回填篇数（防限流）
     venue_request_interval_s: float = 1.2   # 无 Key 约 1 QPS，节流间隔
     venue_user_agent: str = "Lodestar/0.1 (research workspace; mailto:lodestar.research.dev@example.com)"
+    # --- V1-R2：PDF 全文读取 ---
+    pdf_cache_dir: Path = WORKSPACE_DIR / "pdfs_cache"   # PDF 下载缓存（gitignore）
+    full_text_enabled: bool = False       # 默认关：全文读取成本高；开启后仅 Top N 源读全文
+    full_text_max_sources: int = 2        # 开启时最多几个来源读全文（token 预算守护）
     # --- 存储 ---
     db_path: Path = DEFAULT_DB_PATH
     workspace_dir: Path = WORKSPACE_DIR
@@ -69,6 +73,9 @@ def load_config() -> Config:
     c.enrich_venues = os.getenv("LODESTAR_ENRICH_VENUES", str(c.enrich_venues)).lower() in {"1", "true", "yes", "on"}
     if os.getenv("LODESTAR_TOOL_TIMEOUT"):
         c.tool_timeout_s = int(os.environ["LODESTAR_TOOL_TIMEOUT"])
+    c.full_text_enabled = os.getenv("LODESTAR_FULL_TEXT", str(c.full_text_enabled)).lower() in {"1", "true", "yes", "on"}
+    if os.getenv("LODESTAR_FULL_TEXT_MAX_SOURCES"):
+        c.full_text_max_sources = int(os.environ["LODESTAR_FULL_TEXT_MAX_SOURCES"])
     if os.getenv("LODESTAR_VENUE_PROVIDERS"):
         c.venue_providers = tuple(p.strip() for p in os.environ["LODESTAR_VENUE_PROVIDERS"].split(",") if p.strip())
     if os.getenv("LODESTAR_VENUE_USER_AGENT"):

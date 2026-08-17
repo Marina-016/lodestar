@@ -132,6 +132,35 @@ class SmokeTestCase(unittest.TestCase):
         finally:
             ws.close()
 
+    def test_05_full_text_path_offline(self):
+        """V1-R2：开启全文时 Top N 论文来源 read_depth=full；关闭时全为摘要级。"""
+        ft_cfg = Config(llm_mode="mock", search_mode="mock",
+                        full_text_enabled=True, full_text_max_sources=2,
+                        db_path=Path(self.tmp) / "ft.db",
+                        workspace_dir=Path(self.tmp) / "ws_ft",
+                        cases_dir=self.cfg.cases_dir)
+        ws = Workspace(ft_cfg)
+        try:
+            agent = ResearchAgent(ws, interactive=False)
+            res = agent.run(GOLDEN_GOAL, apply_updates=True)
+            rows = repo.list_sources(ws.conn, res["task_id"])
+            fulls = [s for s in rows if s.get("read_depth") == "full"]
+            self.assertTrue(fulls, "开启全文后应有 read_depth=full 的来源")
+            self.assertGreaterEqual(len(fulls), 1, "Top 2 论文来源应读全文")
+            # 关闭全文时对照：无 full
+            off_cfg = Config(llm_mode="mock", search_mode="mock", full_text_enabled=False,
+                             db_path=Path(self.tmp) / "off.db",
+                             workspace_dir=Path(self.tmp) / "ws_off",
+                             cases_dir=self.cfg.cases_dir)
+            ws2 = Workspace(off_cfg)
+            res2 = ResearchAgent(ws2, interactive=False).run(GOLDEN_GOAL, apply_updates=True)
+            rows2 = repo.list_sources(ws2.conn, res2["task_id"])
+            self.assertFalse(any(s.get("read_depth") == "full" for s in rows2),
+                             "关闭全文时不应有 full 来源")
+            ws2.close()
+        finally:
+            ws.close()
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

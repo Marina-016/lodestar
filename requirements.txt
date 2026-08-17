@@ -2,3 +2,4 @@ anthropic>=0.40
 requests>=2.31
 beautifulsoup4>=4.12
 python-dotenv>=1.0
+pymupdf>=1.24        # V1-R2：PDF 全文解析（装不上自动降级回 abstract 级）

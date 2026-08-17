@@ -60,7 +60,7 @@ python -m lodestar feedback
 ## 能力边界（诚实声明）
 
 - ✅ **V1-R1 已实现（v0.1.1）**：论文 **journal/venue 已补齐**——检索后并联 provider 链（Semantic Scholar → OpenAlex → Dblp → Crossref）回填 `venue / is_published`，进 Rerank 的 Source Quality 与 Brief 表格；429 限流/不可达自动换源，单篇失败优雅降级（不阻断任务），基于 title 的源带相似度守卫。**live 已实测**（Dblp 兜底：CoT/Reflexion 解析到 NeurIPS）。详见 `docs/V0-design.md` §六。
-- 论文读取仍为 **abstract 级**；`read_paper` 仅支持 arXiv；**PDF 全文读取未做**（V1-R2 待排期）。
+- ✅ **V1-R2 已实现（v0.1.5）**：**PDF 全文读取**——`read_paper` 支持 arXiv + 通用 `.pdf`；下载缓存到 `workspace/pdfs_cache/`（gitignore），PyMuPDF 解析后**按节递进**（Abstract/Introduction/Method/Experiments）；**token 预算守护**：默认关（`LODESTAR_FULL_TEXT=true` 开启，仅 Top 2 来源读全文，assess 证据不足补搜时读 Top 1）；PyMuPDF 缺失/下载失败/扫描件 → 优雅降级回 abstract 级。
 - Web 搜索后端为 DuckDuckGo Lite（零 Key）；搜索后端接口化，可换 Brave/Serper。
 - `knowledge rollback` 只恢复 status/confidence，追加的笔记作为审计痕迹保留。
 - 未做：UI、Experiment 闭环、GitHub/项目文件检索、自演进（V4）、自动过期重审（B4 缺口，V1）。
@@ -69,5 +69,5 @@ python -m lodestar feedback
 ## Roadmap
 
 - **V0（当前）**：Research —— Plan → Search → Rerank → Read(abstract) → Synthesis → Knowledge Update，含 Trace + Eval。
-- **V1（进行中）**：V1-R1 journal/venue 补齐 ✅；V1-R2 PDF 全文读取（PyMuPDF，Top 1~2 来源，token 预算守护）；Weekly AI Frontier Research。
+- **V1（进行中）**：V1-R1 journal/venue 补齐 ✅；V1-R2 PDF 全文读取 ✅；Weekly AI Frontier Research。
 - **V2+**：Research → Experiment 闭环；Build 接入；Self-Evolving Skill（PRD §25）。

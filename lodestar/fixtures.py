@@ -213,15 +213,28 @@ def all_web() -> list[dict]:
     return out
 
 
-def mock_paper_text(url: str) -> dict:
+def mock_paper_text(url: str, full_text: bool = False) -> dict:
     for p in all_papers():
         if p["url"] == url:
+            base = (f"# {p['title']}\nauthors: Mock Author\npublished: {p['date']}\n\n"
+                    f"## Abstract\n{p['snippet']}")
+            if full_text:  # V1-R2：mock 全文（含正文节）
+                body = (base + "\n\n## introduction\n" + p['snippet']
+                        + " We introduce a framework with several technical components, "
+                          "motivated by prior work.\n\n## method\n"
+                        + "The proposed method operates in stages: collection, reflection, "
+                          "candidate generation and evaluation.\n\n## experiments\n"
+                        + "Experiments show consistent gains across benchmarks; "
+                          "ablation confirms each component contributes.")
+                return {"title": p["title"], "url": url, "text": body, "truncated": False,
+                        "read_depth": "full", "full_text_ok": True,
+                        "note": "mock 离线全文（含正文节）", "sections": ["introduction", "method", "experiments"]}
             return {
                 "title": p["title"],
                 "url": url,
-                "text": f"# {p['title']}\nauthors: Mock Author\npublished: {p['date']}\n\n"
-                        f"## Abstract\n{p['snippet']}",
+                "text": base,
                 "truncated": False,
+                "read_depth": "abstract", "full_text_ok": False,
                 "note": "mock 离线读取（abstract 级）",
             }
     return {"error": "mock 夹具无此论文", "url": url}

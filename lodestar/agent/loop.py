@@ -108,7 +108,9 @@ class ResearchAgent:
             if sid:
                 repo.update_source(ws.conn, sid, rank=s.get("rank"), reason=s.get("reason"))
 
-        read_sources = self._deep_read(ranked, trace)
+        # V1-R2：config 开启全文时，Top N 论文来源读 PDF 全文（token 预算守护）
+        full_text_count = cfg.full_text_max_sources if cfg.full_text_enabled else 0
+        read_sources = self._deep_read(ranked, trace, full_text_count=full_text_count)
         for rs in read_sources:
             sid = id_by_title.get(rs["title"])
             if sid:
@@ -133,7 +135,8 @@ class ResearchAgent:
                 sources.append(s)
             if added:
                 extra_ranked = reranker_mod.rerank(cfg, self.llm, goal, plan["research_questions"], added, knowledge_ctx)
-                read_sources += self._deep_read(extra_ranked, trace)
+                # V1-R2：assess 判定证据不足才补搜 → 补搜的 Top 1 来源读全文
+                read_sources += self._deep_read(extra_ranked, trace, full_text_count=1)
             assess = assessor_mod.assess(cfg, self.llm, goal, plan["research_questions"], self._evidence_summary(read_sources))
             trace.log("assess", assess)
 
@@ -210,19 +213,32 @@ class ResearchAgent:
             out.append(s)
         return out
 
-    def _deep_read(self, ranked: list[dict], trace: Trace) -> list[dict]:
-        """深度读取 Top N 来源（受 max_deep_read_sources 限制），带硬截断。"""
+    def _deep_read(self, ranked: list[dict], trace: Trace, full_text_count: int = 0) -> list[dict]:
+        """深度读取 Top N 来源（受 max_deep_read_sources 限制），带硬截断。
+
+        V1-R2：full_text_count>0 时，前 N 个论文来源请求 PDF 全文（token 预算守护：
+        默认 config 只给 Top 2，或 assess 证据不足补搜时给 1）。读不到全文优雅降级 abstract。
+        """
         ws, cfg = self.ws, self.cfg
         read_sources = []
+        remaining_full = full_text_count
         for s in ranked[: cfg.max_deep_read_sources]:
-            tool = "read_paper" if s.get("source_type") == "paper" else "read_webpage"
+            is_paper = s.get("source_type") == "paper"
+            want_full = is_paper and remaining_full > 0
+            tool = "read_paper" if is_paper else "read_webpage"
             params = {"url": s["url"], "char_budget": cfg.read_char_budget}
+            if want_full:
+                params["full_text"] = True
             trace.tool_call(tool, params)
             result = call_tool(ws, tool, params)
             trace.tool_result(tool, {"title": result.get("title"), "truncated": result.get("truncated"),
-                                     "error": result.get("error")})
+                                     "error": result.get("error"), "full_text_ok": result.get("full_text_ok")})
             item = dict(s)
-            item["read_depth"] = "abstract" if s.get("source_type") == "paper" else "web"
+            if result.get("read_depth") == "full" and result.get("full_text_ok"):
+                item["read_depth"] = "full"
+                remaining_full -= 1
+            else:
+                item["read_depth"] = "abstract" if is_paper else "web"
             if result.get("error"):
                 item["read_error"] = result["error"]
                 item["content"] = f"（读取失败：{result['error']}）"

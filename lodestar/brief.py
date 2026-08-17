@@ -16,12 +16,16 @@ def _venue_label(s: dict) -> str:
     return f"{venue}（{pub}）"
 
 
+_DEPTH_LABEL = {"full": "全文", "abstract": "摘要", "web": "网页", "none": "未读"}
+
+
 def _sources_table(sources: list[dict]) -> str:
-    lines = ["| # | 类型 | 标题 | 日期 | venue / 发表状态 |", "|---|---|---|---|---|"]
+    lines = ["| # | 类型 | 标题 | 日期 | 读取 | venue / 发表状态 |", "|---|---|---|---|---|---|"]
     for i, s in enumerate(sources, 1):
         title = s.get("title", "").replace("|", "\\|")
+        depth = _DEPTH_LABEL.get(s.get("read_depth"), "未读")
         lines.append(f"| {i} | {s.get('source_type', '')} | [{title}]({s.get('url', '')}) | "
-                     f"{s.get('date') or 'n/a'} | {_venue_label(s)} |")
+                     f"{s.get('date') or 'n/a'} | {depth} | {_venue_label(s)} |")
     return "\n".join(lines)
 
 

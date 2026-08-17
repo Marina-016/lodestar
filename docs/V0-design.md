@@ -247,17 +247,18 @@ Lodestar/                          ← 项目根（2026-08-17 由 lodestar 改�
 - **严格限流**：超打会 429/断连（实测连打 9 个请求即被断连），生产代码守礼貌：mailto UA + 批间 1.2s + 瞬时错误退避重试 + 每篇最多 2 次查询。
 - 结论：**Dblp 定位为回退源，安全优先、宁缺勿错**；每个 venue 带 `venue_note` 标注来源，可审计。
 
-### V1-R2 论文 PDF 全文读取
+### V1-R2 论文 PDF 全文读取 —— ✅ 已实现（v0.1.5）
 
 **现状与缺口**：V0 `read_paper` 仅读取 arXiv **摘要级**（title/authors/date/abstract），跨源综合的证据粒度止于摘要；arXiv 虽提供 PDF 链接但 V0 不下载不解析。
 
-**方案**：
-- `read_paper` 扩展 URL 解析：支持 arXiv（含 v 版本）与通用 PDF 链接。
-- 下载与缓存：PDF 落 `workspace/pdfs_cache/`（gitignore），按 arXiv id 缓存去重，重复任务不重复下载。
-- 解析：**PyMuPDF**（Windows 有预编译 wheel）抽文本 → 清洗 → 沿用 `read_char_budget` 硬截断；全文读取按「节」递进：abstract → intro → method → experiments，只在需要处展开。
-- **Token 预算守护（沿缺口 A2 原则）**：默认全文只对 **Top 1~2 个来源**开启，其余保持 abstract 级；读全文要么在 config 显式开启，要么由 assess 判定「证据不足」时触发。绝不让全文读取打爆上下文。
-- 依赖新增：`PyMuPDF`（仅 live 全文路径需要；装不上自动降级回 abstract 级，不阻断管道）。
-- **Eval 配套**：新增 `read_depth=full` 相关指标（full 来源数 / 全文 token 估算）；golden case 可断言「关键来源读到 full」。
-- **验收**：live 下 `read_paper` 对含正文的 arXiv 条目返回正文章节；无 PDF 的条目优雅降级；mock 全离线回归保持绿。
+**落地（v0.1.5）**：
+- `read_paper` 扩展：arXiv（含 v 版本）+ 通用 `.pdf` 链接；新增 `full_text` 参数。
+- 下载与缓存：PDF 落 `workspace/pdfs_cache/`（gitignore），按 arXiv id / URL 名缓存去重，重复任务不重复下载。
+- 解析：**PyMuPDF** 抽文本 → 轻量**按节抽取**（Abstract/Introduction/Method/Experiments/Results…）→
+  `read_char_budget` 硬截断。
+- **Token 预算守护（沿缺口 A2 原则）**：默认关（`LODESTAR_FULL_TEXT=false`）；开启后仅 **Top `full_text_max_sources`(默认2)** 个论文来源读全文；assess 判定证据不足触发 replan 时，补搜的 Top 1 来源读全文。绝不让全文读取打爆上下文。
+- **优雅降级**：PyMuPDF 缺失 / PDF 下载失败 / 无文本层（扫描件）→ 回退 abstract 级并带 note，绝不阻断管道。
+- **Eval 配套**：新增 `full_text_sources`（read_depth=full 的来源数）指标；Brief 来源表新增「读取」列（全文/摘要/网页）。
+- **验收**：live 下对 arXiv 条目返回正文章节、PDF 缓存落盘；无 PDF/扫描件优雅降级；mock 全离线回归保持绿（mock 全文夹具覆盖 read_depth=full 路径）。
 
 **（相关但未排入本条）**：多来源论文重复检测（同一论文在 arXiv + Semantic Scholar + 网页去重）、GitHub README 检索、Experiment 闭环——分别列 V1 其它条目 / V2。

@@ -53,6 +53,12 @@ python -m lodestar feedback
 # V3：调 Coding Agent CLI 执行（默认 codex 开源；须配 LODESTAR_CODEX_BASE_URL + LODESTAR_CODEX_API_KEY 走内网网关，
 #      未配则默认拒绝——防误烧 ChatGPT Plus 额度；--executor claude 可切）
 python -m lodestar build "给这个项目写个 README"
+
+# V3：Research → Experiment → Build（闭环）
+python -m lodestar experiment list
+python -m lodestar experiment save <task_id>          # 从 Brief 的 Project Opportunities 提取
+python -m lodestar experiment build <exp_id> --out /tmp/exp  # scaffold + codex 实现 baseline/candidate
+python -m lodestar experiment build <exp_id> --scaffold-only  # 仅确定性骨架
 ```
 
 ## 产物位置
@@ -96,4 +102,4 @@ cd <项目目录> && python -m lodestar research "<目标>"      # 或安装后�
 
 - **V0（当前）**：Research —— Plan → Search → Rerank → Read(abstract) → Synthesis → Knowledge Update，含 Trace + Eval。
 - **V1（进行中）**：V1-R1 journal/venue 补齐 ✅；V1-R2 PDF 全文读取 ✅；Weekly AI Frontier Research。
-- **V2+**：Research → Experiment 闭环；Build 接入；Self-Evolving Skill（PRD §25）。
+- **V3 最小闭环（已实现 ✅）**：Research Brief → Project Opportunities → Save Experiment → Scaffold + codex Build（A/B eval harness）。

@@ -27,23 +27,25 @@ class CodexExecutor(BuildExecutor):
 
     def __init__(self, model: str | None = None, provider: str | None = None,
                  base_url: str | None = None, api_key: str | None = None,
-                 require_gateway: bool = False):
+                 require_gateway: bool = False, sandbox: str = "workspace-write"):
         self.model = model
         self.provider = provider          # 自定义 provider 名（如 lodestar-gw）
         self.base_url = base_url          # 自定义端点（如 http://<gw>/v1）
         self.api_key = api_key            # 注入为 OPENAI_API_KEY 传给子进程
         self.require_gateway = require_gateway
+        self.sandbox = sandbox            # read-only | workspace-write | danger-full-access
 
     def _binary(self) -> str:
         return "codex"
 
     def run(self, prompt: str, cwd: str = ".", timeout: int = 300) -> ExecutorResult:
+        base = ["codex", "exec", "--skip-git-repo-check", "--sandbox", self.sandbox]
         if not (self.provider and self.base_url):
             if self.require_gateway:
                 return ExecutorResult(ok=False, error=self.GATEWAY_REQUIRED_MSG)
             # 允许默认模式（用户显式关掉 require_gateway 后，走本机 codex 配置 / ChatGPT 登录）
-            return self._exec(["codex", "exec", "--skip-git-repo-check", prompt], cwd, timeout)
-        cmd = ["codex", "exec", "--skip-git-repo-check"]
+            return self._exec([*base, prompt], cwd, timeout)
+        cmd = list(base)
         name = self.provider
         cmd += [
             "-c", f'model="{self.model or "deepseek-v4-flash"}"',

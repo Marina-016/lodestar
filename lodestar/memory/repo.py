@@ -257,6 +257,37 @@ def list_feedback(conn: sqlite3.Connection) -> list[dict]:
 
 
 # ----------------------------------------------------------------------
+# Experiments（V3：Research → Experiment → Build）
+# ----------------------------------------------------------------------
+def add_experiment(conn: sqlite3.Connection, hypothesis: str, task_id: str | None = None,
+                   description: str | None = None, source_claim: str | None = None) -> int:
+    cur = conn.execute(
+        "INSERT INTO experiments(task_id,hypothesis,description,source_claim,build_status,created_at) "
+        "VALUES(?,?,?,?,?,?)",
+        (task_id, hypothesis, description, source_claim, "draft", _now()),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def get_experiment(conn: sqlite3.Connection, exp_id: int) -> Optional[dict]:
+    row = conn.execute("SELECT * FROM experiments WHERE id=?", (exp_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def list_experiments(conn: sqlite3.Connection) -> list[dict]:
+    return [dict(r) for r in conn.execute("SELECT * FROM experiments ORDER BY id DESC").fetchall()]
+
+
+def set_experiment_build(conn: sqlite3.Connection, exp_id: int, status: str, output_dir: str | None = None) -> None:
+    conn.execute(
+        "UPDATE experiments SET build_status=?, output_dir=?, built_at=? WHERE id=?",
+        (status, output_dir, _now() if status in {"built", "failed"} else None, exp_id),
+    )
+    conn.commit()
+
+
+# ----------------------------------------------------------------------
 # Eval
 # ----------------------------------------------------------------------
 def save_eval_run(conn: sqlite3.Connection, case_id: str, task_id: str, llm_mode: str,

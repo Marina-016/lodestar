@@ -4,8 +4,9 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 
-from lodestar import __version__
+from lodestar import __version__, experiment as experiment_mod
 from lodestar.agent.loop import ResearchAgent
 from lodestar.config import load_config
 from lodestar.context import Workspace
@@ -126,21 +127,25 @@ def cmd_feedback(args, cfg):
     ws.close()
 
 
+def _make_build_executor(cfg, name: str):
+    """构造 build executor（codex 走网关/保险，claude 兜底）。"""
+    if name == "codex":
+        from lodestar.build.codex import CodexExecutor
+        return CodexExecutor(
+            model=cfg.codex_model,
+            provider=cfg.codex_provider_name if cfg.codex_base_url else None,
+            base_url=cfg.codex_base_url or None,
+            require_gateway=cfg.codex_require_gateway,
+        )
+    from lodestar.build import get_executor
+    return get_executor(name)
+
+
 def cmd_build(args, cfg):
     """V3：把 prompt 交给外部 coding agent CLI 执行（默认 codex，可切 claude）。"""
-    from lodestar.build import get_executor
     name = args.executor or cfg.build_executor
     try:
-        if name == "codex":
-            from lodestar.build.codex import CodexExecutor
-            ex = CodexExecutor(
-                model=cfg.codex_model,
-                provider=cfg.codex_provider_name if cfg.codex_base_url else None,
-                base_url=cfg.codex_base_url or None,
-                require_gateway=cfg.codex_require_gateway,
-            )
-        else:
-            ex = get_executor(name)
+        ex = _make_build_executor(cfg, name)
     except (ValueError, RuntimeError) as e:
         print(f"[error] {e}")
         sys.exit(1)
@@ -156,6 +161,70 @@ def cmd_build(args, cfg):
         sys.exit(1)
     print("--- 输出 ---")
     print(r.output[:4000])
+
+
+def cmd_experiment(args, cfg):
+    """V3：Research → Experiment → Build。"""
+    ws = Workspace(cfg)
+    try:
+        if args.action == "list":
+            rows = repo.list_experiments(ws.conn)
+            if not rows:
+                print("暂无 experiment。")
+            for e in rows:
+                print(f"#{e['id']} [{e['build_status']:<7}] task={e.get('task_id') or '-'}  {e['hypothesis'][:60]}")
+            return
+        if args.action == "save":
+            task = repo.get_task(ws.conn, args.task_id)
+            if not task:
+                print(f"[error] 找不到 task {args.task_id}")
+                sys.exit(1)
+            hyp = args.hypothesis
+            if not hyp:
+                opts = experiment_mod.extract_opportunities(task.get("brief_md") or "")
+                if not opts:
+                    print(f"[error] task {args.task_id} 的 brief 里没有 Project Opportunities 可提取")
+                    sys.exit(1)
+                idx = (args.pick or 1) - 1
+                if not (0 <= idx < len(opts)):
+                    print(f"[error] --pick {args.pick} 越界（共 {len(opts)} 条）")
+                    sys.exit(1)
+                hyp = opts[idx]
+                print(f"从 Project Opportunities 提取（#{(idx + 1)}/{len(opts)}）：{hyp[:80]}")
+            exp_id = repo.add_experiment(ws.conn, hyp, task_id=args.task_id,
+                                        description=args.description)
+            print(f"已保存 Experiment #{exp_id}（draft）：{hyp[:60]}")
+            return
+        if args.action == "build":
+            exp = repo.get_experiment(ws.conn, args.exp_id)
+            if not exp:
+                print(f"[error] 找不到 Experiment #{args.exp_id}")
+                sys.exit(1)
+            out_dir = Path(args.out)
+            if args.scaffold_only:
+                project = experiment_mod.scaffold_experiment(exp, out_dir)
+                repo.set_experiment_build(ws.conn, exp["id"], "built", str(project))
+                print(f"[scaffold-only] 已生成：{project}")
+                return
+            try:
+                ex = _make_build_executor(cfg, args.executor or cfg.build_executor)
+            except (ValueError, RuntimeError) as e:
+                print(f"[error] {e}")
+                sys.exit(1)
+            if not ex.available():
+                print(f"[error] executor {ex.name} 不可用")
+                sys.exit(1)
+            repo.set_experiment_build(ws.conn, exp["id"], "building")
+            project, result = experiment_mod.build_experiment(exp, out_dir, ex, timeout=args.timeout)
+            status = "built" if result.ok else "failed"
+            repo.set_experiment_build(ws.conn, exp["id"], status, str(project))
+            print(f"[build] {'成功' if result.ok else '失败'}：{project}")
+            if not result.ok:
+                print(f"[error] {result.error[:400]}")
+                sys.exit(1)
+            print(result.output[:1500])
+    finally:
+        ws.close()
 
 
 # ----------------------------------------------------------------------
@@ -213,6 +282,22 @@ def main(argv=None):
     pb.add_argument("--executor", default=None, help="claude | codex | auto（缺省用 config.build_executor）")
     pb.add_argument("--timeout", type=int, default=300)
     pb.set_defaults(fn=cmd_build)
+
+    pe = sub.add_parser("experiment", help="V3：Research→Experiment→Build")
+    exsub = pe.add_subparsers(dest="action", required=True)
+    exsub.add_parser("list").set_defaults(fn=cmd_experiment)
+    es = exsub.add_parser("save", help="从 task 的 Project Opportunities 存一个实验")
+    es.add_argument("task_id")
+    es.add_argument("--pick", type=int, default=None, help="选第几条机会（从 1 起；缺省取第一条）")
+    es.add_argument("--hypothesis", default=None, help="自定义假设（不填则从 brief 提取）")
+    es.add_argument("--description", default=None)
+    eb = exsub.add_parser("build", help="scaffold + coding agent 实现实验")
+    eb.add_argument("exp_id", type=int)
+    eb.add_argument("--out", default="experiments", help="输出根目录（默认 experiments/）")
+    eb.add_argument("--executor", default=None, help="codex | claude（缺省用 config）")
+    eb.add_argument("--timeout", type=int, default=300)
+    eb.add_argument("--scaffold-only", action="store_true", help="只生成确定性骨架，不调 coding agent")
+    pe.set_defaults(fn=cmd_experiment)
 
     args = p.parse_args(argv)
     cfg = _make_config(args)

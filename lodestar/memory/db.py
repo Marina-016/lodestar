@@ -108,6 +108,19 @@ CREATE TABLE IF NOT EXISTS eval_runs(
   verdict TEXT NOT NULL,            -- pass | fail | warn
   created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS experiments(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id TEXT,
+  hypothesis TEXT NOT NULL,
+  description TEXT,
+  source_claim TEXT,
+  build_status TEXT NOT NULL DEFAULT 'draft',   -- draft | building | built | failed
+  output_dir TEXT,
+  created_at TEXT NOT NULL,
+  built_at TEXT,
+  FOREIGN KEY(task_id) REFERENCES research_tasks(id)
+);
 """
 
 

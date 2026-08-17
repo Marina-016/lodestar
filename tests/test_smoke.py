@@ -170,6 +170,30 @@ class SmokeTestCase(unittest.TestCase):
         with self.assertRaises(ValueError):
             get_executor("bogus")
 
+    def test_07_experiment_closed_loop_offline(self):
+        """V3：Research→Experiment→Build 离线骨架 + 确定性 scaffold。"""
+        from lodestar import experiment as experiment_mod
+        # 提取机会
+        brief = ("## Project Opportunities\n"
+                 "- **可验证方向**：假设 A。验证方式：比较 baseline 与 candidate。\n"
+                 "- 假设 B\n"
+                 "---\n*Lodestar · footer*\n")
+        ops = experiment_mod.extract_opportunities(brief)
+        self.assertEqual(len(ops), 2, "应提取两条机会并跳过 --- 分隔线")
+        self.assertIn("假设 A", ops[0])
+        self.assertIn("假设 B", ops[1])
+        # scaffold + eval 跑通
+        exp = {"id": 99, "task_id": "fake", "hypothesis": ops[0],
+               "description": "测试", "source_claim": ops[0]}
+        project = experiment_mod.scaffold_experiment(exp, Path(self.tmp) / "exp_out")
+        self.assertTrue((project / "eval.py").exists())
+        self.assertTrue((project / "baseline.py").exists())
+        self.assertTrue((project / "candidate.py").exists())
+        import subprocess
+        r = subprocess.run(["python", "eval.py"], capture_output=True, text=True,
+                           cwd=str(project), timeout=30)
+        self.assertEqual(r.returncode, 0, f"eval.py 应能跑通：{r.stderr}")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

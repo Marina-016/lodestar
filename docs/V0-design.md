@@ -294,5 +294,13 @@ PRD V3 需要把 Research Insight → Experiment → Build，Build 步接入外�
 - 用法：`LODESTAR_CODEX_BASE_URL=<gw>/v1` + `LODESTAR_CODEX_API_KEY=<token>` → `python -m lodestar build "<prompt>"`（默认 executor=codex）。
 - **防误烧保险（v0.1.8）**：`codex_require_gateway=true`（默认）时，未配 BASE_URL 会**拒绝**用 codex 默认模式
   （避免静默走 ChatGPT Plus 的 gpt-5.6-terra）；确认要用 ChatGPT 额度才显式设 `LODESTAR_CODEX_REQUIRE_GATEWAY=false`。
+
+**V3 最小闭环已实现（v0.1.9）**：Research → Experiment → Build。
+- `lodestar/experiment.py`：`extract_opportunities` 从 Brief 提取 Project Opportunities（跳过 `---` 分隔线）；
+  `scaffold_experiment` 确定性生成 A/B eval harness 骨架（baseline/candidate/eval.py）；
+  `build_experiment` scaffold 后调用 codex（`--sandbox workspace-write`）实现代码。
+- CLI：`experiment save <task_id>` / `experiment build <exp_id>` / `experiment list`。
+- 实测：mock 研究出 Brief → 提取机会 → 存实验 → codex 用 workspace-write 写入 baseline（3KB）和 candidate（5KB），
+  `eval.py` 跑通出对比指标（quality/novelty/recall/task_success）。
 - **Claude Code 保留为备选**（`--executor claude` / `LODESTAR_BUILD_EXECUTOR=claude`），在无 codex 的环境兜底。
 - 许可维度：Codex Apache-2.0 可随 Lodestar 开源分发；Claude Code 闭源仅运行时依赖。

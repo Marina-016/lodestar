@@ -1,0 +1,71 @@
+{
+  "id": "agent_eval",
+  "title": "Agent Eval 方法论进展",
+  "goal": "研究 Agent Eval 最近的方法论进展：评测基准、trajectory 评测、LLM-as-Judge 的可靠性，以及 Eval 在 Agent 开发循环中的位置。",
+  "tags": [
+    "agent",
+    "eval",
+    "benchmark",
+    "judge"
+  ],
+  "seed_knowledge": [
+    {
+      "name": "Agent Eval",
+      "status": "partial",
+      "confidence": "medium"
+    },
+    {
+      "name": "LLM Judge",
+      "status": "known",
+      "confidence": "high"
+    },
+    {
+      "name": "Trace",
+      "status": "known",
+      "confidence": "high"
+    },
+    {
+      "name": "Benchmark",
+      "status": "partial",
+      "confidence": "medium"
+    },
+    {
+      "name": "Regression",
+      "status": "known",
+      "confidence": "high"
+    },
+    {
+      "name": "Agent",
+      "status": "known",
+      "confidence": "high"
+    }
+  ],
+  "expected": {
+    "min_sources": 3,
+    "must_cover_concepts": [
+      "evaluation",
+      "benchmark",
+      "trajectory",
+      "judge",
+      "trace",
+      "regression",
+      "agent"
+    ],
+    "key_insights": [
+      "从 final-answer 转向 trajectory 级评测",
+      "LLM-as-Judge 的偏差与校准（self-bias / 长度偏好）",
+      "Eval 接入 agent 开发循环，与 trace/regression 深度绑定"
+    ]
+  },
+  "thresholds": {
+    "coverage": 0.6,
+    "task_success": 3,
+    "faithfulness": 3,
+    "min_venue_coverage": 0.3
+  },
+  "metadata": {
+    "stage": "V0-golden-4",
+    "created": "2026-08-17",
+    "note": "Golden Case #4：Agent Eval（PRD §21 示例主题）"
+  }
+}

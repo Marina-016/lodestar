@@ -1,0 +1,71 @@
+{
+  "id": "context_engineering",
+  "title": "Context Engineering 技术路径",
+  "goal": "研究 Context Engineering 最近的主要技术路径：上下文窗口管理、压缩、检索增强、记忆分层，以及它和 Agent Harness、Memory 的关系。",
+  "tags": [
+    "context",
+    "harness",
+    "memory",
+    "prompt"
+  ],
+  "seed_knowledge": [
+    {
+      "name": "Context Engineering",
+      "status": "known",
+      "confidence": "high"
+    },
+    {
+      "name": "Prompt",
+      "status": "known",
+      "confidence": "high"
+    },
+    {
+      "name": "Agent",
+      "status": "known",
+      "confidence": "high"
+    },
+    {
+      "name": "Memory",
+      "status": "partial",
+      "confidence": "medium"
+    },
+    {
+      "name": "RAG",
+      "status": "partial",
+      "confidence": "medium"
+    },
+    {
+      "name": "Harness",
+      "status": "partial",
+      "confidence": "low"
+    }
+  ],
+  "expected": {
+    "min_sources": 3,
+    "must_cover_concepts": [
+      "context",
+      "compression",
+      "retrieval",
+      "window",
+      "prompt",
+      "memory",
+      "harness"
+    ],
+    "key_insights": [
+      "上下文是一等公民：预算/压缩/检索/分层",
+      "summarization vs token 级 compression 的取舍",
+      "Context Engineering 与 Memory、Harness 的分层职责"
+    ]
+  },
+  "thresholds": {
+    "coverage": 0.6,
+    "task_success": 3,
+    "faithfulness": 3,
+    "min_venue_coverage": 0.3
+  },
+  "metadata": {
+    "stage": "V0-golden-3",
+    "created": "2026-08-17",
+    "note": "Golden Case #3：Context Engineering（PRD §21 示例主题）"
+  }
+}

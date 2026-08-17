@@ -1,0 +1,66 @@
+{
+  "id": "mcp",
+  "title": "MCP（Model Context Protocol）技术与生态",
+  "goal": "研究 MCP（Model Context Protocol）的技术进展与生态：协议设计、工具/资源/权限模型、与 Agent 框架的集成，以及它和 Tool Calling、Agent Harness 的关系。",
+  "tags": [
+    "mcp",
+    "protocol",
+    "tool",
+    "harness"
+  ],
+  "seed_knowledge": [
+    {
+      "name": "Agent",
+      "status": "known",
+      "confidence": "high"
+    },
+    {
+      "name": "Tool Calling",
+      "status": "known",
+      "confidence": "high"
+    },
+    {
+      "name": "API",
+      "status": "known",
+      "confidence": "high"
+    },
+    {
+      "name": "Harness",
+      "status": "partial",
+      "confidence": "low"
+    },
+    {
+      "name": "Protocol",
+      "status": "partial",
+      "confidence": "low"
+    }
+  ],
+  "expected": {
+    "min_sources": 3,
+    "must_cover_concepts": [
+      "mcp",
+      "model context protocol",
+      "tool",
+      "protocol",
+      "server",
+      "client",
+      "harness"
+    ],
+    "key_insights": [
+      "MCP 用 client-server 结构统一模型与工具/资源的连接",
+      "工具 schema 规范化与权限/审计模型",
+      "MCP 成为 agent harness 连接外部能力的标准接口"
+    ]
+  },
+  "thresholds": {
+    "coverage": 0.6,
+    "task_success": 3,
+    "faithfulness": 3,
+    "min_venue_coverage": 0.3
+  },
+  "metadata": {
+    "stage": "V0-golden-5",
+    "created": "2026-08-17",
+    "note": "Golden Case #5：MCP（PRD §21 示例主题）"
+  }
+}

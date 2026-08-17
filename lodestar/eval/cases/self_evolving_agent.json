@@ -1,0 +1,84 @@
+{
+  "id": "self_evolving_agent",
+  "title": "Self-Evolving Agent / Self-Evolving Skill 技术进展",
+  "goal": "研究最近 Self-Evolving Skill / Self-Evolving Agent 有哪些值得关注的技术进展，理解核心技术路径，以及它和 Skill、Memory、Eval 的关系。",
+  "tags": [
+    "agent",
+    "skill",
+    "self-improving",
+    "memory",
+    "eval"
+  ],
+  "seed_knowledge": [
+    {
+      "name": "Agent",
+      "status": "known",
+      "confidence": "high"
+    },
+    {
+      "name": "Skill",
+      "status": "known",
+      "confidence": "high"
+    },
+    {
+      "name": "Eval",
+      "status": "known",
+      "confidence": "medium"
+    },
+    {
+      "name": "Agent Eval",
+      "status": "partial",
+      "confidence": "medium"
+    },
+    {
+      "name": "Trace",
+      "status": "known",
+      "confidence": "high"
+    },
+    {
+      "name": "Memory",
+      "status": "known",
+      "confidence": "medium"
+    },
+    {
+      "name": "Harness",
+      "status": "partial",
+      "confidence": "low"
+    },
+    {
+      "name": "Prompt Optimization",
+      "status": "known",
+      "confidence": "high"
+    }
+  ],
+  "expected": {
+    "min_sources": 3,
+    "must_cover_concepts": [
+      "self-evolving",
+      "self-improving",
+      "reflection",
+      "evaluation",
+      "promotion",
+      "memory",
+      "skill"
+    ],
+    "key_insights": [
+      "核心循环：Experience → Failure/Feedback → Reflection → Candidate → Eval → Promotion",
+      "不同工作改进的层不同：Prompt / Skill / Memory / Policy / Tool",
+      "Eval 作为 Promotion 关卡，与 Regression 结合",
+      "相对已有认知的真增量与重包装区分"
+    ]
+  },
+  "thresholds": {
+    "coverage": 0.6,
+    "task_success": 3,
+    "faithfulness": 3,
+    "min_venue_coverage": 0.3
+  },
+  "metadata": {
+    "stage": "V0-golden-1",
+    "created": "2026-08-17",
+    "updated": "2026-08-17 [V1-R1]",
+    "note": "第一阶段 Golden Scenario：研究 Self-Evolving Agent / Self-Evolving Skill（PRD §6）；V1-R1 起加入 venue 覆盖率门槛"
+  }
+}

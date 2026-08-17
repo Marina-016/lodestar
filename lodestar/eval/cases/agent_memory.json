@@ -1,0 +1,77 @@
+{
+  "id": "agent_memory",
+  "title": "Agent Memory 技术路径与方向",
+  "goal": "研究最近 Agent Memory 有哪些值得关注的新方向：记忆的存储/检索/更新/自改进技术路径，以及它和 Context Engineering、Skill、Eval 的关系。",
+  "tags": [
+    "agent",
+    "memory",
+    "retrieval",
+    "context"
+  ],
+  "seed_knowledge": [
+    {
+      "name": "Agent",
+      "status": "known",
+      "confidence": "high"
+    },
+    {
+      "name": "Memory",
+      "status": "known",
+      "confidence": "medium"
+    },
+    {
+      "name": "Retrieval",
+      "status": "known",
+      "confidence": "high"
+    },
+    {
+      "name": "Vector Database",
+      "status": "partial",
+      "confidence": "medium"
+    },
+    {
+      "name": "Context Engineering",
+      "status": "partial",
+      "confidence": "medium"
+    },
+    {
+      "name": "Skill",
+      "status": "known",
+      "confidence": "high"
+    },
+    {
+      "name": "Eval",
+      "status": "known",
+      "confidence": "medium"
+    }
+  ],
+  "expected": {
+    "min_sources": 3,
+    "must_cover_concepts": [
+      "agent memory",
+      "retrieval",
+      "episodic",
+      "procedural",
+      "updating",
+      "context",
+      "evaluation"
+    ],
+    "key_insights": [
+      "分层记忆：episodic / semantic / procedural",
+      "memory updating（改写/合并）vs 纯 append-only",
+      "检索不再是记忆的唯一入口，与 context engineering 融合",
+      "evaluation 反馈驱动记忆重写与 skill 沉淀"
+    ]
+  },
+  "thresholds": {
+    "coverage": 0.6,
+    "task_success": 3,
+    "faithfulness": 3,
+    "min_venue_coverage": 0.3
+  },
+  "metadata": {
+    "stage": "V0-golden-2",
+    "created": "2026-08-17",
+    "note": "Golden Case #2：Agent Memory（PRD §21 示例主题）"
+  }
+}

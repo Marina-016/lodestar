@@ -1,0 +1,20 @@
+# 密钥与环境
+.env
+*.env
+!*.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 运行产物（数据库、每任务 trace/产物）
+lodestar/data/
+workspace/
+!lodestar/data/.gitkeep
+!workspace/.gitkeep
+
+# 测试缓存
+.pytest_cache/

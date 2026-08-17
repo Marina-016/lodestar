@@ -54,6 +54,7 @@ class Config:
     codex_model: str = "deepseek-v4-flash"
     codex_provider_name: str = "lodestar-gw"
     codex_base_url: str = ""              # 空=用用户自带 codex 配置（ChatGPT 登录）；设了则走内网网关（Responses API）
+    codex_require_gateway: bool = True    # 保险：未配 BASE_URL 时拒绝用 codex 默认模式（防误烧 ChatGPT Plus 额度）
     # codex 网关模式的 key 走 LODESTAR_CODEX_API_KEY（.env，gitignore），不在代码里
     # --- 存储 ---
     db_path: Path = DEFAULT_DB_PATH
@@ -85,6 +86,7 @@ def load_config() -> Config:
     c.build_executor = os.getenv("LODESTAR_BUILD_EXECUTOR", c.build_executor)
     c.codex_model = os.getenv("LODESTAR_CODEX_MODEL", c.codex_model)
     c.codex_base_url = os.getenv("LODESTAR_CODEX_BASE_URL", c.codex_base_url)
+    c.codex_require_gateway = os.getenv("LODESTAR_CODEX_REQUIRE_GATEWAY", str(c.codex_require_gateway)).lower() not in {"0", "false", "no", "off"}
     if os.getenv("LODESTAR_VENUE_PROVIDERS"):
         c.venue_providers = tuple(p.strip() for p in os.environ["LODESTAR_VENUE_PROVIDERS"].split(",") if p.strip())
     if os.getenv("LODESTAR_VENUE_USER_AGENT"):

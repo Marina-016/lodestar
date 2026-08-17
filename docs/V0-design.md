@@ -292,5 +292,7 @@ PRD V3 需要把 Research Insight → Experiment → Build，Build 步接入外�
   `-c model_providers.<name>.{name,base_url,wire_api="responses",env_key="OPENAI_API_KEY"}`，
   key 走 `LODESTAR_CODEX_API_KEY`。chatgpt.com 云同步的 MCP worker 报错是无害噪音。
 - 用法：`LODESTAR_CODEX_BASE_URL=<gw>/v1` + `LODESTAR_CODEX_API_KEY=<token>` → `python -m lodestar build "<prompt>"`（默认 executor=codex）。
+- **防误烧保险（v0.1.8）**：`codex_require_gateway=true`（默认）时，未配 BASE_URL 会**拒绝**用 codex 默认模式
+  （避免静默走 ChatGPT Plus 的 gpt-5.6-terra）；确认要用 ChatGPT 额度才显式设 `LODESTAR_CODEX_REQUIRE_GATEWAY=false`。
 - **Claude Code 保留为备选**（`--executor claude` / `LODESTAR_BUILD_EXECUTOR=claude`），在无 codex 的环境兜底。
 - 许可维度：Codex Apache-2.0 可随 Lodestar 开源分发；Claude Code 闭源仅运行时依赖。

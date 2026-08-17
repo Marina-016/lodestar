@@ -18,33 +18,43 @@ from lodestar.build.executor import BuildExecutor, ExecutorResult
 class CodexExecutor(BuildExecutor):
     name = "codex"
 
+    GATEWAY_REQUIRED_MSG = (
+        "codex 需要网关模式：LODESTAR_CODEX_BASE_URL 未配置。"
+        "为避免误用 ChatGPT Plus 额度（codex 默认会走 gpt-5.6-terra），Lodestar 默认拒绝以 codex 默认配置运行。"
+        "任选其一：1) 配 LODESTAR_CODEX_BASE_URL=<网关>/v1 + LODESTAR_CODEX_API_KEY（走便宜的 deepseek-v4-flash）；"
+        "2) 改用 --executor claude；3) 确认要用 ChatGPT 额度则设 LODESTAR_CODEX_REQUIRE_GATEWAY=false。"
+    )
+
     def __init__(self, model: str | None = None, provider: str | None = None,
-                 base_url: str | None = None, api_key: str | None = None):
+                 base_url: str | None = None, api_key: str | None = None,
+                 require_gateway: bool = False):
         self.model = model
         self.provider = provider          # 自定义 provider 名（如 lodestar-gw）
         self.base_url = base_url          # 自定义端点（如 http://<gw>/v1）
         self.api_key = api_key            # 注入为 OPENAI_API_KEY 传给子进程
+        self.require_gateway = require_gateway
 
     def _binary(self) -> str:
         return "codex"
 
     def run(self, prompt: str, cwd: str = ".", timeout: int = 300) -> ExecutorResult:
+        if not (self.provider and self.base_url):
+            if self.require_gateway:
+                return ExecutorResult(ok=False, error=self.GATEWAY_REQUIRED_MSG)
+            # 允许默认模式（用户显式关掉 require_gateway 后，走本机 codex 配置 / ChatGPT 登录）
+            return self._exec(["codex", "exec", "--skip-git-repo-check", prompt], cwd, timeout)
         cmd = ["codex", "exec", "--skip-git-repo-check"]
-        env = None
-        if self.provider and self.base_url:
-            name = self.provider
-            cmd += [
-                "-c", f'model="{self.model or "deepseek-v4-flash"}"',
-                "-c", f'model_provider="{name}"',
-                "-c", f'model_providers.{name}.name="{name}"',
-                "-c", f'model_providers.{name}.base_url="{self.base_url}"',
-                '-c', f'model_providers.{name}.wire_api="responses"',
-                '-c', f'model_providers.{name}.env_key="OPENAI_API_KEY"',
-            ]
-            key = self.api_key or os.environ.get("LODESTAR_CODEX_API_KEY") or os.environ.get("OPENAI_API_KEY")
-            if key:
-                env = {"OPENAI_API_KEY": key}
-            elif self.provider:
-                return ExecutorResult(ok=False, error="codex 网关模式需要 LODESTAR_CODEX_API_KEY / OPENAI_API_KEY")
+        name = self.provider
+        cmd += [
+            "-c", f'model="{self.model or "deepseek-v4-flash"}"',
+            "-c", f'model_provider="{name}"',
+            "-c", f'model_providers.{name}.name="{name}"',
+            "-c", f'model_providers.{name}.base_url="{self.base_url}"',
+            '-c', f'model_providers.{name}.wire_api="responses"',
+            '-c', f'model_providers.{name}.env_key="OPENAI_API_KEY"',
+        ]
+        key = self.api_key or os.environ.get("LODESTAR_CODEX_API_KEY") or os.environ.get("OPENAI_API_KEY")
+        if not key:
+            return ExecutorResult(ok=False, error="codex 网关模式需要 LODESTAR_CODEX_API_KEY / OPENAI_API_KEY")
         cmd.append(prompt)
-        return self._exec(cmd, cwd, timeout, env=env)
+        return self._exec(cmd, cwd, timeout, env={"OPENAI_API_KEY": key})

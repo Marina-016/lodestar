@@ -50,7 +50,8 @@ python -m lodestar knowledge rollback <update_id>
 python -m lodestar trace <task_id>
 python -m lodestar feedback
 
-# V3：调 Coding Agent CLI 执行（默认 codex 开源；配 LODESTAR_CODEX_BASE_URL + LODESTAR_CODEX_API_KEY 走内网网关；--executor claude 可切）
+# V3：调 Coding Agent CLI 执行（默认 codex 开源；须配 LODESTAR_CODEX_BASE_URL + LODESTAR_CODEX_API_KEY 走内网网关，
+#      未配则默认拒绝——防误烧 ChatGPT Plus 额度；--executor claude 可切）
 python -m lodestar build "给这个项目写个 README"
 ```
 

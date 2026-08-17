@@ -131,10 +131,14 @@ def cmd_build(args, cfg):
     from lodestar.build import get_executor
     name = args.executor or cfg.build_executor
     try:
-        if name == "codex" and cfg.codex_base_url:
+        if name == "codex":
             from lodestar.build.codex import CodexExecutor
-            ex = CodexExecutor(model=cfg.codex_model, provider=cfg.codex_provider_name,
-                               base_url=cfg.codex_base_url)
+            ex = CodexExecutor(
+                model=cfg.codex_model,
+                provider=cfg.codex_provider_name if cfg.codex_base_url else None,
+                base_url=cfg.codex_base_url or None,
+                require_gateway=cfg.codex_require_gateway,
+            )
         else:
             ex = get_executor(name)
     except (ValueError, RuntimeError) as e:

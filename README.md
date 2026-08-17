@@ -60,6 +60,28 @@ python -m lodestar build "给这个项目写个 README" --executor auto
 - 每任务产物：`workspace/<task_id>/{brief.md, sources.json, trace.jsonl}`
 - Eval 隔离库：`lodestar/data/eval_lodestar.db`
 
+## 部署到另一台电脑（可移植性）
+
+**代码完全可移植**（无硬编码路径/凭据）。新机器上三步：
+
+```bash
+# 1) 拿到代码：git clone 仓库 或 直接拷贝项目文件夹（排除 .git / data / workspace）
+# 2) 装依赖
+python -m pip install -r requirements.txt        # 或：python -m pip install -e .（可在任意目录运行）
+# 3) 配凭据
+cp .env.example .env   # 填 ANTHROPIC_API_KEY，或用内网网关 ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN + LODESTAR_MODEL
+# 运行
+cd <项目目录> && python -m lodestar research "<目标>"      # 或安装后任意目录：lodestar research "…"
+```
+
+**每台机器要重新配置的（不在代码里）**：
+- `.env`：模型网关地址 + token / Anthropic Key（`.env` 已 gitignore，不会随代码走）
+- Build 步的可选 CLI：`claude` / `codex`（不装也能用 research；build 需要时再装）
+- 网络：网关需可达（内网）；DDG/S2/OpenAlex 在普通网络通常比本沙箱更可用
+- 可选迁移：拷贝 `lodestar/data/lodestar.db` 可把已 seed 的 Knowledge State 带过去
+
+**已验证**（实测）：`pip install -e .` 后从任意目录运行正常，数据/产物仍落在仓库内（不会写进 site-packages）。
+
 ## 能力边界（诚实声明）
 
 - ✅ **V1-R1 已实现（v0.1.1）**：论文 **journal/venue 已补齐**——检索后并联 provider 链（Semantic Scholar → OpenAlex → Dblp → Crossref）回填 `venue / is_published`，进 Rerank 的 Source Quality 与 Brief 表格；429 限流/不可达自动换源，单篇失败优雅降级（不阻断任务），基于 title 的源带相似度守卫。**live 已实测**（Dblp 兜底：CoT/Reflexion 解析到 NeurIPS）。详见 `docs/V0-design.md` §六。

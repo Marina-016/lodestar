@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lodestar"
+version = "0.1.6"
+description = "Lodestar（导星）— 面向 AI 从业者的个人 AI 前沿技术研究 Workspace Agent"
+requires-python = ">=3.10"
+dependencies = [
+    "anthropic>=0.40",
+    "requests>=2.31",
+    "beautifulsoup4>=4.12",
+    "python-dotenv>=1.0",
+    "pymupdf>=1.24",
+]
+
+[project.scripts]
+lodestar = "lodestar.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["lodestar*"]

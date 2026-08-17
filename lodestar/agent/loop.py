@@ -19,7 +19,7 @@ from lodestar.memory import repo
 from lodestar.tools.registry import call_tool
 from lodestar.trace.recorder import Trace
 
-MAX_REPLANS = 1
+# max_replans 已进 config.py（v0.1.10：1→2）
 NO_EVIDENCE_BRIEF_TEMPLATE = (
     "# Research Brief — {goal}\n\n"
     "## 核心结论\n本次检索未能获得可用来源（候选 0 条）。可能原因：查询过窄、检索后端失败、"
@@ -121,9 +121,9 @@ class ResearchAgent:
         assess = assessor_mod.assess(cfg, self.llm, goal, plan["research_questions"], evidence)
         trace.log("assess", assess)
         replans = 0
-        while assess["decision"] == "replan" and replans < MAX_REPLANS and searches < cfg.max_agent_steps:
+        while assess["decision"] == "replan" and replans < cfg.max_replans and searches < cfg.max_agent_steps:
             replans += 1
-            extra_queries = [{"text": f"补充检索: {g}", "purpose": "assess 补搜"} for g in (assess["gaps"] or [])[:2]]
+            extra_queries = self._gaps_to_queries(assess["gaps"] or [])
             trace.log("replan", {"extra_queries": extra_queries, "reason": assess["reason"]})
             extra, searches = self._collect(extra_queries, trace, searches=searches)
             seen = {s["dedup_key"] for s in sources}
@@ -254,6 +254,26 @@ class ResearchAgent:
             head = (s.get("content") or "")[:600].replace("\n", " ")
             lines.append(f"- [{s['title']}]({s['url']}) read_depth={s.get('read_depth')} | {head}")
         return "\n".join(lines) or "（无已读来源）"
+
+    def _gaps_to_queries(self, gaps: list[str]) -> list[dict]:
+        """把 assess 标记的研究缺口转为检索 Query（LLM 提取关键词，比直接用 gap 文本更精准）。"""
+        if not gaps:
+            return []
+        joined = "；".join(gaps[:3])
+        try:
+            text = self.llm.complete(
+                "gap_queries",
+                "# ROLE: gap_queries\n\n将以下研究缺口转化为 1-3 个英文检索 Query（用于 arXiv 搜索），"
+                "每个 Query 用关键词拼接、去掉冗余修饰。只输出逐行 Query，每行一个。",
+                f"缺口：{joined}",
+                max_tokens=200,
+            )
+            lines = [l.strip() for l in text.strip().splitlines() if l.strip() and not l.strip().startswith("#")]
+            return [{"text": l, "purpose": "assess 缺口补搜"} for l in lines[:3]] or [
+                {"text": f"supplemental: {gaps[0][:60]}", "purpose": "assess 补搜（LLM 产出为空，回退原文本）"}
+            ]
+        except Exception:  # noqa: BLE001
+            return [{"text": f"supplemental: {g[:60]}", "purpose": "assess 补搜（LLM 失败，回退）"} for g in gaps[:2]]
 
     # ------------------------------------------------------------------
     # Knowledge Update（HITL）

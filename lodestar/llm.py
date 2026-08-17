@@ -408,7 +408,11 @@ class MockLLM:
         t = MockLLM._TOPIC_LLM[MockLLM._topic(user)]
         return json.dumps({"claims": t["claims"], "overall_novelty": "medium"}, ensure_ascii=False)
 
-    # --- judge 系列 ---
+    # --- gap_queries：assess 缺口 → 检索 Query ---
+    @staticmethod
+    def _role_gap_queries(system: str, user: str) -> str:
+        # 简单提取缺口中的关键词作为 mock query
+        return "supplemental search mock gap query"
     @staticmethod
     def _role_judge_task_success(system: str, user: str) -> str:
         return json.dumps({"score": 4, "rationale": "mock judge：管道完整性通过（离线夹具，非内容质量判定）"}, ensure_ascii=False)

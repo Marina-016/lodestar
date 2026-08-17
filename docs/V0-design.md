@@ -204,6 +204,9 @@ Lodestar/                          ← 项目根（2026-08-17 由 lodestar 改�
   自有网络通常可用。
 - **5 个 case 的 live 全基线（v0.1.4，deepseek-v4-flash）**：全部 verdict=pass、coverage=1.0、
   task_success 4~5、faithfulness 5、venue_cov 0.25~0.38。检索量 24~40 个来源、深度阅读 5~9 个。
+- **replan 质量改进（v0.1.10）**：`max_replans` 1→2；补搜 query 不再用裸 gap 文本，改由 LLM
+  把 gap 转为关键词英文检索 Query（`_gaps_to_queries`）。live 复测 agent_memory：task_success 4→5、
+  来源 24→35、深度阅读 5→10，replan 新增的 gap→query 转换生效。
 
 ## 五、V0 完成边界（本轮交付）
 

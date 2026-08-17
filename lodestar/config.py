@@ -31,6 +31,7 @@ class Config:
     max_agent_steps: int = 15
     max_search_queries: int = 8
     max_deep_read_sources: int = 5
+    max_replans: int = 2              # assess 证据不足时最多补搜几轮（v0.1.10：1→2）
     rerank_top_n: int = 8           # Rerank 输出 Top N；真正深度读取取前 max_deep_read_sources
     web_results_per_query: int = 6
     arxiv_results_per_query: int = 6

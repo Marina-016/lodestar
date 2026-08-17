@@ -13,6 +13,34 @@ from lodestar import prompts
 from lodestar.eval.cases import GoldenCase
 
 
+# 覆盖度中英同义词（中文 Brief 用「检索」而非 "retrieval" 时不低估）
+_ZH_SYNONYMS = {
+    "retrieval": ["检索"],
+    "evaluation": ["评估", "评测"],
+    "memory": ["记忆"],
+    "context": ["上下文"],
+    "compression": ["压缩"],
+    "trajectory": ["轨迹"],
+    "reflection": ["反思"],
+    "promotion": ["推广"],
+    "benchmark": ["基准"],
+    "updating": ["更新"],
+    "episodic": ["情景"],
+    "procedural": ["程序"],
+    "harness": ["运行框架", "工具框架"],
+    "skill": ["技能"],
+    "tool": ["工具"],
+    "agent": ["智能体", "代理"],
+    "protocol": ["协议"],
+}
+
+
+def _concept_covered(concept: str, brief_l: str) -> bool:
+    if concept.lower() in brief_l:
+        return True
+    return any(syn in brief_l for syn in _ZH_SYNONYMS.get(concept, []))
+
+
 def _iso_seconds(s: str) -> float | None:
     try:
         return dt.datetime.fromisoformat(s).timestamp()
@@ -56,9 +84,9 @@ def compute_metrics(cfg, case: GoldenCase, task: dict, brief: str, sources: list
         seen_calls.add(key)
     metrics["duplicate_searches"] = dup_calls
 
-    # ---- 确定性：覆盖度（brief 子串匹配，大小写不敏感）----
+    # ---- 确定性：覆盖度（brief 子串匹配，大小写不敏感；支持中英同义词）----
     brief_l = (brief or "").lower()
-    covered = [c for c in case.expected.must_cover_concepts if c.lower() in brief_l]
+    covered = [c for c in case.expected.must_cover_concepts if _concept_covered(c, brief_l)]
     metrics["covered_concepts"] = covered
     metrics["missing_concepts"] = [c for c in case.expected.must_cover_concepts if c not in covered]
     total = max(1, len(case.expected.must_cover_concepts))

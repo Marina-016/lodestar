@@ -61,7 +61,7 @@
     "coverage": 0.6,
     "task_success": 3,
     "faithfulness": 3,
-    "min_venue_coverage": 0.3
+    "min_venue_coverage": 0.2
   },
   "metadata": {
     "stage": "V0-golden-3",

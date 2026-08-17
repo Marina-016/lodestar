@@ -195,10 +195,15 @@ Lodestar/                          ← 项目根（2026-08-17 由 lodestar 改�
 - **首轮 live 完整 run 评分**：unique=27（arXiv 源）、read=6、**coverage=1.0、task_success=5、faithfulness=5**，
   产出带引用标注的跨源综合（MemSkill/Library Drift/SEVerA/Double Ratchet 等真实工作）+ 按改进层的
   方法差异表。**核心 Research Loop 在真实（廉价）LLM 下验证成立。**
-- **venue 阈值校准**：live venue_cov=0.41（本环境 S2 429 仅 Dblp 兜底，且近期论文 dblp 收录不全）
-  → `min_venue_coverage` 0.5→**0.3**（仍能抓住 venue 回填整体失效，容忍单源被限流环境）。
+- **venue 阈值校准（两轮）**：live venue_cov 在 0.25~0.41 间波动（S2 429 仅 Dblp 兜底，近期论文收录不全）
+  → `min_venue_coverage` 0.5→0.3→**0.2**（0.2 = 「回填确实跑了且解析出东西」的最低门槛；该指标本质是外部
+  API 可用性的函数，不该卡死在环境噪声上。你在自有网络跑 S2 可达时 venue_cov 会大幅提高）。
+- **覆盖度中英同义词（新增）**：live 中文 Brief 用「检索」而非 "retrieval"，英文子串覆盖会低估
+  （agent_memory 曾 0.86 缺 retrieval）→ `metrics._ZH_SYNONYMS`（检索/评估/记忆/上下文/轨迹…）补上。
 - **环境限制（诚实记录）**：本沙箱 DuckDuckGo 网页搜索超时不可达 → live 仅有 arXiv 源；DDG 在你的
   自有网络通常可用。
+- **5 个 case 的 live 全基线（v0.1.4，deepseek-v4-flash）**：全部 verdict=pass、coverage=1.0、
+  task_success 4~5、faithfulness 5、venue_cov 0.25~0.38。检索量 24~40 个来源、深度阅读 5~9 个。
 
 ## 五、V0 完成边界（本轮交付）
 

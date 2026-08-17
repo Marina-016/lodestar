@@ -49,6 +49,9 @@ python -m lodestar knowledge rollback <update_id>
 # Trace / 反馈
 python -m lodestar trace <task_id>
 python -m lodestar feedback
+
+# V3 种子：调 Coding Agent CLI 执行（Claude Code 实测可用；Codex 需另配端点）
+python -m lodestar build "给这个项目写个 README" --executor auto
 ```
 
 ## 产物位置

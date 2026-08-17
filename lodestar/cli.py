@@ -126,6 +126,27 @@ def cmd_feedback(args, cfg):
     ws.close()
 
 
+def cmd_build(args, cfg):
+    """V3 种子：把 prompt 交给外部 coding agent CLI 执行（Claude Code / Codex）。"""
+    from lodestar.build import get_executor
+    try:
+        ex = get_executor(args.executor)
+    except (ValueError, RuntimeError) as e:
+        print(f"[error] {e}")
+        sys.exit(1)
+    print(f"executor: {ex.name}  available={ex.available()}")
+    if not ex.available():
+        print("[error] 该 CLI 未安装或不可用")
+        sys.exit(1)
+    print(f"prompt: {args.prompt[:80]}{'…' if len(args.prompt) > 80 else ''}")
+    r = ex.run(args.prompt, timeout=args.timeout)
+    if not r.ok:
+        print(f"[error] exit 非 0：{r.error[:300]}")
+        sys.exit(1)
+    print("--- 输出 ---")
+    print(r.output[:4000])
+
+
 # ----------------------------------------------------------------------
 def main(argv=None):
     # Windows 控制台中文显示：stdout/stderr 统一 UTF-8
@@ -175,6 +196,12 @@ def main(argv=None):
 
     pf = sub.add_parser("feedback", help="列出用户反馈")
     pf.set_defaults(fn=cmd_feedback)
+
+    pb = sub.add_parser("build", help="V3 种子：调 coding agent CLI 执行 prompt（claude/codex）")
+    pb.add_argument("prompt", help="要执行的指令")
+    pb.add_argument("--executor", default="auto", help="claude | codex | auto")
+    pb.add_argument("--timeout", type=int, default=300)
+    pb.set_defaults(fn=cmd_build)
 
     args = p.parse_args(argv)
     cfg = _make_config(args)

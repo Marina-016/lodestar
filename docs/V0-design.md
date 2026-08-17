@@ -262,3 +262,29 @@ Lodestar/                          ← 项目根（2026-08-17 由 lodestar 改�
 - **验收**：live 下对 arXiv 条目返回正文章节、PDF 缓存落盘；无 PDF/扫描件优雅降级；mock 全离线回归保持绿（mock 全文夹具覆盖 read_depth=full 路径）。
 
 **（相关但未排入本条）**：多来源论文重复检测（同一论文在 arXiv + Semantic Scholar + 网页去重）、GitHub README 检索、Experiment 闭环——分别列 V1 其它条目 / V2。
+
+---
+
+## 七、V3 种子：Coding Agent 接入选型（v0.1.6，实测）
+
+PRD V3 需要把 Research Insight → Experiment → Build，Build 步接入外部 Coding Agent。
+落地为一个**可插拔 executor 抽象**（`lodestar/build/`），当前实现两个：
+
+- `lodestar/build/executor.py`：`BuildExecutor.run(prompt, cwd, timeout) → ExecutorResult`；`get_executor(auto)` 按可用性探测。
+- `lodestar/build/claude_code.py`：headless `claude -p`（透传 `--model / --permission-mode / --output-format`）。
+- `lodestar/build/codex.py`：headless `codex exec --skip-git-repo-check`。
+- CLI：`python -m lodestar build "<prompt>" [--executor claude|codex|auto]`。
+
+**实测对比（2026-08-17，本环境）**：
+
+| 维度 | Claude Code（claude 2.1.200） | Codex CLI（codex 0.139.0） |
+|---|---|---|
+| headless 执行 | ✅ `claude -p` 直接返回输出 | ⚠️ `codex exec` 需 `--skip-git-repo-check` |
+| 本环境可用 | ✅ **实测通过**（走现有网关 ANTHROPIC_BASE_URL+token，模型 deepseek-v4-flash） | ❌ **实测失败**：绑定 chatgpt.com 云认证（`/backend-api/wham/apps`），本环境不可达、反复重连 |
+| 鉴权 | 复用已有网关 / Anthropic Key / Pro OAuth | 需单独 ChatGPT 登录或 OpenAI 兼容端点配置 |
+| 可参数化 | `--model / --permission-mode / --output-format json` | `--model` 等 |
+| 与 Lodestar 契合 | 高（同一网关、JSON 输出好解析、用户日常工具） | 低（当前环境不可达，需额外配置） |
+
+**结论：选 Claude Code CLI 为主 executor，Codex 留作可插拔备选。**
+理由：① 本环境实测可用且复用同一网关（零额外鉴权）；② `--output-format json` 便于程序解析；③ 与用户日常 Agent 栈一致。
+Codex 仅当后续拿到可用的 OpenAI 兼容端点（或登录态）时再启用（`--executor codex` 一行切换）。

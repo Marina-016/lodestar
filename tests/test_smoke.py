@@ -161,6 +161,15 @@ class SmokeTestCase(unittest.TestCase):
         finally:
             ws.close()
 
+    def test_06_build_executor_resolution(self):
+        """V3 种子：executor 解析（不依赖 CLI 安装，仅测抽象层）。"""
+        from lodestar.build import get_executor
+        self.assertEqual(get_executor("claude").name, "claude")
+        self.assertEqual(get_executor("codex").name, "codex")
+        self.assertEqual(get_executor("auto").name, get_executor("auto").name)
+        with self.assertRaises(ValueError):
+            get_executor("bogus")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

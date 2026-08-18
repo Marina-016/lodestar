@@ -62,6 +62,9 @@ python -m lodestar experiment build <exp_id> --scaffold-only  # 仅确定性骨�
 
 # V1：Weekly AI Frontier Research（基于 Knowledge State 推荐本周该研究什么）
 python -m lodestar frontier            # 可选 --save 存报告
+
+# Web UI（本地单页仪表盘，零依赖，默认 http://127.0.0.1:8123）
+lodestar ui                            # 或 python -m lodestar ui --port 8123
 ```
 
 ## 产物位置

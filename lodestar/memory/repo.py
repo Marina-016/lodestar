@@ -134,10 +134,15 @@ def seed_concepts(conn: sqlite3.Connection, items: list[dict]) -> int:
 # ----------------------------------------------------------------------
 def create_task(conn: sqlite3.Connection, task_id: str, goal: str, plan: dict,
                 queries: Optional[list] = None, llm_mode: str = "live") -> None:
-    conn.execute(
-        "INSERT INTO research_tasks(id,goal,plan,queries,status,llm_mode,created_at) VALUES(?,?,?,?,?,?,?)",
-        (task_id, goal, _dumps(plan), _dumps(queries or []), "running", llm_mode, _now()),
-    )
+    """幂等：任务行已存在（Web UI 预建 running 行）则更新 goal/plan/queries，否则插入。"""
+    if conn.execute("SELECT 1 FROM research_tasks WHERE id=?", (task_id,)).fetchone():
+        conn.execute("UPDATE research_tasks SET goal=?, plan=?, queries=? WHERE id=?",
+                     (goal, _dumps(plan), _dumps(queries or []), task_id))
+    else:
+        conn.execute(
+            "INSERT INTO research_tasks(id,goal,plan,queries,status,llm_mode,created_at) VALUES(?,?,?,?,?,?,?)",
+            (task_id, goal, _dumps(plan), _dumps(queries or []), "running", llm_mode, _now()),
+        )
     conn.commit()
 
 

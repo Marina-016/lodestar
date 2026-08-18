@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import unittest
@@ -208,6 +209,30 @@ class SmokeTestCase(unittest.TestCase):
         for s in report["suggestions"]:
             self.assertTrue(s["topic"] and s["why"])
             self.assertIn(s["priority"], {"high", "medium", "low"})
+
+    def test_09_ui_server(self):
+        """Web UI：本地 server 起得来，health/首页/任务 API 响应。"""
+        import threading
+        from http.server import ThreadingHTTPServer
+        import urllib.request
+        from lodestar import ui as ui_mod
+        cfg = Config(llm_mode="mock", search_mode="mock", db_path=Path(self.tmp) / "ui.db",
+                     workspace_dir=Path(self.tmp) / "ws_ui", cases_dir=self.cfg.cases_dir)
+        import lodestar.config as cfg_mod
+        cfg_mod.load_config = lambda: cfg  # 让 ui 模块用测试 config（避免写主库）
+        server = ThreadingHTTPServer(("127.0.0.1", 0), ui_mod.Handler)
+        port = server.server_address[1]
+        t = threading.Thread(target=server.serve_forever, daemon=True)
+        t.start()
+        try:
+            h = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=10).read())
+            self.assertEqual(h["ok"], True)
+            html = urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=10).read().decode("utf-8")
+            self.assertIn("Lodestar", html)
+            tasks = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/api/tasks", timeout=10).read())
+            self.assertIsInstance(tasks, list)
+        finally:
+            server.shutdown()
 
 
 if __name__ == "__main__":

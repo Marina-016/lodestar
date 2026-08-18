@@ -164,6 +164,11 @@ def cmd_build(args, cfg):
     print(r.output[:4000])
 
 
+def _cmd_ui(args, cfg):
+    from lodestar.ui import serve
+    serve(port=args.port, open_browser=not args.no_browser)
+
+
 def cmd_frontier(args, cfg):
     """V1：Weekly AI Frontier Research —— 基于 Knowledge State 推荐本周该研究什么。"""
     ws = Workspace(cfg)
@@ -314,6 +319,11 @@ def main(argv=None):
     pf.add_argument("--save", action="store_true", help="保存报告到 workspace/")
     pf.add_argument("--mock", action="store_true", help="LLM 用离线夹具")
     pf.set_defaults(fn=cmd_frontier)
+
+    pui = sub.add_parser("ui", help="本地 Web UI（零依赖，默认 http://127.0.0.1:8123）")
+    pui.add_argument("--port", type=int, default=8123)
+    pui.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
+    pui.set_defaults(fn=lambda a, c: _cmd_ui(a, c))
 
     pe = sub.add_parser("experiment", help="V3：Research→Experiment→Build")
     exsub = pe.add_subparsers(dest="action", required=True)

@@ -38,15 +38,16 @@ class ResearchAgent:
         self.interactive = sys.stdin.isatty() if interactive is None else interactive
 
     # ------------------------------------------------------------------
-    def run(self, goal: str, apply_updates: Optional[bool] = None) -> dict:
+    def run(self, goal: str, apply_updates: Optional[bool] = None, task_id: Optional[str] = None) -> dict:
         """执行一次 Research Task。
 
-        apply_updates: True=直接应用 knowledge 更新；False=全部拒绝；
+        apply_updates: True=直接应用；False=全部拒绝；"pending"=留待 UI/用户后置应用；
         None=交互式确认（非 tty 自动应用，供 eval/脚本）。
+        task_id: 可选，预生成 task_id（Web UI 需先建任务行再后台轮询）。
         """
         cfg = self.cfg
         ws = self.ws
-        task_id = ws.new_task_id()
+        task_id = task_id or ws.new_task_id()
         ws.current_task_id = task_id
         trace = Trace(ws.conn, task_id, cfg.workspace_dir)
         trace.log("start", {"goal": goal, "llm_mode": cfg.llm_mode, "model": cfg.model})
@@ -318,7 +319,8 @@ class ResearchAgent:
                             "update_id": res.get("update_id"), "proposal": proposal})
         return updates
 
-    def _decide_updates(self, updates: list[dict], apply_updates: Optional[bool]) -> bool:
+    def _decide_updates(self, updates: list[dict], apply_updates) -> str | bool:
+        """返回 True/False/"pending"。True=应用 False=拒绝 "pending"=留待后置应用（Web UI）。"""
         if apply_updates is not None:
             return apply_updates
         if not self.interactive:
@@ -335,10 +337,14 @@ class ResearchAgent:
         ans = input("应用以上更新？[y/N] ").strip().lower()
         return ans in {"y", "yes"}
 
-    def _apply_updates(self, updates: list[dict], apply: bool) -> list[dict]:
+    def _apply_updates(self, updates: list[dict], apply) -> list[dict]:
         ws = self.ws
         applied = []
         for u in updates:
+            if apply == "pending":
+                # Web UI 后置应用：保持 pending，等用户确认
+                applied.append({"concept": u["concept"], "action": u["action"], "status": "pending"})
+                continue
             status = "applied" if apply else "rejected"
             if apply:
                 p = u["proposal"]

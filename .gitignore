@@ -18,3 +18,4 @@ workspace/
 
 # 测试缓存
 .pytest_cache/
+lodestar.bat

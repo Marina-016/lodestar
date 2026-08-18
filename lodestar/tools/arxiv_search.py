@@ -17,9 +17,10 @@ def _clean_arxiv_text(text: str, limit: int = 500) -> str:
     return re.sub(r"\s+", " ", text or "").strip()[:limit]
 
 
-def _search_arxiv(query: str, max_results: int = 6, timeout: int = 30) -> list[dict]:
+def _search_arxiv(query: str, max_results: int = 6, timeout: int = 30, field: str = "abs") -> list[dict]:
+    # field: all=全文(噪声多) | abs=摘要(默认，精确) | ti=标题(最严)
     params = {
-        "search_query": f"all:{query}",
+        "search_query": f"{field}:{query}",
         "start": 0,
         "max_results": max_results,
         "sortBy": "relevance",
@@ -55,8 +56,9 @@ def tool_search_papers(ws, query: str, max_results: int | None = None):
         return {"sources": [{**p, "query": query} for p in sources][:max_results],
                 "note": f"mock 离线检索（query={query!r}）"}
     try:
-        sources = _search_arxiv(query, max_results=max_results, timeout=cfg.tool_timeout_s)
-        return {"sources": sources, "note": f"arXiv 返回 {len(sources)} 条（query={query!r}）"}
+        sources = _search_arxiv(query, max_results=max_results, timeout=cfg.tool_timeout_s,
+                                field=cfg.arxiv_search_field)
+        return {"sources": sources, "note": f"arXiv({cfg.arxiv_search_field}) 返回 {len(sources)} 条（query={query!r}）"}
     except Exception as e:  # noqa: BLE001
         return {"sources": [], "error": f"arXiv 检索失败: {e}", "note": f"query={query!r}"}
 

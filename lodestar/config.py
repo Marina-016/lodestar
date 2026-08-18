@@ -33,8 +33,10 @@ class Config:
     max_deep_read_sources: int = 5
     max_replans: int = 2              # assess 证据不足时最多补搜几轮（v0.1.10：1→2）
     rerank_top_n: int = 8           # Rerank 输出 Top N；真正深度读取取前 max_deep_read_sources
+    rerank_min_score: int = 5       # 噪声过滤：分数低于此的来源不进 Brief Key Sources（1-10）
     web_results_per_query: int = 6
     arxiv_results_per_query: int = 6
+    arxiv_search_field: str = "abs"    # arXiv 检索字段：all=全文（噪声多）| abs=摘要（精确）| ti=标题
     read_char_budget: int = 12000   # 单源读取字符上限（硬截断）
     tool_timeout_s: int = 30
     # --- 产品 ---
@@ -82,6 +84,9 @@ def load_config() -> Config:
     if os.getenv("LODESTAR_TOOL_TIMEOUT"):
         c.tool_timeout_s = int(os.environ["LODESTAR_TOOL_TIMEOUT"])
     c.full_text_enabled = os.getenv("LODESTAR_FULL_TEXT", str(c.full_text_enabled)).lower() in {"1", "true", "yes", "on"}
+    c.arxiv_search_field = os.getenv("LODESTAR_ARXIV_SEARCH_FIELD", c.arxiv_search_field)
+    if os.getenv("LODESTAR_RERANK_MIN_SCORE"):
+        c.rerank_min_score = int(os.environ["LODESTAR_RERANK_MIN_SCORE"])
     if os.getenv("LODESTAR_FULL_TEXT_MAX_SOURCES"):
         c.full_text_max_sources = int(os.environ["LODESTAR_FULL_TEXT_MAX_SOURCES"])
     c.build_executor = os.getenv("LODESTAR_BUILD_EXECUTOR", c.build_executor)

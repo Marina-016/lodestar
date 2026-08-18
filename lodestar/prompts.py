@@ -88,6 +88,8 @@ def queries_prompt(cfg: Config, goal: str, plan: dict, knowledge_ctx: list[dict]
         "- 必须保留 original（用户原始目标，避免改写改变意图）。\n"
         "- 生成 3-6 个 Query，**一律使用英文**（AI 前沿论文/资料几乎全英文，中文 Query 在 arXiv 上检索质量差）；"
         "最多允许 1 个中文兜底 Query。\n"
+        "- **每个 Query 必须直接服务于研究目标**：只围绕目标主题本身检索，禁止扩展到无关子领域"
+        "（如研究 MCP 时不要搜通用的 multi-agent 或医疗等无关话题）。宁可少而准，不要多而杂。\n"
         "- 每个 Query 注明 purpose（它想召回什么证据）。\n"
         "- 不要重复搜索同一个意思。\n"
         "只输出如下 JSON：\n"

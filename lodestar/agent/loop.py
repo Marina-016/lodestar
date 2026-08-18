@@ -108,6 +108,9 @@ class ResearchAgent:
             if sid:
                 repo.update_source(ws.conn, sid, rank=s.get("rank"), reason=s.get("reason"))
 
+        # 检索噪声优化：Brief 只展示被 Rerank 选中且分数达标的 Top-N（不含全部收集来源）
+        key_sources = [s for s in ranked if s.get("score", 10) >= cfg.rerank_min_score][: cfg.rerank_top_n]
+
         # V1-R2：config 开启全文时，Top N 论文来源读 PDF 全文（token 预算守护）
         full_text_count = cfg.full_text_max_sources if cfg.full_text_enabled else 0
         read_sources = self._deep_read(ranked, trace, full_text_count=full_text_count)
@@ -135,6 +138,7 @@ class ResearchAgent:
                 sources.append(s)
             if added:
                 extra_ranked = reranker_mod.rerank(cfg, self.llm, goal, plan["research_questions"], added, knowledge_ctx)
+                key_sources += [s for s in extra_ranked if s.get("score", 10) >= cfg.rerank_min_score][: cfg.rerank_top_n]
                 # V1-R2：assess 判定证据不足才补搜 → 补搜的 Top 1 来源读全文
                 read_sources += self._deep_read(extra_ranked, trace, full_text_count=1)
             assess = assessor_mod.assess(cfg, self.llm, goal, plan["research_questions"], self._evidence_summary(read_sources))
@@ -160,7 +164,11 @@ class ResearchAgent:
         metrics = {"queries": len(queries), "searches": searches,
                    "candidates_collected": len(candidates), "unique_sources": len(sources),
                    "sources_read": len(read_sources), "replans": replans}
-        brief_md = brief_mod.render_brief(cfg, task_id, goal, plan, queries, sources, read_sources,
+        # 把读取深度回填到 key_sources，保证 Brief 的「读取」列正确显示（全文/摘要/未读）
+        depth_by_url = {rs["url"]: rs.get("read_depth", "none") for rs in read_sources}
+        for ks in key_sources:
+            ks["read_depth"] = depth_by_url.get(ks["url"], "none")
+        brief_md = brief_mod.render_brief(cfg, task_id, goal, plan, queries, key_sources, read_sources,
                                           synthesis, novelty, knowledge_ctx, assess, metrics)
         repo.finish_task(ws.conn, task_id, brief_md, "finished", metrics)
         trace.log("finish", {"metrics": metrics, "workspace": str(cfg.workspace_dir / task_id)})

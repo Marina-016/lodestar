@@ -88,7 +88,10 @@ def ingest_github(url: str, token: str | None = None, timeout: float = 20) -> di
     owner, repo = parsed
     token = token or _github_token()
     meta = fetch_github_metadata(owner, repo, token, timeout)
-    readme = fetch_github_readme(owner, repo, token, timeout)
+    try:  # README 是可选信息：读不到不影响登记（元信息已够判断技术栈/领域）
+        readme = fetch_github_readme(owner, repo, token, timeout)
+    except Exception:  # noqa: BLE001
+        readme = ""
     stack = infer_tech_stack(meta.get("language", ""), readme, meta.get("topics"))
     desc = meta.get("description") or (readme.split("\n", 1)[0][:150] if readme else "")
     return {

@@ -147,15 +147,21 @@ class Handler(BaseHTTPRequestHandler):
             ws = _ws()
             try:
                 try:
+                    cfg = load_config()
+                    cfg.llm_timeout_s = 40  # 选题是交互动作，LLM 超时压短，避免长时间转圈
                     ctx = repo.list_concepts(ws.conn)
                     recent = [dict(r) for r in ws.conn.execute(
                         "SELECT goal, created_at FROM research_tasks WHERE status='finished' ORDER BY created_at DESC LIMIT 5"
                     ).fetchall()]
-                    llm = LLMClient(load_config())
-                    report = generate_frontier(load_config(), llm, ctx, recent)
+                    report = generate_frontier(cfg, LLMClient(cfg), ctx, recent)
                     return self._send(200, report)
-                except Exception as e:  # noqa: BLE001 —— LLM 网关失败也要给前端明确错误，不能卡死
-                    return self._send(200, {"suggestions": [], "error": f"选题生成失败：{e}"})
+                except Exception as e:  # noqa: BLE001
+                    # 网关失败/超时 → 降级为示例选题（明确标注），绝不卡死
+                    mock_cfg = load_config()
+                    mock_cfg.llm_mode = "mock"
+                    mock = generate_frontier(mock_cfg, LLMClient(mock_cfg), [], [])
+                    mock["error"] = f"实时选题失败，已降级为示例选题：{e}"
+                    return self._send(200, mock)
             finally:
                 ws.close()
         if path == "/api/knowledge/seed":
@@ -334,13 +340,14 @@ async function loadExp(){const d=await jget('/api/experiments');
  '<div>'+esc((e.hypothesis||'').slice(0,80))+'</div>'+
  '<div class="small">task '+esc(e.task_id||'-')+'</div></div>').join(''))||'<p class="mut">（无实验）</p>';}
 // ---- 选题 ----
-$('#frBtn').onclick=async()=>{$('#frNote').innerHTML='<span class="spin"></span>生成中（约 10-60s）…';
+$('#frBtn').onclick=async()=>{$('#frNote').innerHTML='<span class="spin"></span>生成中…';
  try{
-  const r=await jpost('/api/frontier',{},150000);$('#frNote').innerHTML='';
-  if(r.error){$('#frNote').innerHTML='<span class="warn">'+esc(r.error)+'</span>';return;}
-  $('#frArea').innerHTML=r.suggestions.map((s,i)=>'<div class="item" onclick="useTopic(\''+esc(s.topic).replace(/'/g,"\\'")+'\')">'+
+  const r=await jpost('/api/frontier',{},60000);$('#frNote').innerHTML='';
+  if(r.error){$('#frNote').innerHTML='<span class="warn">'+esc(r.error)+'</span>';}
+  if(r.suggestions&&r.suggestions.length){$('#frArea').innerHTML=r.suggestions.map((s,i)=>'<div class="item" onclick="useTopic(\''+esc(s.topic).replace(/'/g,"\\'")+'\')">'+
  '<b>'+esc(s.topic)+'</b> <span class="badge">'+s.priority+'</span><br><span class="small">'+esc(s.why)+'</span></div>').join('');}
- catch(e){$('#frNote').innerHTML='<span class="warn">生成失败：'+esc(e.message||e)+'</span>';}};
+  else{$('#frArea').innerHTML='<p class="warn">（无选题返回）</p>';}
+ }catch(e){$('#frNote').innerHTML='<span class="warn">请求失败：'+esc(e.message||e)+'</span>';}};
 function useTopic(t){$('#goal').value=t;$('#tabs').querySelector('button[data-t=research]').click();}
 // ---- 知识库 ----
 async function loadK(){const q=$('#kq').value.trim();const d=await jget('/api/knowledge'+(q?'?q='+encodeURIComponent(q):''));

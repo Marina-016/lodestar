@@ -25,7 +25,7 @@ def generate_frontier(cfg, llm: LLMClient, knowledge_ctx: list[dict],
     ctx_lines = ["## 用户 Knowledge State"]
     if knowledge_ctx:
         for c in knowledge_ctx:
-            ctx_lines.append(f"- {c['name']} [{c['status']}/{c['confidence']}]"
+            ctx_lines.append(f"- {c['name']} [{c.get('status', '?')}/{c.get('confidence', '?')}]"
                              + (f" — 笔记：{'; '.join(c['notes'][-2:])}" if c.get('notes') else ""))
     else:
         ctx_lines.append("（空：用户尚未声明已掌握的概念）")

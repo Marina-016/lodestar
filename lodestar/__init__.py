@@ -3,7 +3,7 @@
 Single Agent + Tools；确定性步骤走 Code；全程 Trace；Golden Case 驱动 Eval。
 """
 
-__version__ = "0.3.7"  # 知识评估 Quiz：agent 出题→回答→评估→回写 Knowledge State（补 B1 缺口）
+__version__ = "0.4.1"  # Projects + frontier 项目感知 + quiz→研究打通 + 批量摄入
 
 # Agent 名称：Lodestar（导星）——引导研究方向、追踪 AI 前沿。
 # 改名只改这里，prompts/README 会引用。

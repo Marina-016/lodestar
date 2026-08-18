@@ -146,13 +146,16 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/frontier":
             ws = _ws()
             try:
-                ctx = repo.list_concepts(ws.conn)
-                recent = [dict(r) for r in ws.conn.execute(
-                    "SELECT goal, created_at FROM research_tasks WHERE status='finished' ORDER BY created_at DESC LIMIT 5"
-                ).fetchall()]
-                llm = LLMClient(load_config())
-                report = generate_frontier(load_config(), llm, ctx, recent)
-                return self._send(200, report)
+                try:
+                    ctx = repo.list_concepts(ws.conn)
+                    recent = [dict(r) for r in ws.conn.execute(
+                        "SELECT goal, created_at FROM research_tasks WHERE status='finished' ORDER BY created_at DESC LIMIT 5"
+                    ).fetchall()]
+                    llm = LLMClient(load_config())
+                    report = generate_frontier(load_config(), llm, ctx, recent)
+                    return self._send(200, report)
+                except Exception as e:  # noqa: BLE001 —— LLM 网关失败也要给前端明确错误，不能卡死
+                    return self._send(200, {"suggestions": [], "error": f"选题生成失败：{e}"})
             finally:
                 ws.close()
         if path == "/api/knowledge/seed":
@@ -251,6 +254,9 @@ th{background:#22304a;color:var(--mut);font-weight:600}
 .brief a{color:var(--acc)}
 .upd{border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:8px}
 .upd .arrow{color:var(--mut)}
+.row{display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap}
+.row input[type=text]{width:auto;flex:1;min-width:120px}
+.row .mut{white-space:nowrap}
 @keyframes spin{to{transform:rotate(360deg)}}
 .spin{display:inline-block;width:12px;height:12px;border:2px solid var(--mut);border-top-color:var(--acc);border-radius:50%;animation:spin 1s linear infinite;vertical-align:-2px;margin-right:6px}
 </style></head><body>
@@ -265,27 +271,32 @@ th{background:#22304a;color:var(--mut);font-weight:600}
 <main>
 <div class="tab on" id="t-research">
   <div class="card"><textarea id="goal" placeholder="研究目标，如：研究最近 Agent Memory 有哪些值得关注的新方向"></textarea>
-  <br><button id="startBtn">开始研究</button> <span class="mut small" id="runNote"></span></div>
+  <div class="row"><button id="startBtn">开始研究</button><span class="mut small" id="runNote"></span></div></div>
   <div id="resArea"></div>
 </div>
-<div class="tab" id="t-frontier"><button id="frBtn">生成本周选题</button><span class="mut small" id="frNote"></span><div id="frArea"></div></div>
+<div class="tab" id="t-frontier"><div class="row"><button id="frBtn">生成本周选题</button><span class="mut small" id="frNote"></span></div><div id="frArea"></div></div>
 <div class="tab" id="t-knowledge">
-  <div class="card"><input type="text" id="kq" placeholder="搜索概念…（回车）">&nbsp;
-  <button id="kseedBtn" class="ghost">seed 已知概念</button><input type="text" id="kseed" placeholder="Agent,Skill,Eval…" style="width:240px;display:inline-block;margin-left:8px"></div>
+  <div class="card"><div class="row"><input type="text" id="kq" placeholder="搜索概念…（回车）"><button class="ghost" onclick="loadK()">搜索</button></div>
+  <div class="row"><button id="kseedBtn" class="ghost">seed 已知概念</button><input type="text" id="kseed" placeholder="Agent,Skill,Eval…"></div></div>
   <div id="kArea"></div>
 </div>
 <div class="tab" id="t-history"><div id="hArea"></div></div>
 <div class="tab" id="t-experiment"><button onclick="loadExp()" class="ghost">刷新</button><div id="eArea"></div></div>
 </main>
 <script>
-const $=s=>document.querySelector(s), api={g:p=>fetch(p).then(r=>r.json()),p:(p,b)=>fetch(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.json())};
+const $=s=>document.querySelector(s);
+async function jget(p,t){const c=new AbortController();const to=setTimeout(()=>c.abort(),t||120000);
+ const r=await fetch(p,{signal:c.signal});clearTimeout(to);if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}
+async function jpost(p,b,t){const c=new AbortController();const to=setTimeout(()=>c.abort(),t||120000);
+ const r=await fetch(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{}),signal:c.signal});
+ clearTimeout(to);if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}
 // ---- tabs ----
 $('#tabs').onclick=e=>{const b=e.target.closest('button');if(!b)return;
  document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
  b.classList.add('on');$('#t-'+b.dataset.t).classList.add('on');
  if(b.dataset.t==='knowledge')loadK(); if(b.dataset.t==='history')loadH(); if(b.dataset.t==='experiment')loadExp();};
-api.g('/api/health').then(h=>$('#ver').textContent='v'+h.version);
+jget('/api/health').then(h=>$('#ver').textContent='v'+h.version);
 // ---- md 渲染（够用）----
 function md(t){if(!t)return'';t=t.replace(/&/g,'&amp;').replace(/</g,'&lt;');
  t=t.replace(/^### (.*)$/gm,'<h3>$1</h3>').replace(/^## (.*)$/gm,'<h2>$1</h2>').replace(/^# (.*)$/gm,'<h2>$1</h2>');
@@ -298,11 +309,11 @@ function md(t){if(!t)return'';t=t.replace(/&/g,'&amp;').replace(/</g,'&lt;');
 function esc(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;');}
 // ---- 研究 ----
 $('#startBtn').onclick=async()=>{const g=$('#goal').value.trim();if(!g)return;
- $('#runNote').innerHTML='<span class="spin"></span>研究启动中…';const r=await api.p('/api/research',{goal:g});
+ $('#runNote').innerHTML='<span class="spin"></span>研究启动中…';const r=await jpost('/api/research',{goal:g});
  $('#runNote').innerHTML='';pollTask(r.task_id);};
 let pv=0;
 async function pollTask(id){$('#runNote').innerHTML='<span class="spin"></span>研究中…';
- const iv=setInterval(async()=>{const d=await api.g('/api/task/'+id);
+ const iv=setInterval(async()=>{const d=await jget('/api/task/'+id);
   if(d.task&&(d.task.status==='finished'||d.task.status==='error')){clearInterval(iv);$('#runNote').innerHTML='';
    renderTask(d);pv=0;}else{$('#runNote').textContent='研究中…（'+(++pv)+'s）';}},2000);}
 function renderTask(d){const t=d.task,b=d.brief_md,upd=d.updates.filter(u=>u.status==='pending');
@@ -315,30 +326,33 @@ function renderTask(d){const t=d.task,b=d.brief_md,upd=d.updates.filter(u=>u.sta
    '<button onclick="applyUpd(\''+t.id+'\')">应用这些知识更新</button>';}
  if(t.status==='finished'){h+=' <button class="ghost" onclick="saveExp(\''+t.id+'\')">存为实验</button>';}
  h+='</div><div class="brief">'+md(b)+'</div>';$('#resArea').innerHTML=h;}
-async function applyUpd(id){await api.p('/api/task/apply',{task_id:id});pollTask(id);}
-async function saveExp(id){const r=await api.p('/api/experiment/save',{task_id:id});
+async function applyUpd(id){await jpost('/api/task/apply',{task_id:id});pollTask(id);}
+async function saveExp(id){const r=await jpost('/api/experiment/save',{task_id:id});
  alert(r.exp_id?('已保存为实验 #'+r.exp_id+'：'+r.hypothesis):(r.error||'保存失败'));}
-async function loadExp(){const d=await api.g('/api/experiments');
+async function loadExp(){const d=await jget('/api/experiments');
  $('#eArea').innerHTML=(d.map(e=>'<div class="item"><b>#'+e.id+'</b> <span class="badge '+(e.build_status==='built'?'run':e.build_status==='failed'?'err':'')+'">'+e.build_status+'</span>'+
  '<div>'+esc((e.hypothesis||'').slice(0,80))+'</div>'+
  '<div class="small">task '+esc(e.task_id||'-')+'</div></div>').join(''))||'<p class="mut">（无实验）</p>';}
 // ---- 选题 ----
-$('#frBtn').onclick=async()=>{$('#frNote').innerHTML='<span class="spin"></span>生成中…';
- const r=await api.p('/api/frontier');$('#frNote').innerHTML='';
- $('#frArea').innerHTML=r.suggestions.map((s,i)=>'<div class="item" onclick="useTopic(\''+esc(s.topic).replace(/'/g,"\\'")+'\')">'+
- '<b>'+esc(s.topic)+'</b> <span class="badge">'+s.priority+'</span><br><span class="small">'+esc(s.why)+'</span></div>').join('');};
+$('#frBtn').onclick=async()=>{$('#frNote').innerHTML='<span class="spin"></span>生成中（约 10-60s）…';
+ try{
+  const r=await jpost('/api/frontier',{},150000);$('#frNote').innerHTML='';
+  if(r.error){$('#frNote').innerHTML='<span class="warn">'+esc(r.error)+'</span>';return;}
+  $('#frArea').innerHTML=r.suggestions.map((s,i)=>'<div class="item" onclick="useTopic(\''+esc(s.topic).replace(/'/g,"\\'")+'\')">'+
+ '<b>'+esc(s.topic)+'</b> <span class="badge">'+s.priority+'</span><br><span class="small">'+esc(s.why)+'</span></div>').join('');}
+ catch(e){$('#frNote').innerHTML='<span class="warn">生成失败：'+esc(e.message||e)+'</span>';}};
 function useTopic(t){$('#goal').value=t;$('#tabs').querySelector('button[data-t=research]').click();}
 // ---- 知识库 ----
-async function loadK(){const q=$('#kq').value.trim();const d=await api.g('/api/knowledge'+(q?'?q='+encodeURIComponent(q):''));
+async function loadK(){const q=$('#kq').value.trim();const d=await jget('/api/knowledge'+(q?'?q='+encodeURIComponent(q):''));
  $('#kArea').innerHTML=(d.map(c=>'<div class="item"><b>'+esc(c.name)+'</b><span class="badge">'+c.status+'/'+c.confidence+'</span>'+
   (c.notes&&c.notes.length?'<div class="small">'+esc(c.notes.slice(-2).join('；'))+'</div>':'')+'</div>').join(''))||'<p class="mut">（空）</p>';}
 $('#kq').onkeydown=e=>{if(e.key==='Enter')loadK();};
 $('#kseedBtn').onclick=async()=>{const v=$('#kseed').value.trim();if(!v)return;
- const r=await api.p('/api/knowledge/seed',{names:v});loadK();};
+ const r=await jpost('/api/knowledge/seed',{names:v});loadK();};
 // ---- 历史 ----
-async function loadH(){const d=await api.g('/api/tasks');
+async function loadH(){const d=await jget('/api/tasks');
  $('#hArea').innerHTML=d.map(t=>'<div class="item" onclick="openTask(\''+t.id+'\')"><b>'+esc((t.goal||'').slice(0,70))+'</b>'+
  '<span class="badge '+(t.status==='running'?'run':t.status==='error'?'err':'')+'">'+t.status+'</span>'+
  '<div class="small">'+t.created_at+'</div></div>').join('')||'<p class="mut">（无任务）</p>';}
-async function openTask(id){const d=await api.g('/api/task/'+id);renderTask(d);$('#tabs').querySelector('button[data-t=research]').click();}
+async function openTask(id){const d=await jget('/api/task/'+id);renderTask(d);$('#tabs').querySelector('button[data-t=research]').click();}
 </script></body></html>"""

@@ -34,15 +34,34 @@ def _ws() -> Workspace:
 def _run_research(task_id: str, goal: str, cfg) -> None:
     ws = Workspace(cfg)
     try:
-        ResearchAgent(ws, interactive=False).run(goal, apply_updates="pending", task_id=task_id)
-    except Exception as e:  # noqa: BLE001
         try:
-            repo.finish_task(ws.conn, task_id, "", status="error", metrics={"error": str(e)})
-        except Exception:  # noqa: BLE001
-            pass
+            result = ResearchAgent(ws, interactive=False).run(goal, apply_updates="pending", task_id=task_id)
+        except Exception as e:  # noqa: BLE001
+            result = {"error": str(e), "status": "error"}
+        if result.get("error") or result.get("status") == "error":
+            # 实时研究失败 → 降级为示例研究（mock），UI 永远有结果
+            _degrade_to_mock(task_id, goal, result.get("error") or "未知错误")
     finally:
         ws.close()
         _runners.pop(task_id, None)
+
+
+def _degrade_to_mock(task_id: str, goal: str, error: str) -> None:
+    try:
+        mock_cfg = load_config()          # 同一主库，仅 LLM/检索切 mock
+        mock_cfg.llm_mode = "mock"
+        mock_cfg.search_mode = "mock"
+        ws = Workspace(mock_cfg)
+        try:
+            ResearchAgent(ws, interactive=False).run(goal, apply_updates="pending", task_id=task_id)
+            brief = (repo.get_task(ws.conn, task_id) or {}).get("brief_md") or ""
+            repo.finish_task(ws.conn, task_id,
+                             f"> ⚠️ 实时研究失败，以下为示例数据（mock 降级）。原因：{error}\n\n" + brief,
+                             "finished", metrics={"degraded": True, "error": error})
+        finally:
+            ws.close()
+    except Exception:  # noqa: BLE001 —— 降级也失败就保持 error 状态
+        pass
 
 
 def _start_research(goal: str) -> str:
@@ -321,10 +340,11 @@ let pv=0;
 async function pollTask(id){$('#runNote').innerHTML='<span class="spin"></span>研究中…';
  const iv=setInterval(async()=>{const d=await jget('/api/task/'+id);
   if(d.task&&(d.task.status==='finished'||d.task.status==='error')){clearInterval(iv);$('#runNote').innerHTML='';
-   renderTask(d);pv=0;}else{$('#runNote').textContent='研究中…（'+(++pv)+'s）';}},2000);}
+   renderTask(d);pv=0;}else{$('#runNote').innerHTML='<span class="spin"></span>研究中…（'+(++pv)+'s · 步骤 '+(d.trace?d.trace.length:0)+'）';}},2000);}
 function renderTask(d){const t=d.task,b=d.brief_md,upd=d.updates.filter(u=>u.status==='pending');
  let h='<div class="card"><h3 style="margin:0 0 6px">'+esc(t.goal)+'</h3><span class="mut small">task '+t.id+' · '+t.status+'</span>';
- if(t.status==='error'){h+='<p class="warn">'+esc((t.metrics||{}).error||'执行失败')+'</p>';}
+ if(t.metrics&&t.metrics.degraded){h+='<p class="warn">⚠️ 实时研究失败，以下为示例数据（mock 降级）。</p>';}
+ else if(t.status==='error'){h+='<p class="warn">'+esc((t.metrics||{}).error||'执行失败')+'</p>';}
  if(upd.length){h+='<h4>待应用的知识更新（'+upd.length+'）</h4>'+upd.map(u=>{
    const p=u.proposal;return '<div class="upd"><b>'+esc(u.concept)+'</b> <span class="arrow">'+
    (p.old_status?esc(p.old_status)+'/':'')+(p.old_confidence?esc(p.old_confidence)+' → ':'')+

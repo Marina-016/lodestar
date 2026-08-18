@@ -435,14 +435,18 @@ class MockLLM:
     # --- frontier：Weekly AI Frontier Research 策展 ---
     @staticmethod
     def _role_frontier(system: str, user: str) -> str:
+        proj = re.findall(r"^- ([A-Za-z0-9_.\-/]+)（", user, flags=re.M)
         return json.dumps(
             {"suggestions": [
                 {"topic": "Agent Memory 分层与更新机制的最新进展", "why": "你的 Knowledge State 中 Memory 为 known/medium，"
-                 "但 episodic/procedural 分层与 memory updating 的具体实现未覆盖，本周有多篇相关工作值得关注。", "priority": "high"},
+                 "但 episodic/procedural 分层与 memory updating 的具体实现未覆盖，本周有多篇相关工作值得关注。",
+                 "priority": "high", "related_projects": proj[:1]},
                 {"topic": "Context Engineering 与 Agent Harness 的融合边界", "why": "Context Engineering 为 known/high，"
-                 "但 Harness 为 partial/low，本周关于两者融合的新框架值得研究。", "priority": "medium"},
+                 "但 Harness 为 partial/low，本周关于两者融合的新框架值得研究。",
+                 "priority": "medium", "related_projects": proj[:1]},
                 {"topic": "MCP 生态最近的实现与争议", "why": "MCP 已进入快速迭代期，Tool Protocol 与 Tool Calling 的关系"
-                 "是当前热点，你的 Knowledge State 中 Protocol 为 partial/low。", "priority": "high"},
+                 "是当前热点，你的 Knowledge State 中 Protocol 为 partial/low。",
+                 "priority": "high", "related_projects": []},
             ]}, ensure_ascii=False)
 
     # --- gap_queries：assess 缺口 → 检索 Query ---

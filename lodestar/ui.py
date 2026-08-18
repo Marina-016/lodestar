@@ -190,7 +190,8 @@ class Handler(BaseHTTPRequestHandler):
                     recent = [dict(r) for r in ws.conn.execute(
                         "SELECT goal, created_at FROM research_tasks WHERE status='finished' ORDER BY created_at DESC LIMIT 5"
                     ).fetchall()]
-                    report = generate_frontier(cfg, LLMClient(cfg), ctx, recent)
+                    projects = repo.list_projects(ws.conn, status="active")
+                    report = generate_frontier(cfg, LLMClient(cfg), ctx, recent, projects)
                     return self._send(200, report)
                 except Exception as e:  # noqa: BLE001
                     # 网关失败/超时 → 降级为示例选题（明确标注），绝不卡死
@@ -490,6 +491,7 @@ $('#frBtn').onclick=async()=>{$('#frNote').innerHTML='<span class="spin"></span>
   if(r.error){$('#frNote').innerHTML='<span class="warn">'+esc(r.error)+'</span>';}
   if(r.suggestions&&r.suggestions.length){$('#frArea').innerHTML=r.suggestions.map((s,i)=>{const t=esc(s.topic).replace(/'/g,"\\'");
    return '<div class="item"><b>'+esc(s.topic)+'</b> <span class="badge">'+s.priority+'</span>'+
+   (s.related_projects&&s.related_projects.length?' <span class="badge run">'+s.related_projects.map(esc).join('、')+'</span>':'')+
    '<div class="small">'+esc(s.why)+'</div>'+
    '<div class="row" style="margin:6px 0 0"><button class="ghost" onclick="researchTopic(\''+t+'\')">研究这条</button>'+
    '<button class="ghost" onclick="useTopic(\''+t+'\')">填到研究框</button></div></div>';}).join('');}
@@ -512,7 +514,9 @@ async function quizSubmit(){const a=$('#quizA').value.trim();if(!a){alert('先�
  const r=await jpost('/api/quiz/answer',{concept:c,question:quiz.q,answer:a},60000);
  if(r.error){$('#quizV').innerHTML='<span class="warn">'+esc(r.error)+'</span>';return;}
  $('#quizV').innerHTML='<span class="ok">'+r.status+'/'+r.confidence+'</span> '+esc(r.feedback||'');
+ if(r.status!=='known'){$('#quizV').innerHTML+=' <button class="ghost" onclick="researchConcept(\''+esc(c).replace(/'/g,"\\'")+'\')">研究这个薄弱点</button>';}
  if(r.next_question){showQuizQ(c,r.next_question);}else{advanceQuiz();}}
+function researchConcept(t){$('#goal').value='研究 '+t+' 的最新进展，加深理解';startResearch();$('#tabs').querySelector('button[data-t=research]').click();}
 async function advanceQuiz(){quiz.idx++;
  if(quiz.idx>=quiz.concepts.length){$('#quizArea').innerHTML='<p class="ok">本轮评估完成（'+quiz.concepts.length+' 个概念），Knowledge State 已更新。</p>';return;}
  $('#quizV').innerHTML='<span class="spin"></span>下一题…';

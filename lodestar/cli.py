@@ -182,19 +182,20 @@ def cmd_project(args, cfg):
             return
         if args.action == "add":
             from lodestar.project import ingest_github
-            try:
-                info = ingest_github(args.url)
-            except Exception as e:  # noqa: BLE001
-                print(f"[error] 摄入失败：{e}")
-                sys.exit(1)
-            pid = repo.upsert_project(ws.conn, info["name"], url=info["url"],
-                                      description=info.get("description"),
-                                      tech_stack=info.get("tech_stack"),
-                                      status=args.status)
-            print(f"已登记项目 #{pid}：{info['name']}")
-            print(f"  描述: {(info.get('description') or '')[:80]}")
-            print(f"  技术栈: {', '.join(info.get('tech_stack') or []) or '-'}（最近 push: {info.get('last_push')}）")
-            print(f"  状态: {args.status}")
+            for url in args.url:
+                try:
+                    info = ingest_github(url)
+                except Exception as e:  # noqa: BLE001
+                    print(f"[error] 摄入失败 {url}：{e}")
+                    continue
+                pid = repo.upsert_project(ws.conn, info["name"], url=info["url"],
+                                          description=info.get("description"),
+                                          tech_stack=info.get("tech_stack"),
+                                          status=args.status)
+                print(f"已登记项目 #{pid}：{info['name']}")
+                print(f"  描述: {(info.get('description') or '')[:80]}")
+                print(f"  技术栈: {', '.join(info.get('tech_stack') or []) or '-'}（最近 push: {info.get('last_push')}）")
+                print(f"  状态: {args.status}")
             return
         if args.action == "status":
             repo.set_project_status(ws.conn, int(args.id), args.status)
@@ -212,12 +213,15 @@ def cmd_frontier(args, cfg):
         recent_tasks = [dict(r) for r in ws.conn.execute(
             "SELECT goal, created_at FROM research_tasks WHERE status='finished' ORDER BY created_at DESC LIMIT 5"
         ).fetchall()]
+        projects = repo.list_projects(ws.conn, status="active")
         llm = LLMClient(cfg)
-        report = frontier_mod.generate_frontier(cfg, llm, knowledge_ctx, recent_tasks)
+        report = frontier_mod.generate_frontier(cfg, llm, knowledge_ctx, recent_tasks, projects)
         print(f"# Weekly AI Frontier Research\n")
         for i, s in enumerate(report["suggestions"], 1):
             print(f"## {i}. {s['topic']}")
             print(f"**优先级**：{s['priority']}")
+            if s.get("related_projects"):
+                print(f"**相关项目**：{'、'.join(s['related_projects'])}")
             print(f"\n{s['why']}\n")
         if args.save:
             p = cfg.workspace_dir / f"frontier_{ws.new_task_id()}.md"
@@ -364,7 +368,7 @@ def main(argv=None):
     pjsub = pj.add_subparsers(dest="action", required=True)
     pjsub.add_parser("list").set_defaults(fn=cmd_project)
     pja = pjsub.add_parser("add")
-    pja.add_argument("url", help="GitHub 仓库链接")
+    pja.add_argument("url", nargs="+", help="一个或多个 GitHub 仓库链接")
     pja.add_argument("--status", default="active", help="active|paused|archived|idea")
     pjs = pjsub.add_parser("status")
     pjs.add_argument("id", type=int)

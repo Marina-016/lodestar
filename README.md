@@ -60,8 +60,13 @@ python -m lodestar experiment save <task_id>          # 从 Brief 的 Project Op
 python -m lodestar experiment build <exp_id> --out /tmp/exp  # scaffold + codex 实现 baseline/candidate
 python -m lodestar experiment build <exp_id> --scaffold-only  # 仅确定性骨架
 
-# V1：Weekly AI Frontier Research（基于 Knowledge State 推荐本周该研究什么）
+# V1：Weekly AI Frontier Research（基于 Knowledge State + 进行中项目推荐本周该研究什么）
 python -m lodestar frontier            # 可选 --save 存报告
+
+# Projects：GitHub 摄入 + 进行中状态（研究/选题会参考 active 项目）
+python -m lodestar project add https://github.com/owner/repo [--status active]   # 可多个链接
+python -m lodestar project list
+python -m lodestar project status <id> active|paused|archived|idea
 
 # Web UI（本地单页仪表盘，零依赖，默认 http://127.0.0.1:8123）
 lodestar ui                            # 或 python -m lodestar ui --port 8123

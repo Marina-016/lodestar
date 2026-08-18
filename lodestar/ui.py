@@ -16,6 +16,7 @@ from urllib.parse import parse_qs, urlparse
 from lodestar.agent.loop import ResearchAgent
 from lodestar.config import load_config
 from lodestar.context import Workspace
+from lodestar.experiment import extract_opportunities, scaffold_experiment
 from lodestar.frontier import generate_frontier
 from lodestar.llm import LLMClient
 from lodestar.memory import repo
@@ -148,11 +149,14 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/task/apply":
             data = self._read_json()
             task_id = data.get("task_id")
+            want_ids = set(int(i) for i in (data.get("update_ids") or []))
             ws = _ws()
             try:
                 pend = repo.list_knowledge_updates(ws.conn, task_id=task_id, status="pending")
                 applied = []
                 for u in pend:
+                    if want_ids and u["id"] not in want_ids:
+                        continue  # 只应用勾选的更新
                     p = u["proposal"]
                     repo.upsert_concept(ws.conn, u["concept"], status=p["new_status"],
                                         confidence=p["new_confidence"],
@@ -192,8 +196,20 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"seeded": n})
             finally:
                 ws.close()
+        if path == "/api/experiment/build":
+            data = self._read_json()
+            ws = _ws()
+            try:
+                exp = repo.get_experiment(ws.conn, int(data.get("exp_id")))
+                if not exp:
+                    return self._send(404, {"error": "实验不存在"})
+                out_root = load_config().workspace_dir / "experiments"
+                project = scaffold_experiment(exp, out_root)
+                repo.set_experiment_build(ws.conn, exp["id"], "built", str(project))
+                return self._send(200, {"project": str(project), "status": "built"})
+            finally:
+                ws.close()
         if path == "/api/experiment/save":
-            from lodestar.experiment import extract_opportunities
             data = self._read_json()
             ws = _ws()
             try:
@@ -224,6 +240,7 @@ class Handler(BaseHTTPRequestHandler):
                 "sources": repo.list_sources(ws.conn, task_id),
                 "updates": repo.list_knowledge_updates(ws.conn, task_id=task_id),
                 "trace": repo.list_trace_events(ws.conn, task_id),
+                "opportunities": extract_opportunities(task.get("brief_md") or ""),
             })
         finally:
             ws.close()
@@ -333,9 +350,12 @@ function md(t){if(!t)return'';t=t.replace(/&/g,'&amp;').replace(/</g,'&lt;');
  return t.replace(/\n\n/g,'\n');}
 function esc(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;');}
 // ---- 研究 ----
-$('#startBtn').onclick=async()=>{const g=$('#goal').value.trim();if(!g)return;
+async function startResearch(){const g=$('#goal').value.trim();if(!g)return;
  $('#runNote').innerHTML='<span class="spin"></span>研究启动中…';const r=await jpost('/api/research',{goal:g});
- $('#runNote').innerHTML='';pollTask(r.task_id);};
+ $('#runNote').innerHTML='';if(r.error){$('#runNote').innerHTML='<span class="warn">'+esc(r.error)+'</span>';return;}
+ pollTask(r.task_id);}
+$('#startBtn').onclick=startResearch;
+function researchTopic(t){$('#goal').value=t;startResearch();$('#tabs').querySelector('button[data-t=research]').click();}
 let pv=0;
 async function pollTask(id){$('#runNote').innerHTML='<span class="spin"></span>研究中…';
  const iv=setInterval(async()=>{const d=await jget('/api/task/'+id);
@@ -345,27 +365,38 @@ function renderTask(d){const t=d.task,b=d.brief_md,upd=d.updates.filter(u=>u.sta
  let h='<div class="card"><h3 style="margin:0 0 6px">'+esc(t.goal)+'</h3><span class="mut small">task '+t.id+' · '+t.status+'</span>';
  if(t.metrics&&t.metrics.degraded){h+='<p class="warn">⚠️ 实时研究失败，以下为示例数据（mock 降级）。</p>';}
  else if(t.status==='error'){h+='<p class="warn">'+esc((t.metrics||{}).error||'执行失败')+'</p>';}
- if(upd.length){h+='<h4>待应用的知识更新（'+upd.length+'）</h4>'+upd.map(u=>{
-   const p=u.proposal;return '<div class="upd"><b>'+esc(u.concept)+'</b> <span class="arrow">'+
-   (p.old_status?esc(p.old_status)+'/':'')+(p.old_confidence?esc(p.old_confidence)+' → ':'')+
-   esc(p.new_status)+'/'+esc(p.new_confidence)+'</span><br><span class="small">'+esc(p.claim||'')+'</span></div>';}).join('')+
-   '<button onclick="applyUpd(\''+t.id+'\')">应用这些知识更新</button>';}
- if(t.status==='finished'){h+=' <button class="ghost" onclick="saveExp(\''+t.id+'\')">存为实验</button>';}
+ if(upd.length){h+='<h4>待应用的知识更新</h4>'+upd.map(u=>{
+   const p=u.proposal;return '<label class="upd" style="display:block;cursor:pointer"><input type="checkbox" class="updbox" value="'+u.id+'" checked> '+
+   '<b>'+esc(u.concept)+'</b> <span class="arrow">'+(p.old_status?esc(p.old_status)+'/':'')+(p.old_confidence?esc(p.old_confidence)+' → ':'')+
+   esc(p.new_status)+'/'+esc(p.new_confidence)+'</span><br><span class="small">'+esc(p.claim||'')+'</span></label>';}).join('')+
+   '<div class="row"><button onclick="applyChecked(\''+t.id+'\')">应用选中的更新</button></div>';}
+ if(t.status==='finished'&&d.opportunities&&d.opportunities.length){
+  h+='<div class="row" style="margin-top:10px"><select id="oppSel">'+d.opportunities.map((o,i)=>'<option value="'+(i+1)+'">'+(i+1)+'. '+esc(o.slice(0,46))+'…</option>').join('')+'</select>'+
+  '<button class="ghost" onclick="saveExpPick(\''+t.id+'\')">存为实验</button></div>';}
  h+='</div><div class="brief">'+md(b)+'</div>';$('#resArea').innerHTML=h;}
-async function applyUpd(id){await jpost('/api/task/apply',{task_id:id});pollTask(id);}
-async function saveExp(id){const r=await jpost('/api/experiment/save',{task_id:id});
- alert(r.exp_id?('已保存为实验 #'+r.exp_id+'：'+r.hypothesis):(r.error||'保存失败'));}
+function applyChecked(id){const ids=[...document.querySelectorAll('.updbox:checked')].map(x=>+x.value);
+ if(!ids.length){alert('请先勾选要应用的更新');return;}
+ jpost('/api/task/apply',{task_id:id,update_ids:ids}).then(r=>{alert('已应用 '+r.count+' 条更新');pollTask(id);});}
+function saveExpPick(id){const pick=+$('#oppSel').value;
+ jpost('/api/experiment/save',{task_id:id,pick}).then(r=>{alert(r.exp_id?('已保存为实验 #'+r.exp_id):(r.error||'保存失败'));});}
 async function loadExp(){const d=await jget('/api/experiments');
  $('#eArea').innerHTML=(d.map(e=>'<div class="item"><b>#'+e.id+'</b> <span class="badge '+(e.build_status==='built'?'run':e.build_status==='failed'?'err':'')+'">'+e.build_status+'</span>'+
  '<div>'+esc((e.hypothesis||'').slice(0,80))+'</div>'+
- '<div class="small">task '+esc(e.task_id||'-')+'</div></div>').join(''))||'<p class="mut">（无实验）</p>';}
+ '<div class="small">task '+esc(e.task_id||'-')+'</div>'+
+ (e.output_dir?'<div class="small ok">'+esc(e.output_dir)+'</div>':'')+
+ '<div class="row" style="margin:6px 0 0"><button class="ghost" onclick="buildExp('+e.id+')">生成骨架</button></div></div>').join(''))||'<p class="mut">（无实验）</p>';}
+async function buildExp(id){const r=await jpost('/api/experiment/build',{exp_id:id});
+ alert(r.project?('骨架已生成：'+r.project):(r.error||'生成失败'));loadExp();}
 // ---- 选题 ----
 $('#frBtn').onclick=async()=>{$('#frNote').innerHTML='<span class="spin"></span>生成中…';
  try{
   const r=await jpost('/api/frontier',{},60000);$('#frNote').innerHTML='';
   if(r.error){$('#frNote').innerHTML='<span class="warn">'+esc(r.error)+'</span>';}
-  if(r.suggestions&&r.suggestions.length){$('#frArea').innerHTML=r.suggestions.map((s,i)=>'<div class="item" onclick="useTopic(\''+esc(s.topic).replace(/'/g,"\\'")+'\')">'+
- '<b>'+esc(s.topic)+'</b> <span class="badge">'+s.priority+'</span><br><span class="small">'+esc(s.why)+'</span></div>').join('');}
+  if(r.suggestions&&r.suggestions.length){$('#frArea').innerHTML=r.suggestions.map((s,i)=>{const t=esc(s.topic).replace(/'/g,"\\'");
+   return '<div class="item"><b>'+esc(s.topic)+'</b> <span class="badge">'+s.priority+'</span>'+
+   '<div class="small">'+esc(s.why)+'</div>'+
+   '<div class="row" style="margin:6px 0 0"><button class="ghost" onclick="researchTopic(\''+t+'\')">研究这条</button>'+
+   '<button class="ghost" onclick="useTopic(\''+t+'\')">填到研究框</button></div></div>';}).join('');}
   else{$('#frArea').innerHTML='<p class="warn">（无选题返回）</p>';}
  }catch(e){$('#frNote').innerHTML='<span class="warn">请求失败：'+esc(e.message||e)+'</span>';}};
 function useTopic(t){$('#goal').value=t;$('#tabs').querySelector('button[data-t=research]').click();}

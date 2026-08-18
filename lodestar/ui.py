@@ -109,6 +109,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, repo.list_concepts(ws.conn))
             finally:
                 ws.close()
+        if path == "/api/experiments":
+            ws = _ws()
+            try:
+                return self._send(200, repo.list_experiments(ws.conn))
+            finally:
+                ws.close()
         return self._send(404, {"error": "not found"})
 
     def do_POST(self):
@@ -156,6 +162,24 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 n = repo.seed_concepts(ws.conn, [{"name": nm, "status": "known", "confidence": "high"} for nm in names])
                 return self._send(200, {"seeded": n})
+            finally:
+                ws.close()
+        if path == "/api/experiment/save":
+            from lodestar.experiment import extract_opportunities
+            data = self._read_json()
+            ws = _ws()
+            try:
+                task = repo.get_task(ws.conn, data.get("task_id"))
+                if not task:
+                    return self._send(404, {"error": "task 不存在"})
+                opts = extract_opportunities(task.get("brief_md") or "")
+                if not opts:
+                    return self._send(400, {"error": "该任务无 Project Opportunities"})
+                idx = (int(data.get("pick") or 1)) - 1
+                idx = max(0, min(idx, len(opts) - 1))
+                exp_id = repo.add_experiment(ws.conn, opts[idx], task_id=task["id"],
+                                            description="(UI 保存)")
+                return self._send(200, {"exp_id": exp_id, "hypothesis": opts[idx][:80]})
             finally:
                 ws.close()
         return self._send(404, {"error": "not found"})
@@ -236,6 +260,7 @@ th{background:#22304a;color:var(--mut);font-weight:600}
 <button data-t="frontier">选题</button>
 <button data-t="knowledge">知识库</button>
 <button data-t="history">历史</button>
+<button data-t="experiment">实验</button>
 </div>
 <main>
 <div class="tab on" id="t-research">
@@ -250,6 +275,7 @@ th{background:#22304a;color:var(--mut);font-weight:600}
   <div id="kArea"></div>
 </div>
 <div class="tab" id="t-history"><div id="hArea"></div></div>
+<div class="tab" id="t-experiment"><button onclick="loadExp()" class="ghost">刷新</button><div id="eArea"></div></div>
 </main>
 <script>
 const $=s=>document.querySelector(s), api={g:p=>fetch(p).then(r=>r.json()),p:(p,b)=>fetch(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(r=>r.json())};
@@ -258,7 +284,7 @@ $('#tabs').onclick=e=>{const b=e.target.closest('button');if(!b)return;
  document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
  b.classList.add('on');$('#t-'+b.dataset.t).classList.add('on');
- if(b.dataset.t==='knowledge')loadK(); if(b.dataset.t==='history')loadH();};
+ if(b.dataset.t==='knowledge')loadK(); if(b.dataset.t==='history')loadH(); if(b.dataset.t==='experiment')loadExp();};
 api.g('/api/health').then(h=>$('#ver').textContent='v'+h.version);
 // ---- md 渲染（够用）----
 function md(t){if(!t)return'';t=t.replace(/&/g,'&amp;').replace(/</g,'&lt;');
@@ -287,8 +313,15 @@ function renderTask(d){const t=d.task,b=d.brief_md,upd=d.updates.filter(u=>u.sta
    (p.old_status?esc(p.old_status)+'/':'')+(p.old_confidence?esc(p.old_confidence)+' → ':'')+
    esc(p.new_status)+'/'+esc(p.new_confidence)+'</span><br><span class="small">'+esc(p.claim||'')+'</span></div>';}).join('')+
    '<button onclick="applyUpd(\''+t.id+'\')">应用这些知识更新</button>';}
+ if(t.status==='finished'){h+=' <button class="ghost" onclick="saveExp(\''+t.id+'\')">存为实验</button>';}
  h+='</div><div class="brief">'+md(b)+'</div>';$('#resArea').innerHTML=h;}
 async function applyUpd(id){await api.p('/api/task/apply',{task_id:id});pollTask(id);}
+async function saveExp(id){const r=await api.p('/api/experiment/save',{task_id:id});
+ alert(r.exp_id?('已保存为实验 #'+r.exp_id+'：'+r.hypothesis):(r.error||'保存失败'));}
+async function loadExp(){const d=await api.g('/api/experiments');
+ $('#eArea').innerHTML=(d.map(e=>'<div class="item"><b>#'+e.id+'</b> <span class="badge '+(e.build_status==='built'?'run':e.build_status==='failed'?'err':'')+'">'+e.build_status+'</span>'+
+ '<div>'+esc((e.hypothesis||'').slice(0,80))+'</div>'+
+ '<div class="small">task '+esc(e.task_id||'-')+'</div></div>').join(''))||'<p class="mut">（无实验）</p>';}
 // ---- 选题 ----
 $('#frBtn').onclick=async()=>{$('#frNote').innerHTML='<span class="spin"></span>生成中…';
  const r=await api.p('/api/frontier');$('#frNote').innerHTML='';

@@ -268,19 +268,19 @@ th{background:#22304a;color:var(--mut);font-weight:600}
 </style></head><body>
 <header><h1>Lodestar（导星）<span class="v" id="ver"></span></h1></header>
 <div class="tabs" id="tabs">
-<button data-t="research" class="on">研究</button>
-<button data-t="frontier">选题</button>
+<button data-t="frontier" class="on">选题</button>
+<button data-t="research">研究</button>
 <button data-t="knowledge">知识库</button>
 <button data-t="history">历史</button>
 <button data-t="experiment">实验</button>
 </div>
 <main>
-<div class="tab on" id="t-research">
+<div class="tab on" id="t-frontier"><div class="row"><button id="frBtn">生成本周选题</button><span class="mut small" id="frNote"></span></div><div id="frArea"></div></div>
+<div class="tab" id="t-research">
   <div class="card"><textarea id="goal" placeholder="研究目标，如：研究最近 Agent Memory 有哪些值得关注的新方向"></textarea>
   <div class="row"><button id="startBtn">开始研究</button><span class="mut small" id="runNote"></span></div></div>
   <div id="resArea"></div>
 </div>
-<div class="tab" id="t-frontier"><div class="row"><button id="frBtn">生成本周选题</button><span class="mut small" id="frNote"></span></div><div id="frArea"></div></div>
 <div class="tab" id="t-knowledge">
   <div class="card"><div class="row"><input type="text" id="kq" placeholder="搜索概念…（回车）"><button class="ghost" onclick="loadK()">搜索</button></div>
   <div class="row"><button id="kseedBtn" class="ghost">seed 已知概念</button><input type="text" id="kseed" placeholder="Agent,Skill,Eval…"></div></div>

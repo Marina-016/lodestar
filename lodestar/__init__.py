@@ -3,7 +3,7 @@
 Single Agent + Tools；确定性步骤走 Code；全程 Trace；Golden Case 驱动 Eval。
 """
 
-__version__ = "0.3.2"  # UI 修复：选题不卡死（错误兜底+前端超时）+ 版式对齐
+__version__ = "0.3.4"  # UI：Tab 顺序改为「先选题再研究」，选题为默认落地页；含选题降级/卡死修复
 
 # Agent 名称：Lodestar（导星）——引导研究方向、追踪 AI 前沿。
 # 改名只改这里，prompts/README 会引用。

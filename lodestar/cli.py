@@ -169,6 +169,41 @@ def _cmd_ui(args, cfg):
     serve(port=args.port, open_browser=not args.no_browser)
 
 
+def cmd_project(args, cfg):
+    """Projects：GitHub 摄入 + 进行中状态。"""
+    ws = Workspace(cfg)
+    try:
+        if args.action == "list":
+            rows = repo.list_projects(ws.conn)
+            if not rows:
+                print("暂无项目。用 `lodestar project add <github_url>` 登记。")
+            for p in rows:
+                print(f"#{p['id']} [{p['status']:<7}] {p['name']} — 技术栈: {','.join(p['tech_stack'][:6]) or '-'}")
+            return
+        if args.action == "add":
+            from lodestar.project import ingest_github
+            try:
+                info = ingest_github(args.url)
+            except Exception as e:  # noqa: BLE001
+                print(f"[error] 摄入失败：{e}")
+                sys.exit(1)
+            pid = repo.upsert_project(ws.conn, info["name"], url=info["url"],
+                                      description=info.get("description"),
+                                      tech_stack=info.get("tech_stack"),
+                                      status=args.status)
+            print(f"已登记项目 #{pid}：{info['name']}")
+            print(f"  描述: {(info.get('description') or '')[:80]}")
+            print(f"  技术栈: {', '.join(info.get('tech_stack') or []) or '-'}（最近 push: {info.get('last_push')}）")
+            print(f"  状态: {args.status}")
+            return
+        if args.action == "status":
+            repo.set_project_status(ws.conn, int(args.id), args.status)
+            print(f"项目 #{args.id} 状态 → {args.status}")
+            return
+    finally:
+        ws.close()
+
+
 def cmd_frontier(args, cfg):
     """V1：Weekly AI Frontier Research —— 基于 Knowledge State 推荐本周该研究什么。"""
     ws = Workspace(cfg)
@@ -324,6 +359,17 @@ def main(argv=None):
     pui.add_argument("--port", type=int, default=8123)
     pui.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
     pui.set_defaults(fn=lambda a, c: _cmd_ui(a, c))
+
+    pj = sub.add_parser("project", help="Projects：GitHub 摄入 + 进行中状态")
+    pjsub = pj.add_subparsers(dest="action", required=True)
+    pjsub.add_parser("list").set_defaults(fn=cmd_project)
+    pja = pjsub.add_parser("add")
+    pja.add_argument("url", help="GitHub 仓库链接")
+    pja.add_argument("--status", default="active", help="active|paused|archived|idea")
+    pjs = pjsub.add_parser("status")
+    pjs.add_argument("id", type=int)
+    pjs.add_argument("status", choices=["active", "paused", "archived", "idea"])
+    pj.set_defaults(fn=cmd_project)
 
     pe = sub.add_parser("experiment", help="V3：Research→Experiment→Build")
     exsub = pe.add_subparsers(dest="action", required=True)

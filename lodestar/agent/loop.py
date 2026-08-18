@@ -13,6 +13,7 @@ from lodestar import prompts
 from lodestar.agent import (assessor as assessor_mod, novelty as novelty_mod,
                                 planner as planner_mod, queries as queries_mod,
                                 reranker as reranker_mod, synthesizer as synthesizer_mod)
+from lodestar import relevance as relevance_mod
 from lodestar import venue as venue_mod
 from lodestar.llm import LLMClient, LLMError
 from lodestar.memory import repo
@@ -161,6 +162,15 @@ class ResearchAgent:
         applied = self._apply_updates(updates, apply)
         trace.log("knowledge_updates_applied", applied)
 
+        # 8.5 Project Relevance：把可验证方向映射到用户「进行中」项目（用户愿景：最新技术×项目现状自动结合）
+        opportunities = [f"{c['claim']}。验证方式：先固定 baseline 与 eval 指标，再比较 candidate。"
+                         for c in novelty.get("claims", []) if c.get("novelty") == "high"]
+        projects = repo.list_projects(ws.conn, status="active")
+        relevance = {"mappings": []}
+        if opportunities and projects:
+            relevance = relevance_mod.assess_relevance(cfg, self.llm, opportunities, projects)
+        trace.log("project_relevance", relevance)
+
         # 9. Brief + Finish
         metrics = {"queries": len(queries), "searches": searches,
                    "candidates_collected": len(candidates), "unique_sources": len(sources),
@@ -170,7 +180,7 @@ class ResearchAgent:
         for ks in key_sources:
             ks["read_depth"] = depth_by_url.get(ks["url"], "none")
         brief_md = brief_mod.render_brief(cfg, task_id, goal, plan, queries, key_sources, read_sources,
-                                          synthesis, novelty, knowledge_ctx, assess, metrics)
+                                          synthesis, novelty, knowledge_ctx, assess, metrics, relevance)
         repo.finish_task(ws.conn, task_id, brief_md, "finished", metrics)
         trace.log("finish", {"metrics": metrics, "workspace": str(cfg.workspace_dir / task_id)})
         trace.dump_jsonl()

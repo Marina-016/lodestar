@@ -143,6 +143,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, repo.list_experiments(ws.conn))
             finally:
                 ws.close()
+        if path == "/api/projects":
+            ws = _ws()
+            try:
+                return self._send(200, repo.list_projects(ws.conn))
+            finally:
+                ws.close()
         return self._send(404, {"error": "not found"})
 
     def do_POST(self):
@@ -202,6 +208,30 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 n = repo.seed_concepts(ws.conn, [{"name": nm, "status": "known", "confidence": "high"} for nm in names])
                 return self._send(200, {"seeded": n})
+            finally:
+                ws.close()
+        if path == "/api/project/add":
+            from lodestar.project import ingest_github
+            data = self._read_json()
+            try:
+                info = ingest_github(data.get("url") or "")
+            except Exception as e:  # noqa: BLE001
+                return self._send(200, {"error": f"摄入失败：{e}"})
+            ws = _ws()
+            try:
+                pid = repo.upsert_project(ws.conn, info["name"], url=info["url"],
+                                          description=info.get("description"),
+                                          tech_stack=info.get("tech_stack"),
+                                          status=data.get("status") or "active")
+                return self._send(200, {"id": pid, "name": info["name"], "tech_stack": info.get("tech_stack")})
+            finally:
+                ws.close()
+        if path == "/api/project/status":
+            data = self._read_json()
+            ws = _ws()
+            try:
+                repo.set_project_status(ws.conn, int(data.get("id")), data.get("status") or "idea")
+                return self._send(200, {"ok": True})
             finally:
                 ws.close()
         if path == "/api/quiz/start":
@@ -365,6 +395,7 @@ th{background:#22304a;color:var(--mut);font-weight:600}
 <button data-t="knowledge">知识库</button>
 <button data-t="history">历史</button>
 <button data-t="experiment">实验</button>
+<button data-t="project">项目</button>
 </div>
 <main>
 <div class="tab on" id="t-frontier"><div class="row"><button id="frBtn">生成本周选题</button><span class="mut small" id="frNote"></span></div><div id="frArea"></div></div>
@@ -382,6 +413,13 @@ th{background:#22304a;color:var(--mut);font-weight:600}
 </div>
 <div class="tab" id="t-history"><div id="hArea"></div></div>
 <div class="tab" id="t-experiment"><button onclick="loadExp()" class="ghost">刷新</button><div id="eArea"></div></div>
+<div class="tab" id="t-project">
+  <div class="card"><div class="row"><input type="text" id="purl" placeholder="GitHub 仓库链接，如 https://github.com/xxx/repo">
+  <button id="paddBtn" class="ghost">登记项目</button></div>
+  <div class="row"><label class="mut small">标记状态（研究只关联「active」）：</label>
+  <select id="pstatus"><option value="active">进行中</option><option value="paused">暂停</option><option value="archived">归档</option><option value="idea">想法</option></select></div></div>
+  <div id="pArea"></div>
+</div>
 </main>
 <script>
 const $=s=>document.querySelector(s);
@@ -395,7 +433,7 @@ $('#tabs').onclick=e=>{const b=e.target.closest('button');if(!b)return;
  document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
  b.classList.add('on');$('#t-'+b.dataset.t).classList.add('on');
- if(b.dataset.t==='knowledge')loadK(); if(b.dataset.t==='history')loadH(); if(b.dataset.t==='experiment')loadExp();};
+ if(b.dataset.t==='knowledge')loadK(); if(b.dataset.t==='history')loadH(); if(b.dataset.t==='experiment')loadExp(); if(b.dataset.t==='project')loadProjects();};
 jget('/api/health').then(h=>$('#ver').textContent='v'+h.version);
 // ---- md 渲染（够用）----
 function md(t){if(!t)return'';t=t.replace(/&/g,'&amp;').replace(/</g,'&lt;');
@@ -481,6 +519,20 @@ async function advanceQuiz(){quiz.idx++;
  const r=await jpost('/api/quiz/next',{concepts:quiz.concepts,index:quiz.idx},60000);
  if(r.error){$('#quizV').innerHTML='<span class="warn">'+esc(r.error)+'</span>';return;}
  showQuizQ(r.concept,r.question);}
+// ---- 项目 ----
+$('#paddBtn').onclick=projectAdd;
+async function loadProjects(){const d=await jget('/api/projects');
+ $('#pArea').innerHTML=(d.map(p=>'<div class="item"><b>'+esc(p.name)+'</b> <span class="badge '+(p.status==='active'?'run':'')+'">'+p.status+'</span>'+
+ (p.url?' <a href="'+esc(p.url)+'" target="_blank" style="color:var(--acc)">GitHub</a>':'')+
+ '<div class="small">'+esc((p.description||'').slice(0,80))+'</div>'+
+ '<div class="small">技术栈: '+esc((p.tech_stack||[]).slice(0,8).join(', '))+'</div>'+
+ '<div class="row" style="margin:6px 0 0"><select onchange="projectStatus('+p.id+',this.value)">'+
+ ['active','paused','archived','idea'].map(s=>'<option value="'+s+'"'+(p.status===s?' selected':'')+'>'+s+'</option>').join('')+
+ '</select></div></div>').join(''))||'<p class="mut">（无项目）登记一个 GitHub 仓库试试</p>';}
+async function projectAdd(){const url=$('#purl').value.trim();if(!url){alert('先填 GitHub 链接');return;}
+ const r=await jpost('/api/project/add',{url:url,status:$('#pstatus').value},90000);
+ if(r.error){alert(r.error);return;}alert('已登记 '+r.name+'（技术栈: '+(r.tech_stack||[]).join(', ')+'）');loadProjects();}
+function projectStatus(id,s){jpost('/api/project/status',{id:id,status:s}).then(loadProjects);}
 // ---- 知识库 ----
 async function loadK(){const q=$('#kq').value.trim();const d=await jget('/api/knowledge'+(q?'?q='+encodeURIComponent(q):''));
  $('#kArea').innerHTML=(d.map(c=>'<div class="item"><b>'+esc(c.name)+'</b><span class="badge">'+c.status+'/'+c.confidence+'</span>'+

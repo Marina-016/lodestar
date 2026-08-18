@@ -408,6 +408,16 @@ class MockLLM:
         t = MockLLM._TOPIC_LLM[MockLLM._topic(user)]
         return json.dumps({"claims": t["claims"], "overall_novelty": "medium"}, ensure_ascii=False)
 
+    # --- project_relevance：研究机会 × 用户项目 ---
+    @staticmethod
+    def _role_project_relevance(system: str, user: str) -> str:
+        names = re.findall(r"^- ([A-Za-z0-9_.\-/]+)（", user, flags=re.M)
+        first = names[0] if names else "（无项目）"
+        return json.dumps({"mappings": [{"opportunity_index": 0,
+                                         "applicable": [first],
+                                         "reason": f"mock 判定：该方向与项目 {first} 的技术栈/领域相关。"}]},
+                          ensure_ascii=False)
+
     # --- quiz：知识评估 ---
     @staticmethod
     def _role_quiz_question(system: str, user: str) -> str:

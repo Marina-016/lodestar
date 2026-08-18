@@ -31,7 +31,8 @@ def _sources_table(sources: list[dict]) -> str:
 
 def render_brief(cfg, task_id: str, goal: str, plan: dict, queries: list[dict], sources: list[dict],
                  read_sources: list[dict], synthesis: str, novelty: dict,
-                 knowledge_ctx: list[dict], assess: dict, metrics: dict) -> str:
+                 knowledge_ctx: list[dict], assess: dict, metrics: dict,
+                 relevance: dict | None = None) -> str:
     zh = cfg.brief_language == "zh"
     overall = NOVELTY_LABEL.get(novelty.get("overall_novelty"), novelty.get("overall_novelty"))
     claims = novelty.get("claims", [])
@@ -127,6 +128,20 @@ def render_brief(cfg, task_id: str, goal: str, plan: dict, queries: list[dict], 
             lines.append(f"- **可验证方向**：{c['claim']}。验证方式：先固定 baseline 与 eval 指标，再比较 candidate。")
     else:
         lines.append("- 本次未产生明显的高新颖可验证方向。")
+    lines.append("")
+
+    # Project Relevance（最新技术 × 用户进行中项目 自动结合）
+    lines += ["## Project Relevance", ""]
+    mappings = (relevance or {}).get("mappings") or []
+    if mappings:
+        for m in mappings:
+            idx = m.get("opportunity_index")
+            opp = f"方向 #{idx + 1}" if isinstance(idx, int) else "方向"
+            lines.append(f"- **{opp}** → 适用于：`{('`、`'.join(m.get('applicable') or []))}`")
+            if m.get("reason"):
+                lines.append(f"  - {m['reason']}")
+    else:
+        lines.append("- 当前无进行中项目匹配（可在「项目」中登记你的 GitHub 项目并标记进行中）。")
     lines.append("")
     lines.append(f"---\n*Lodestar · task_id={task_id} · llm_mode={cfg.llm_mode} · 生成时间见 Trace*")
     return "\n".join(lines)

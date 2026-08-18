@@ -237,6 +237,23 @@ class SmokeTestCase(unittest.TestCase):
         finally:
             server.shutdown()
 
+    def test_10_projects_relevance_offline(self):
+        """Projects：登记 active 项目后，mock 研究的 Brief 应含 Project Relevance 映射。"""
+        from lodestar.build import get_executor  # noqa: F401 (确认 import 链)
+        ws = Workspace(self.cfg)
+        try:
+            repo.upsert_project(ws.conn, "test-agent-proj", url="https://github.com/x/test-agent-proj",
+                                description="an agent project", tech_stack=["python", "agent", "llm"],
+                                status="active")
+            agent = ResearchAgent(ws, interactive=False)
+            res = agent.run(GOLDEN_GOAL, apply_updates=True)
+            self.assertIn("## Project Relevance", res["brief_md"])
+            self.assertIn("test-agent-proj", res["brief_md"], "机会应映射到 active 项目")
+            rows = repo.list_projects(ws.conn)
+            self.assertEqual(len(rows), 1)
+        finally:
+            ws.close()
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

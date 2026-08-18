@@ -293,6 +293,63 @@ def set_experiment_build(conn: sqlite3.Connection, exp_id: int, status: str, out
 
 
 # ----------------------------------------------------------------------
+# Projects（GitHub 摄入 + 进行中状态）
+# ----------------------------------------------------------------------
+PROJECT_STATUS = {"active", "paused", "archived", "idea"}
+
+
+def upsert_project(conn: sqlite3.Connection, name: str, url: str | None = None,
+                   description: str | None = None, tech_stack: list | None = None,
+                   status: str = "idea") -> int:
+    if status not in PROJECT_STATUS:
+        raise ValueError(f"非法 status={status!r}")
+    now = _now()
+    existing = conn.execute("SELECT id FROM projects WHERE name=?", (name,)).fetchone()
+    if existing:
+        conn.execute(
+            "UPDATE projects SET url=?, description=?, tech_stack=?, status=?, updated_at=? WHERE id=?",
+            (url, description, _dumps(tech_stack or []), status, now, existing["id"]),
+        )
+        conn.commit()
+        return existing["id"]
+    cur = conn.execute(
+        "INSERT INTO projects(name,url,description,tech_stack,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        (name, url, description, _dumps(tech_stack or []), status, now, now),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def list_projects(conn: sqlite3.Connection, status: str | None = None) -> list[dict]:
+    sql = "SELECT * FROM projects"
+    args: list = []
+    if status:
+        sql += " WHERE status=?"
+        args.append(status)
+    sql += " ORDER BY status='active' DESC, updated_at DESC"
+    rows = conn.execute(sql, args).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["tech_stack"] = _loads(d.get("tech_stack"), [])
+        out.append(d)
+    return out
+
+
+def get_project(conn: sqlite3.Connection, project_id: int) -> Optional[dict]:
+    row = conn.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def set_project_status(conn: sqlite3.Connection, project_id: int, status: str) -> None:
+    if status not in PROJECT_STATUS:
+        raise ValueError(f"非法 status={status!r}")
+    conn.execute("UPDATE projects SET status=?, updated_at=? WHERE id=?",
+                 (status, _now(), project_id))
+    conn.commit()
+
+
+# ----------------------------------------------------------------------
 # Eval
 # ----------------------------------------------------------------------
 def save_eval_run(conn: sqlite3.Connection, case_id: str, task_id: str, llm_mode: str,

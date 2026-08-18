@@ -121,6 +121,17 @@ CREATE TABLE IF NOT EXISTS experiments(
   built_at TEXT,
   FOREIGN KEY(task_id) REFERENCES research_tasks(id)
 );
+
+CREATE TABLE IF NOT EXISTS projects(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  url TEXT,
+  description TEXT,
+  tech_stack TEXT DEFAULT '[]',       -- json list[str]
+  status TEXT NOT NULL DEFAULT 'idea', -- active | paused | archived | idea
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 """
 
 

@@ -408,6 +408,20 @@ class MockLLM:
         t = MockLLM._TOPIC_LLM[MockLLM._topic(user)]
         return json.dumps({"claims": t["claims"], "overall_novelty": "medium"}, ensure_ascii=False)
 
+    # --- quiz：知识评估 ---
+    @staticmethod
+    def _role_quiz_question(system: str, user: str) -> str:
+        m = re.search(r"## 概念\s*\n(.+)", user)
+        concept = m.group(1).strip() if m else "该概念"
+        return json.dumps({"question": f"请解释「{concept}」的核心原理：它解决什么问题、核心技术路径是什么，"
+                                      "并给出一个实际应用或反例。"}, ensure_ascii=False)
+
+    @staticmethod
+    def _role_quiz_eval(system: str, user: str) -> str:
+        return json.dumps({"status": "partial", "confidence": "medium",
+                           "feedback": "mock 评估：回答有一定基础但细节不足，建议补充原理与边界。",
+                           "next_question": None}, ensure_ascii=False)
+
     # --- frontier：Weekly AI Frontier Research 策展 ---
     @staticmethod
     def _role_frontier(system: str, user: str) -> str:

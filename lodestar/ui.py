@@ -20,6 +20,8 @@ from lodestar.experiment import extract_opportunities, scaffold_experiment
 from lodestar.frontier import generate_frontier
 from lodestar.llm import LLMClient
 from lodestar.memory import repo
+from lodestar.quiz import evaluate_answer as quiz_evaluate
+from lodestar.quiz import generate_question as quiz_question
 
 _cfg = None
 _runners: dict = {}  # task_id -> Thread
@@ -27,6 +29,12 @@ _runners: dict = {}  # task_id -> Thread
 
 def _ws() -> Workspace:
     return Workspace(load_config())
+
+
+def _concepts_text(concepts: list[dict]) -> str:
+    if not concepts:
+        return "（空）"
+    return "；".join(f"{c['name']}[{c.get('status','?')}/{c.get('confidence','?')}]" for c in concepts[:30])
 
 
 # ----------------------------------------------------------------------
@@ -196,6 +204,54 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"seeded": n})
             finally:
                 ws.close()
+        if path == "/api/quiz/start":
+            data = self._read_json()
+            ws = _ws()
+            try:
+                names = data.get("concepts") or []
+                if not names:  # 自动挑：partial/unknown 优先，其次 notes 少的，最多 5 个
+                    allc = repo.list_concepts(ws.conn)
+                    ranked = sorted(allc, key=lambda c: (c["status"] not in {"partial", "unknown"}, c["status"] == "known", -len(c["notes"])))
+                    names = [c["name"] for c in ranked[:5]]
+                if not names:
+                    return self._send(200, {"error": "知识库为空，先 seed 或研究几次再评估"})
+                cfg = load_config(); cfg.llm_timeout_s = 40
+                ctx_txt = _concepts_text(repo.list_concepts(ws.conn))
+                q = quiz_question(cfg, LLMClient(cfg), names[0], ctx_txt)
+                return self._send(200, {"concepts": names, "index": 0, "concept": names[0], "question": q})
+            except Exception as e:  # noqa: BLE001
+                return self._send(200, {"error": f"出题失败：{e}"})
+            finally:
+                ws.close()
+        if path == "/api/quiz/answer":
+            data = self._read_json()
+            concept, question, answer = data.get("concept"), data.get("question"), data.get("answer")
+            if not answer or not answer.strip():
+                return self._send(400, {"error": "回答不能为空"})
+            ws = _ws()
+            try:
+                ctx_txt = _concepts_text(repo.list_concepts(ws.conn))
+                cfg = load_config(); cfg.llm_timeout_s = 40
+                try:
+                    verdict = quiz_evaluate(cfg, LLMClient(cfg), concept, question, answer, ctx_txt)
+                except Exception as e:  # noqa: BLE001
+                    return self._send(200, {"error": f"评估失败：{e}"})
+                repo.upsert_concept(ws.conn, concept, status=verdict["status"], confidence=verdict["confidence"],
+                                    append_note=f"[测评] {question[:40]}… → {verdict['status']}/{verdict['confidence']}。{verdict['feedback']}")
+                return self._send(200, verdict)
+            finally:
+                ws.close()
+        if path == "/api/quiz/next":
+            data = self._read_json()
+            names, idx = data.get("concepts") or [], int(data.get("index") or 0)
+            if idx >= len(names):
+                return self._send(200, {"done": True})
+            cfg = load_config(); cfg.llm_timeout_s = 40
+            try:
+                q = quiz_question(cfg, LLMClient(cfg), names[idx], "")
+                return self._send(200, {"concept": names[idx], "question": q, "done": False})
+            except Exception as e:  # noqa: BLE001
+                return self._send(200, {"error": f"出题失败：{e}"})
         if path == "/api/experiment/build":
             data = self._read_json()
             ws = _ws()
@@ -321,6 +377,8 @@ th{background:#22304a;color:var(--mut);font-weight:600}
   <div class="card"><div class="row"><input type="text" id="kq" placeholder="搜索概念…（回车）"><button class="ghost" onclick="loadK()">搜索</button></div>
   <div class="row"><button id="kseedBtn" class="ghost">seed 已知概念</button><input type="text" id="kseed" placeholder="Agent,Skill,Eval…"></div></div>
   <div id="kArea"></div>
+  <div class="card" style="margin-top:14px"><div class="row"><button id="quizBtn">评估我的掌握</button>
+  <span class="mut small">agent 出题 → 你回答 → 自动更新 Knowledge State</span></div><div id="quizArea"></div></div>
 </div>
 <div class="tab" id="t-history"><div id="hArea"></div></div>
 <div class="tab" id="t-experiment"><button onclick="loadExp()" class="ghost">刷新</button><div id="eArea"></div></div>
@@ -400,6 +458,29 @@ $('#frBtn').onclick=async()=>{$('#frNote').innerHTML='<span class="spin"></span>
   else{$('#frArea').innerHTML='<p class="warn">（无选题返回）</p>';}
  }catch(e){$('#frNote').innerHTML='<span class="warn">请求失败：'+esc(e.message||e)+'</span>';}};
 function useTopic(t){$('#goal').value=t;$('#tabs').querySelector('button[data-t=research]').click();}
+// ---- 知识评估（Quiz）----
+let quiz={concepts:[],idx:0,q:''};
+$('#quizBtn').onclick=quizStart;
+async function quizStart(){$('#quizNote').innerHTML='<span class="spin"></span>出题中…';
+ const r=await jpost('/api/quiz/start',{},60000);$('#quizNote').innerHTML='';
+ if(r.error){$('#quizNote').innerHTML='<span class="warn">'+esc(r.error)+'</span>';return;}
+ quiz={concepts:r.concepts,idx:0,q:r.question};showQuizQ(r.concept,r.question);}
+function showQuizQ(c,q){quiz.q=q;
+ $('#quizArea').innerHTML='<div class="card"><b>'+esc(c)+'</b>：'+esc(q)+
+ '<br><textarea id="quizA" placeholder="你的回答…" style="margin-top:8px"></textarea>'+
+ '<div class="row"><button onclick="quizSubmit()">提交评估</button><span class="mut small" id="quizV"></span></div></div>';}
+async function quizSubmit(){const a=$('#quizA').value.trim();if(!a){alert('先写点回答');return;}
+ const c=quiz.concepts[quiz.idx];$('#quizV').innerHTML='<span class="spin"></span>评估中…';
+ const r=await jpost('/api/quiz/answer',{concept:c,question:quiz.q,answer:a},60000);
+ if(r.error){$('#quizV').innerHTML='<span class="warn">'+esc(r.error)+'</span>';return;}
+ $('#quizV').innerHTML='<span class="ok">'+r.status+'/'+r.confidence+'</span> '+esc(r.feedback||'');
+ if(r.next_question){showQuizQ(c,r.next_question);}else{advanceQuiz();}}
+async function advanceQuiz(){quiz.idx++;
+ if(quiz.idx>=quiz.concepts.length){$('#quizArea').innerHTML='<p class="ok">本轮评估完成（'+quiz.concepts.length+' 个概念），Knowledge State 已更新。</p>';return;}
+ $('#quizV').innerHTML='<span class="spin"></span>下一题…';
+ const r=await jpost('/api/quiz/next',{concepts:quiz.concepts,index:quiz.idx},60000);
+ if(r.error){$('#quizV').innerHTML='<span class="warn">'+esc(r.error)+'</span>';return;}
+ showQuizQ(r.concept,r.question);}
 // ---- 知识库 ----
 async function loadK(){const q=$('#kq').value.trim();const d=await jget('/api/knowledge'+(q?'?q='+encodeURIComponent(q):''));
  $('#kArea').innerHTML=(d.map(c=>'<div class="item"><b>'+esc(c.name)+'</b><span class="badge">'+c.status+'/'+c.confidence+'</span>'+

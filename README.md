@@ -59,6 +59,9 @@ python -m lodestar experiment list
 python -m lodestar experiment save <task_id>          # 从 Brief 的 Project Opportunities 提取
 python -m lodestar experiment build <exp_id> --out /tmp/exp  # scaffold + codex 实现 baseline/candidate
 python -m lodestar experiment build <exp_id> --scaffold-only  # 仅确定性骨架
+
+# V1：Weekly AI Frontier Research（基于 Knowledge State 推荐本周该研究什么）
+python -m lodestar frontier            # 可选 --save 存报告
 ```
 
 ## 产物位置

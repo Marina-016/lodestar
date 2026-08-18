@@ -6,11 +6,12 @@ import json
 import sys
 from pathlib import Path
 
-from lodestar import __version__, experiment as experiment_mod
+from lodestar import __version__, experiment as experiment_mod, frontier as frontier_mod
 from lodestar.agent.loop import ResearchAgent
 from lodestar.config import load_config
 from lodestar.context import Workspace
 from lodestar.eval.runner import run_all
+from lodestar.llm import LLMClient
 from lodestar.memory import repo
 
 
@@ -163,6 +164,32 @@ def cmd_build(args, cfg):
     print(r.output[:4000])
 
 
+def cmd_frontier(args, cfg):
+    """V1：Weekly AI Frontier Research —— 基于 Knowledge State 推荐本周该研究什么。"""
+    ws = Workspace(cfg)
+    try:
+        knowledge_ctx = repo.list_concepts(ws.conn)
+        recent_tasks = [dict(r) for r in ws.conn.execute(
+            "SELECT goal, created_at FROM research_tasks WHERE status='finished' ORDER BY created_at DESC LIMIT 5"
+        ).fetchall()]
+        llm = LLMClient(cfg)
+        report = frontier_mod.generate_frontier(cfg, llm, knowledge_ctx, recent_tasks)
+        print(f"# Weekly AI Frontier Research\n")
+        for i, s in enumerate(report["suggestions"], 1):
+            print(f"## {i}. {s['topic']}")
+            print(f"**优先级**：{s['priority']}")
+            print(f"\n{s['why']}\n")
+        if args.save:
+            p = cfg.workspace_dir / f"frontier_{ws.new_task_id()}.md"
+            p.write_text("\n\n".join(
+                f"# {s['topic']}\n**优先级**：{s['priority']}\n\n{s['why']}"
+                for s in report["suggestions"]
+            ), encoding="utf-8")
+            print(f"已保存：{p}")
+    finally:
+        ws.close()
+
+
 def cmd_experiment(args, cfg):
     """V3：Research → Experiment → Build。"""
     ws = Workspace(cfg)
@@ -282,6 +309,11 @@ def main(argv=None):
     pb.add_argument("--executor", default=None, help="claude | codex | auto（缺省用 config.build_executor）")
     pb.add_argument("--timeout", type=int, default=300)
     pb.set_defaults(fn=cmd_build)
+
+    pf = sub.add_parser("frontier", help="V1：Weekly AI Frontier —— 基于 Knowledge State 推荐本周该研究什么")
+    pf.add_argument("--save", action="store_true", help="保存报告到 workspace/")
+    pf.add_argument("--mock", action="store_true", help="LLM 用离线夹具")
+    pf.set_defaults(fn=cmd_frontier)
 
     pe = sub.add_parser("experiment", help="V3：Research→Experiment→Build")
     exsub = pe.add_subparsers(dest="action", required=True)

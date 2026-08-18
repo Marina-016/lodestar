@@ -194,6 +194,21 @@ class SmokeTestCase(unittest.TestCase):
                            cwd=str(project), timeout=30)
         self.assertEqual(r.returncode, 0, f"eval.py 应能跑通：{r.stderr}")
 
+    def test_08_frontier_offline(self):
+        """V1：Weekly AI Frontier —— mock LLM 返回 3 条建议。"""
+        from lodestar import frontier as frontier_mod
+        from lodestar.llm import LLMClient
+        cfg2 = Config(llm_mode="mock", db_path=Path(self.tmp) / "fr.db",
+                      workspace_dir=Path(self.tmp) / "ws_fr", cases_dir=self.cfg.cases_dir)
+        llm = LLMClient(cfg2)
+        report = frontier_mod.generate_frontier(cfg2, llm,
+                                                knowledge_ctx=[{"name": "Memory", "status": "known"}],
+                                                recent_tasks=[])
+        self.assertEqual(len(report["suggestions"]), 3)
+        for s in report["suggestions"]:
+            self.assertTrue(s["topic"] and s["why"])
+            self.assertIn(s["priority"], {"high", "medium", "low"})
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

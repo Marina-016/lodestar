@@ -214,14 +214,14 @@ Lodestar/                          ← 项目根（2026-08-17 由 lodestar 改�
 2. Trace 全链路落库 + JSONL。
 3. Eval：golden case + runner + 指标，`lodestar eval` 可离线回归。
 4. HITL：knowledge 更新默认交互确认。
-5. 不做：UI、GitHub/项目文件读取、Experiment 创建（V2）、自演进（V4）。
+5. 本节记录最初 V0 的交付边界；截至 v0.4.7，UI、Projects、Weekly Frontier 与 Experiment → Build 已补齐，仍不包含 GitHub/项目文件内容检索、自演进（V4）和自动过期重审。
 
 ---
 
 ## 六、V1 需求池
 
 > 入口原则（PRD §26 ⑤）：每个新能力都必须带 Eval 配套，否则不进 V1。
-> 状态：**V1-R1 已实现（v0.1.1，2026-08-17）**；V1-R2 待排期。来源：V0 评审记录的缺口 A1 论文侧 + A2 读取深度。
+> 状态：**V1-R1 已实现（v0.1.1，2026-08-17）**；**V1-R2 已实现（v0.1.5）**。来源：V0 评审记录的缺口 A1 论文侧 + A2 读取深度。
 
 ### V1-R1 来源元数据补齐：journal / venue —— ✅ 已实现
 

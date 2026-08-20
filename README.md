@@ -1,4 +1,4 @@
-# Lodestar — AI 前沿技术 Research & Build Workspace Agent (V0)
+# Lodestar — AI 前沿技术 Research & Build Workspace Agent (v0.4.7)
 
 **Agent 名：Lodestar（导星）** —— 引导研究方向、追踪 AI 前沿。
 
@@ -106,11 +106,11 @@ cd <项目目录> && python -m lodestar research "<目标>"      # 或安装后�
 - ✅ **V1-R2 已实现（v0.1.5）**：**PDF 全文读取**——`read_paper` 支持 arXiv + 通用 `.pdf`；下载缓存到 `workspace/pdfs_cache/`（gitignore），PyMuPDF 解析后**按节递进**（Abstract/Introduction/Method/Experiments）；**token 预算守护**：默认关（`LODESTAR_FULL_TEXT=true` 开启，仅 Top 2 来源读全文，assess 证据不足补搜时读 Top 1）；PyMuPDF 缺失/下载失败/扫描件 → 优雅降级回 abstract 级。
 - Web 搜索后端为 DuckDuckGo Lite（零 Key）；搜索后端接口化，可换 Brave/Serper。
 - `knowledge rollback` 只恢复 status/confidence，追加的笔记作为审计痕迹保留。
-- 未做：UI、Experiment 闭环、GitHub/项目文件检索、自演进（V4）、自动过期重审（B4 缺口，V1）。
+- 当前仍未做：GitHub/项目文件内容检索、自演进（V4）、自动过期重审（B4 缺口）。UI、项目登记、Weekly Frontier 与 Experiment 闭环已在本版本提供。
 - **Mock 模式（`--mock` / `--offline`）输出为管道验证夹具，不代表真实研究质量。**
 
 ## Roadmap
 
-- **V0（当前）**：Research —— Plan → Search → Rerank → Read(abstract) → Synthesis → Knowledge Update，含 Trace + Eval。
-- **V1（进行中）**：V1-R1 journal/venue 补齐 ✅；V1-R2 PDF 全文读取 ✅；Weekly AI Frontier Research。
+- **v0.4.7（当前发布候选）**：Research —— Plan → Search → Rerank → Read → Synthesis → Knowledge Update，含 Trace + Eval；并提供 UI、Projects、Weekly Frontier 与 Experiment → Build 闭环。
+- **V1/V4 后续**：更强的 GitHub/项目文件检索、自演进与自动过期重审。
 - **V3 最小闭环（已实现 ✅）**：Research Brief → Project Opportunities → Save Experiment → Scaffold + codex Build（A/B eval harness）。

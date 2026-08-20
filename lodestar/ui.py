@@ -354,7 +354,7 @@ PAGE_HTML = r"""<!doctype html>
 <style>
 :root{--bg:#0a0e14;--card:#111620;--line:#1e2736;--fg:#e0e4ec;--mut:#6b7280;--acc:#e8943a;--acc-dim:#a06830;--ok:#5b8c5a;--warn:#c0784a}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.65 "Inter","Segoe UI",system-ui,sans-serif;letter-spacing:-.002em}body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;background-image:radial-gradient(circle,var(--line) 1px,transparent 1px);background-size:44px 44px;opacity:.18}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.65 "Inter","Segoe UI",system-ui,sans-serif;letter-spacing:-.002em}body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;background-image:radial-gradient(circle,var(--line) 1px,transparent 1px);background-size:44px 44px;opacity:.18}[data-theme=light] body::before{opacity:.06}body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:-1;background:var(--bg)}
 header{display:flex;align-items:baseline;gap:12px;padding:20px 28px 0}
 header h1{font-size:15px;margin:0;font-weight:600;color:var(--fg);letter-spacing:.01em}header h1::before{content:'✦';color:var(--acc);font-size:16px;margin-right:7px;vertical-align:-1px}
 header .v{color:var(--mut);font-size:11px;font-weight:400}
@@ -395,8 +395,8 @@ th{background:var(--bg);color:var(--mut);font-weight:600;font-size:11px;letter-s
 .row{display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap}
 .row input[type=text]{width:auto;flex:1;min-width:140px}
 .row .mut{white-space:nowrap}::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}::-webkit-scrollbar-thumb:hover{background:var(--mut)}
-</style></head><body>
-<header><h1>Lodestar（导星）<span class="v" id="ver"></span></h1></header>
+[data-theme=light]{--bg:#f5f3f0;--card:#ffffff;--line:#e0dcd6;--fg:#1a1a1a;--mut:#6b6560;--acc:#c47a20;--acc-dim:#8c5a1a;--ok:#3d7a4a;--warn:#b85a20}body{position:relative;z-index:1}main,header,.tabs{position:relative;z-index:1}.card,.item{position:relative;z-index:1}</style></head><body>
+<header><h1>Lodestar（导星）<span class="v" id="ver"></span></h1><button class="ghost" id="themeBtn" onclick="toggleTheme()" style="font-size:11px;padding:3px 10px;margin-left:auto" title="切换浅色/深色主题">☀</button></header>
 <div class="tabs" id="tabs">
 <button data-t="frontier" class="on">选题</button>
 <button data-t="research">研究</button>
@@ -406,7 +406,7 @@ th{background:var(--bg);color:var(--mut);font-weight:600;font-size:11px;letter-s
 <button data-t="project">项目</button>
 </div>
 <main>
-<div class="tab on" id="t-frontier"><div class="row"><button id="frBtn">生成本周选题</button><span class="mut small" id="frNote"></span></div><div id="frArea"></div></div>
+<div class="tab on" id="t-frontier"><div class="card"><p class="mut small" style="margin:0 0 10px">基于你的 Knowledge State 和进行中项目，推荐本周值得研究的 3 个方向。点击建议可直接开始研究。</p><div class="row"><button id="frBtn">生成本周选题</button><span class="mut small" id="frNote"></span></div></div><div id="frArea"></div></div>
 <div class="tab" id="t-research">
   <div class="card"><textarea id="goal" placeholder="研究目标，如：研究最近 Agent Memory 有哪些值得关注的新方向"></textarea>
   <div class="row"><button id="startBtn">开始研究</button><span class="mut small" id="runNote"></span></div></div>
@@ -430,6 +430,7 @@ th{background:var(--bg);color:var(--mut);font-weight:600;font-size:11px;letter-s
 </div>
 </main>
 <script>
+function toggleTheme(){const h=document.documentElement;const cur=h.getAttribute("data-theme");const nxt=cur==="light"?"":"light";h.setAttribute("data-theme",nxt);localStorage.setItem("lodestar-theme",nxt);document.querySelector("#themeBtn").textContent=nxt==="light"?"☾":"☀"}if(localStorage.getItem("lodestar-theme")==="light"){document.documentElement.setAttribute("data-theme","light")}
 const $=s=>document.querySelector(s);
 async function jget(p,t){const c=new AbortController();const to=setTimeout(()=>c.abort(),t||120000);
  const r=await fetch(p,{signal:c.signal});clearTimeout(to);if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}

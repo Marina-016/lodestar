@@ -448,7 +448,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 [data-theme=light] .badge.err{background:#f8e8e2;color:#9b4c25;border-color:#d59d84}
 [data-theme=light] th{background:#f0ebe3}
 [data-theme=light] .small.ok{color:var(--ok)}
-[data-theme=light] .small.warn{color:var(--warn)}</style></head><body>
+[data-theme=light] .small.warn{color:var(--warn)}[data-theme=light] button.primary{background:#b5671f;color:#fffaf2;border-color:#b5671f;font-weight:800;text-shadow:0 1px 1px rgba(66,30,8,.18)}[data-theme=light] button.primary:hover{background:#9f5718;color:#fffaf2}[data-theme=light] .stat strong{font-size:30px;font-weight:800;color:#211c16;letter-spacing:-.02em}[data-theme=light] .stat span:not(.stat-caption){color:#211c16;font-size:13px;font-weight:750;letter-spacing:.01em}[data-theme=light] .stat .stat-caption{color:#50483f;font-size:11px;font-weight:600}</style></head><body>
 <header><h1>Lodestar（导星）<span class="v" id="ver"></span></h1><button class="ghost" id="themeBtn" onclick="toggleTheme()" style="font-size:11px;padding:3px 10px;margin-left:auto" title="切换浅色/深色主题">☀</button></header>
 <div class="tabs" id="tabs" role="tablist" aria-label="Lodestar 工作区">
 <button data-t="frontier" class="on">选题</button>

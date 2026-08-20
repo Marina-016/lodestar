@@ -128,12 +128,25 @@ class Handler(BaseHTTPRequestHandler):
             finally:
                 ws.close()
         if path == "/api/tasks":
+            demo_only = parse_qs(urlparse(self.path).query).get("demo", ["0"])[0] == "1"
             ws = _ws()
             try:
                 rows = ws.conn.execute(
-                    "SELECT id,goal,status,created_at,finished_at FROM research_tasks "
-                    "ORDER BY created_at DESC LIMIT 20").fetchall()
-                return self._send(200, [dict(r) for r in rows])
+                    "SELECT id,goal,status,created_at,finished_at,plan FROM research_tasks "
+                    "ORDER BY created_at DESC LIMIT 100").fetchall()
+                items = []
+                for row in rows:
+                    item = dict(row)
+                    try:
+                        item["demo"] = bool(json.loads(item.pop("plan") or "{}").get("demo"))
+                    except (TypeError, ValueError):
+                        item.pop("plan", None)
+                        item["demo"] = False
+                    if not demo_only or item["demo"]:
+                        items.append(item)
+                    if len(items) >= 20:
+                        break
+                return self._send(200, items)
             finally:
                 ws.close()
         if path.startswith("/api/task/"):
@@ -380,7 +393,7 @@ header .v{color:var(--mut);font-size:11px;font-weight:400}
 .tabs button.on{color:var(--acc);font-weight:600;transform:none;text-shadow:0 0 12px rgba(232,148,58,.15)}
 .tabs button.on::after{opacity:1}
 main{padding:28px;max-width:960px;margin:0 auto}
-.tab{display:none}.tab.on{display:block}
+.tab{display:none}.tab.on{display:block}.tab.on>.section-head,.tab.on>.hero,.tab.on>.card,.tab.on>#hArea,.tab.on>#eSummary,.tab.on>#eArea,.tab.on>#pArea{animation:rise-in .42s cubic-bezier(.2,.7,.2,1) both}.tab.on>.section-head{animation-delay:30ms}.tab.on>.card{animation-delay:70ms}.tab.on>#hArea,.tab.on>#eArea,.tab.on>#pArea{animation-delay:110ms}
 .card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:20px 24px;margin-bottom:18px;transition:border-color .25s}.card:hover{border-color:var(--acc-dim)}
 textarea{width:100%;min-height:72px;background:var(--bg);border:1px solid var(--line);color:var(--fg);border-radius:6px;padding:12px 14px;font:inherit;resize:vertical;transition:border-color .15s}
 textarea:focus,input[type=text]:focus,select:focus{outline:none;border-color:var(--acc-dim);box-shadow:0 0 0 2px rgba(232,148,58,.08)}
@@ -392,7 +405,7 @@ button:disabled{opacity:.35;cursor:wait}
 select{appearance:none;background-color:var(--card);background-image:linear-gradient(45deg,transparent 50%,var(--acc) 50%),linear-gradient(135deg,var(--acc) 50%,transparent 50%);background-position:calc(100% - 15px) 50%,calc(100% - 10px) 50%;background-size:5px 5px,5px 5px;background-repeat:no-repeat;border:1px solid var(--hair);color:var(--fg);border-radius:8px;padding:9px 34px 9px 12px;font:inherit;font-size:13px;min-height:38px}::placeholder{color:var(--mut);opacity:.82}
 .mut{color:var(--mut)}.ok{color:var(--ok)}.warn{color:var(--warn)}
 .item{background:var(--card);border:1px solid var(--line);border-left:3px solid transparent;border-radius:6px;padding:14px 18px;margin-bottom:10px;cursor:pointer;transition:border-color .12s,border-left-color .2s}
-.item:hover{border-color:var(--acc-dim);border-left-color:var(--acc)}.frontier-item{padding:18px 20px;border-left:0}.frontier-top{display:flex;align-items:center;justify-content:space-between;gap:10px}.frontier-item h3{margin:9px 0 5px;font-size:16px;line-height:1.4;color:var(--fg)}.frontier-meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:13px}.frontier-meta span{padding:4px 8px;background:var(--bg);border:1px solid var(--line);border-radius:5px;color:var(--mut);font-size:11px}.frontier-item .row{margin-top:14px}
+.item:hover{border-color:var(--acc-dim);border-left-color:var(--acc)}.frontier-item{padding:18px 20px;border-left:0;animation:rise-in .48s cubic-bezier(.2,.7,.2,1) both;animation-delay:var(--delay,0ms)}.frontier-top{display:flex;align-items:center;justify-content:space-between;gap:10px}.frontier-item h3{margin:9px 0 5px;font-size:16px;line-height:1.4;color:var(--fg)}.frontier-meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:13px}.frontier-meta span{padding:4px 8px;background:var(--bg);border:1px solid var(--line);border-radius:5px;color:var(--mut);font-size:11px}.frontier-item .row{margin-top:14px}
 .small{font-size:12px;color:var(--mut);font-weight:500}.small.ok{color:var(--ok)}.small.warn{color:var(--warn)}
 .badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10.5px;background:var(--bg);color:var(--mut);margin-left:6px;border:1px solid var(--line);letter-spacing:.02em;font-weight:600}
 .badge.run{background:#132618;color:var(--ok);border-color:var(--ok)}.badge.err{background:#241414;color:#e87a7a;border-color:#e87a7a}
@@ -405,7 +418,7 @@ th{background:var(--bg);color:var(--mut);font-weight:600;font-size:11px;letter-s
 .brief a{color:var(--acc)}.brief p{margin:8px 0;line-height:1.7}.brief ul,.brief ol{padding-left:20px;margin:8px 0}.brief li{margin:4px 0}.brief strong{color:var(--fg);font-weight:600}.brief blockquote{border-left:3px solid var(--acc-dim);margin:12px 0;padding:4px 14px;color:var(--mut);font-style:italic}.brief code{background:var(--bg);padding:2px 6px;border-radius:3px;font-size:12.5px;color:var(--acc)}.brief pre{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:14px 16px;overflow-x:auto;font-size:12.5px;line-height:1.5;margin:10px 0}.brief pre code{background:none;padding:0;color:var(--fg)}
 .upd{border:1px solid var(--line);border-radius:6px;padding:12px 14px;margin-bottom:8px}
 .upd .arrow{color:var(--mut)}
-@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes spin{to{transform:rotate(360deg)}}@keyframes rise-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 .spin{display:inline-block;width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--acc);border-radius:50%;animation:spin 1s linear infinite;vertical-align:-2px;margin-right:6px}
 .row{display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap}
 .row input[type=text]{width:auto;flex:1;min-width:140px}
@@ -473,7 +486,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
   <div class="card" style="margin-top:14px"><div class="row"><button class="primary" id="quizBtn">评估我的掌握</button>
   <span class="mut small" id="quizNote">agent 出题 → 你回答 → 自动更新 Knowledge State</span></div><div id="quizArea"></div></div>
 </div>
-<div class="tab" id="t-history"><div class="section-head"><div><div class="eyebrow">RESEARCH LOG</div><h2>研究历史</h2><p>每一次研究都留下问题、来源和下一步动作。</p></div></div><div id="hArea"></div></div>
+<div class="tab" id="t-history"><div class="section-head"><div><div class="eyebrow">RESEARCH LOG</div><h2>研究历史</h2><p>每一次研究都留下问题、来源和下一步动作。</p></div><button id="historyDemoBtn" class="ghost" onclick="toggleHistoryDemo()">只看演示数据</button></div><div id="hArea"></div></div>
 <div class="tab" id="t-experiment"><div class="section-head"><div><div class="eyebrow">EXPERIMENT LAB</div><h2>从研究结论到可运行骨架</h2><p>每个实验都保留假设、来源任务和可复现的 A/B 验证入口。</p></div><button onclick="loadExp()" class="ghost">刷新实验</button></div><div id="eSummary"></div><div id="eArea"></div></div>
 <div class="tab" id="t-project"><div class="section-head"><div><div class="eyebrow">PROJECTS</div><h2>进行中的项目</h2><p>把研究问题、代码仓库与实验骨架放在同一处管理。</p></div></div>
   <div class="card"><div class="row"><input type="text" id="purl" placeholder="GitHub 仓库链接，如 https://github.com/xxx/repo">
@@ -485,7 +498,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 </main>
 <script>
 function updateThemeLabel(){const light=document.documentElement.getAttribute("data-theme")==="light";document.querySelector("#themeBtn").textContent=light?"☾ 深色":"☀ 浅色";}function toggleTheme(){const h=document.documentElement;const cur=h.getAttribute("data-theme");const nxt=cur==="light"?"":"light";h.setAttribute("data-theme",nxt);localStorage.setItem("lodestar-theme",nxt);updateThemeLabel();}if(localStorage.getItem("lodestar-theme")==="light"){document.documentElement.setAttribute("data-theme","light")}updateThemeLabel();
-const $=s=>document.querySelector(s);
+const $=s=>document.querySelector(s);let historyDemoOnly=false;function formatDateTime(value){if(!value)return "时间未知";const d=new Date(value);if(Number.isNaN(d.getTime()))return value;const parts=new Intl.DateTimeFormat("zh-CN",{timeZone:"Asia/Shanghai",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false}).formatToParts(d);const pick=k=>parts.find(p=>p.type===k)?.value||"";const y=pick("year"),m=pick("month"),day=pick("day"),h=pick("hour"),min=pick("minute");const today=new Intl.DateTimeFormat("zh-CN",{timeZone:"Asia/Shanghai",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());const current=new Intl.DateTimeFormat("zh-CN",{timeZone:"Asia/Shanghai",year:"numeric",month:"2-digit",day:"2-digit"}).format(d);return current===today?"今天 "+h+":"+min:y+"年"+m+"月"+day+"日 "+h+":"+min;}function formatTaskStatus(value){return ({finished:"已完成",running:"研究中",error:"失败",pending:"待处理"})[value]||value||"未知";}function toggleHistoryDemo(){historyDemoOnly=!historyDemoOnly;$("#historyDemoBtn").textContent=historyDemoOnly?"查看全部历史":"只看演示数据";loadH();}
 function goResearch(){$('#tabs').querySelector('button[data-t=research]').click();setTimeout(()=>$('#goal').focus(),0);}
 async function loadSummary(){try{const s=await jget('/api/summary');$('#statTasks').textContent=s.tasks;$('#statKnowledge').textContent=s.knowledge;$('#statProjects').textContent=s.projects;}catch(e){}}
 async function jget(p,t){const c=new AbortController();const to=setTimeout(()=>c.abort(),t||120000);
@@ -542,11 +555,11 @@ function applyChecked(id){const ids=[...document.querySelectorAll('.updbox:check
  jpost('/api/task/apply',{task_id:id,update_ids:ids}).then(r=>{alert('已应用 '+r.count+' 条更新');pollTask(id);});}
 function saveExpPick(id){const pick=+$("#oppSel").value;const row=$("#experimentSaveRow");if(!row)return;row.insertAdjacentHTML("beforeend","<span class=\"small\">保存中…</span>");jpost("/api/experiment/save",{task_id:id,pick}).then(r=>{if(r.error){row.innerHTML="<span class=\"warn\">"+esc(r.error)+"</span>";return;}row.innerHTML="<div class=\"save-confirm\"><span class=\"save-check\">✓</span><div class=\"save-copy\"><strong>已保存为实验 #"+r.exp_id+"</strong><span>"+esc(r.hypothesis||"")+"</span></div><button class=\"primary\" onclick=\"openExperiment("+r.exp_id+")\">查看实验</button></div>";}).catch(e=>{row.innerHTML="<span class=\"warn\">保存失败："+esc(e.message||e)+"</span>";});}
 function openExperiment(id){document.querySelector("#tabs button[data-t=experiment]").click();setTimeout(()=>loadExp(id),0);}
-async function loadExp(focusId){const d=await jget("/api/experiments");const built=d.filter(e=>e.build_status==="built").length;const draft=d.length-built;document.querySelector("#eSummary").innerHTML=`<div class="exp-summary"><div class="exp-summary-card"><strong>${d.length}</strong><span>全部实验</span></div><div class="exp-summary-card"><strong>${built}</strong><span>已生成骨架</span></div><div class="exp-summary-card"><strong>${draft}</strong><span>待验证假设</span></div></div>`;document.querySelector("#eArea").innerHTML=(d.map(e=>{const files=e.files||[];const fileHtml=files.length?`<div class="file-list">${files.map(f=>`<span>${esc(f)}</span>`).join("")}</div>`:"";const path=e.output_dir?`<div class="path-chip">骨架目录 · ${esc(e.output_dir)}</div>`:"";const taskLink=e.task_id?`<button class="ghost" onclick="openTask(&quot;${esc(e.task_id)}&quot;)">查看研究</button>`:"";return `<article class="exp-card ${focusId==e.id?"focus":""}" id="exp-${e.id}"><div class="exp-top"><div><span class="exp-index">EXPERIMENT #${e.id}</span> <span class="badge ${e.build_status==="built"?"run":e.build_status==="failed"?"err":""}">${esc(e.build_status)}</span></div><span class="small">${esc(e.created_at||"")}</span></div><h3>${esc(e.hypothesis||"未命名实验")}</h3><p class="exp-description">${esc(e.description||"从研究 Brief 提取的可验证假设，等待生成 A/B 骨架。")}</p><div class="exp-meta"><span>来源任务 ${esc(e.task_id||"—")}</span><span>${e.build_status==="built"?"已具备可运行目录":"下一步：生成骨架并运行 eval.py"}</span></div>${path}${fileHtml}<div class="exp-actions">${taskLink}<button class="primary" onclick="buildExp(${e.id})">${e.build_status==="built"?"重新生成骨架":"生成骨架"}</button><span class="exp-feedback" id="exp-feedback-${e.id}"></span></div></article>`}).join(""))||`<div class="empty"><span class="empty-mark">✦</span>还没有实验，从研究 Brief 的 Project Opportunities 保存一个假设吧。</div>`;if(focusId){const node=document.querySelector("#exp-"+focusId);if(node){node.scrollIntoView({behavior:"smooth",block:"center"});}}}
+async function loadExp(focusId){const d=await jget("/api/experiments");const built=d.filter(e=>e.build_status==="built").length;const draft=d.length-built;document.querySelector("#eSummary").innerHTML=`<div class="exp-summary"><div class="exp-summary-card"><strong>${d.length}</strong><span>全部实验</span></div><div class="exp-summary-card"><strong>${built}</strong><span>已生成骨架</span></div><div class="exp-summary-card"><strong>${draft}</strong><span>待验证假设</span></div></div>`;document.querySelector("#eArea").innerHTML=(d.map(e=>{const files=e.files||[];const fileHtml=files.length?`<div class="file-list">${files.map(f=>`<span>${esc(f)}</span>`).join("")}</div>`:"";const path=e.output_dir?`<div class="path-chip">骨架目录 · ${esc(e.output_dir)}</div>`:"";const taskLink=e.task_id?`<button class="ghost" onclick="openTask(&quot;${esc(e.task_id)}&quot;)">查看研究</button>`:"";return `<article class="exp-card ${focusId==e.id?"focus":""}" id="exp-${e.id}"><div class="exp-top"><div><span class="exp-index">EXPERIMENT #${e.id}</span> <span class="badge ${e.build_status==="built"?"run":e.build_status==="failed"?"err":""}">${esc(e.build_status)}</span></div><span class="small">${formatDateTime(e.created_at)}</span></div><h3>${esc(e.hypothesis||"未命名实验")}</h3><p class="exp-description">${esc(e.description||"从研究 Brief 提取的可验证假设，等待生成 A/B 骨架。")}</p><div class="exp-meta"><span>来源任务 ${esc(e.task_id||"—")}</span><span>${e.build_status==="built"?"已具备可运行目录":"下一步：生成骨架并运行 eval.py"}</span></div>${path}${fileHtml}<div class="exp-actions">${taskLink}<button class="primary" onclick="buildExp(${e.id})">${e.build_status==="built"?"重新生成骨架":"生成骨架"}</button><span class="exp-feedback" id="exp-feedback-${e.id}"></span></div></article>`}).join(""))||`<div class="empty"><span class="empty-mark">✦</span>还没有实验，从研究 Brief 的 Project Opportunities 保存一个假设吧。</div>`;if(focusId){const node=document.querySelector("#exp-"+focusId);if(node){node.scrollIntoView({behavior:"smooth",block:"center"});}}}
 async function buildExp(id){const feedback=document.querySelector("#exp-feedback-"+id);if(feedback)feedback.textContent="正在生成骨架…";try{const r=await jpost("/api/experiment/build",{exp_id:id});await loadExp(id);const done=document.querySelector("#exp-feedback-"+id);if(done)done.innerHTML=r.project?"<span class=\"ok\">骨架已生成，目录已更新</span>":"<span class=\"warn\">"+esc(r.error||"生成失败")+"</span>";}catch(e){const done=document.querySelector("#exp-feedback-"+id);if(done)done.innerHTML="<span class=\"warn\">生成失败："+esc(e.message||e)+"</span>";}}
 // ---- 选题 ----
 const demoFrontier=[{topic:"Lodestar 如何把 Research Trace 变成 Skill Promotion",priority:"high",label:"能力晋升",related_projects:["Marina-016/lodestar"],why:"把一次研究里的证据、判断和 Eval 结果，沉淀成下一次可以复用的 Skill。",deliverable:"Skill Promotion 证据面板",signal:"Trace · Eval · Knowledge"},{topic:"Agent Memory 如何减少下一次研究的重复检索",priority:"medium",label:"记忆更新",related_projects:["Marina-016/lodestar"],why:"从 partial 概念开始补齐可引用上下文，让下一次研究更快进入真正的新问题。",deliverable:"Memory 更新策略与回归集",signal:"Recall · Confidence · Reuse"},{topic:"Weekly Frontier 如何直接驱动 Experiment",priority:"high",label:"研究闭环",related_projects:["Lodestar / Skill Evaluation Lab"],why:"把选题、Brief、可验证假设和骨架目录串成一条适合演示的产品主线。",deliverable:"一键生成 A/B 实验骨架",signal:"Brief · Hypothesis · Build"}];
-function renderDemoFrontier(items){document.querySelector("#frArea").innerHTML=items.map(s=>{const t=esc(s.topic).replace(/"/g,"&quot;");const project=(s.related_projects||[]).map(esc).join(" · ");return `<div class="item frontier-item"><div class="frontier-top"><span class="eyebrow">${esc(s.label||"RESEARCH DIRECTION")}</span><span class="badge">${esc(s.priority||"medium")}</span></div><h3>${esc(s.topic)}</h3><div class="small">${esc(s.why||"")}</div><div class="frontier-meta"><span>${esc(s.deliverable||"研究 Brief")}</span><span>${esc(s.signal||project)}</span></div><div class="row"><button class="ghost" onclick="researchTopic(&quot;${t}&quot;)">研究这条</button><button class="ghost" onclick="useTopic(&quot;${t}&quot;)">填到研究框</button></div></div>`}).join("");}
+function renderDemoFrontier(items){document.querySelector("#frArea").innerHTML=items.map((s,i)=>{const t=esc(s.topic).replace(/"/g,"&quot;");const project=(s.related_projects||[]).map(esc).join(" · ");return `<div class="item frontier-item" style="--delay:${i*70}ms"><div class="frontier-top"><span class="eyebrow">${esc(s.label||"RESEARCH DIRECTION")}</span><span class="badge">${esc(s.priority||"medium")}</span></div><h3>${esc(s.topic)}</h3><div class="small">${esc(s.why||"")}</div><div class="frontier-meta"><span>${esc(s.deliverable||"研究 Brief")}</span><span>${esc(s.signal||project)}</span></div><div class="row"><button class="ghost" onclick="researchTopic(&quot;${t}&quot;)">研究这条</button><button class="ghost" onclick="useTopic(&quot;${t}&quot;)">填到研究框</button></div></div>`}).join("");}
 renderDemoFrontier(demoFrontier);$('#frBtn').onclick=async()=>{$('#frNote').innerHTML='<span class="spin"></span>生成中…';
  try{
   const r=await jpost('/api/frontier',{},60000);$('#frNote').innerHTML='';
@@ -602,9 +615,7 @@ $('#kq').onkeydown=e=>{if(e.key==='Enter')loadK();};
 $('#kseedBtn').onclick=async()=>{const v=$('#kseed').value.trim();if(!v)return;
  const r=await jpost('/api/knowledge/seed',{names:v});loadK();};
 // ---- 历史 ----
-async function loadH(){const d=await jget('/api/tasks');
- $('#hArea').innerHTML=d.map(t=>'<div class="item" onclick="openTask(\''+t.id+'\')"><b>'+esc((t.goal||'').slice(0,70))+'</b>'+
- '<span class="badge '+(t.status==='running'?'run':t.status==='error'?'err':'')+'">'+t.status+'</span>'+
- '<div class="small">'+t.created_at+'</div></div>').join('')||'<div class="empty"><span class="empty-mark">✦</span>还没有研究记录，从首页开始一次研究。</div>';}
-async function openTask(id){const d=await jget('/api/task/'+id);renderTask(d);$('#tabs').querySelector('button[data-t=research]').click();}
-</script></body></html>"""
+async function loadH(){const d=await jget('/api/tasks'+(historyDemoOnly?'?demo=1':''));
+ $('#hArea').innerHTML=d.map(t=>'<div class="item" onclick="openTask(\''+t.id+'\')"><b>'+esc((t.goal||'').slice(0,70))+'</b>'+(t.demo?'<span class="badge run">演示</span>':'')+
+ '<span class="badge '+(t.status==='running'?'run':t.status==='error'?'err':'')+'">'+formatTaskStatus(t.status)+'</span>'+
+ '<time class="small history-time" datetime="'+esc(t.created_at||'')+'">'+formatDateTime(t.created_at)+'</time></div>').join('')||'<div class="empty"><span class="empty-mark">✦</span>还没有研究记录，从首页开始一次研究。</div>';}</script></body></html>"""

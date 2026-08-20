@@ -426,6 +426,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 [data-theme=light] .mut,[data-theme=light] .small{color:#5c554c}
 [data-theme=light] .warn{color:#8f3f1c;font-weight:600}
 [data-theme=light] .hero-title,[data-theme=light] .section-head h2{color:#1d1b18}
+[data-theme=light] .hero-actions button:first-child{color:#fff8ed;font-weight:700}
 [data-theme=light] .hero{background:linear-gradient(135deg,rgba(183,119,49,.12),transparent 48%),var(--card);box-shadow:0 16px 36px rgba(80,57,28,.08)}
 [data-theme=light] .stat{background:#fffdf8}
 [data-theme=light] .badge.run{background:#e5f0e5;color:#3d6b48;border-color:#8fb193}

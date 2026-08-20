@@ -114,3 +114,30 @@ cd <项目目录> && python -m lodestar research "<目标>"      # 或安装后�
 - **v0.4.7（当前发布候选）**：Research —— Plan → Search → Rerank → Read → Synthesis → Knowledge Update，含 Trace + Eval；并提供 UI、Projects、Weekly Frontier 与 Experiment → Build 闭环。
 - **V1/V4 后续**：更强的 GitHub/项目文件检索、自演进与自动过期重审。
 - **V3 最小闭环（已实现 ✅）**：Research Brief → Project Opportunities → Save Experiment → Scaffold + codex Build（A/B eval harness）。
+
+## V0 Demo Preview
+
+Lodestar v0 is designed around one traceable research loop:
+
+Weekly Frontier → Research Brief → Evidence Trace → Knowledge State → Experiment → Build
+
+### Run the local demo
+
+PowerShell commands:
+
+    $env:LODESTAR_LLM_MODE="mock"
+    $env:LODESTAR_SEARCH_MODE="mock"
+    python -m lodestar demo seed
+    python -m lodestar ui --port 8123 --no-browser
+
+Open http://127.0.0.1:8123/.
+
+The demo workspace includes:
+
+- curated Lodestar research topics and project context;
+- light/dark theme switching with persistent preference;
+- a research trace rail from question to next move;
+- localized history timestamps and a demo-only history filter;
+- inline experiment saving and scaffold navigation.
+
+Mock mode is for product demonstration and workflow validation. It does not represent the quality of a live research run. See CHANGELOG.md for the current release notes.

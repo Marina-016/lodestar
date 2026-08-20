@@ -380,7 +380,7 @@ main{padding:28px;max-width:960px;margin:0 auto}
 textarea{width:100%;min-height:72px;background:var(--bg);border:1px solid var(--line);color:var(--fg);border-radius:6px;padding:12px 14px;font:inherit;resize:vertical;transition:border-color .15s}
 textarea:focus,input[type=text]:focus,select:focus{outline:none;border-color:var(--acc-dim);box-shadow:0 0 0 2px rgba(232,148,58,.08)}
 input[type=text]{width:100%;background:var(--bg);border:1px solid var(--line);color:var(--fg);border-radius:6px;padding:9px 12px;font:inherit;transition:border-color .15s}
-button{background:var(--acc);color:#090d12;border:none;border-radius:6px;padding:8px 18px;font-weight:600;cursor:pointer;font-family:inherit;font-size:13px;letter-spacing:.01em;transition:opacity .15s,box-shadow .2s}button:focus-visible{box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--acc-dim)}
+button{background:var(--acc);color:#090d12;border:none;border-radius:6px;padding:8px 18px;font-weight:600;cursor:pointer;font-family:inherit;font-size:13px;letter-spacing:.01em;transition:opacity .15s,box-shadow .2s}button.primary{font-weight:700}button:focus-visible{box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--acc-dim)}
 button:hover{opacity:.92;box-shadow:0 0 14px rgba(232,148,58,.12)}
 button.ghost{background:transparent;color:var(--acc);border:1px solid var(--acc-dim);font-weight:650}
 button:disabled{opacity:.35;cursor:wait}
@@ -436,7 +436,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 [data-theme=light] .mut,[data-theme=light] .small{color:var(--mut)}
 [data-theme=light] .warn{color:var(--warn);font-weight:600}
 [data-theme=light] .hero-title,[data-theme=light] .section-head h2{color:var(--fg)}
-[data-theme=light] .tab button:not(.ghost){color:#2b180a;font-weight:700}
+[data-theme=light] button.primary{color:#2b180a;font-weight:700}
 [data-theme=light] .hero{background:linear-gradient(135deg,rgba(225,156,74,.14),transparent 48%),var(--card);box-shadow:0 16px 36px rgba(122,84,36,.08)}
 [data-theme=light] .stat{background:var(--card)}
 [data-theme=light] .badge.run{background:#e5f0e5;color:#3d6b48;border-color:#8fb193}
@@ -454,18 +454,18 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 <button data-t="project">项目</button>
 </div>
 <main>
-<div class="tab on" id="t-frontier"><div class="hero"><div class="eyebrow">AI RESEARCH CONSOLE <span class="badge run">LOCAL WORKSPACE</span></div><h2 class="hero-title">把一个问题，变成一份可追踪的研究简报。</h2><p class="hero-copy">从研究目标出发，沿着来源、证据、洞察和知识更新走完一条完整航迹。</p><div class="hero-actions"><button onclick="goResearch()">开始一次研究</button><button id="frBtn" class="ghost">生成本周选题</button><span class="mut small" id="frNote"></span></div><div class="stat-strip"><div class="stat"><strong id="statTasks">—</strong><span>历史研究</span></div><div class="stat"><strong id="statKnowledge">—</strong><span>知识概念</span></div><div class="stat"><strong id="statProjects">—</strong><span>进行中项目</span></div></div></div><div class="section-head"><div><h2>本周值得研究</h2><p>基于 Knowledge State 和进行中项目，生成 3 个有上下文的方向。</p></div><span class="small">点击选题即可开始</span></div><div id="frArea"></div></div>
+<div class="tab on" id="t-frontier"><div class="hero"><div class="eyebrow">AI RESEARCH CONSOLE <span class="badge run">LOCAL WORKSPACE</span></div><h2 class="hero-title">把一个问题，变成一份可追踪的研究简报。</h2><p class="hero-copy">从研究目标出发，沿着来源、证据、洞察和知识更新走完一条完整航迹。</p><div class="hero-actions"><button class="primary" onclick="goResearch()">开始一次研究</button><button id="frBtn" class="ghost">生成本周选题</button><span class="mut small" id="frNote"></span></div><div class="stat-strip"><div class="stat"><strong id="statTasks">—</strong><span>历史研究</span></div><div class="stat"><strong id="statKnowledge">—</strong><span>知识概念</span></div><div class="stat"><strong id="statProjects">—</strong><span>进行中项目</span></div></div></div><div class="section-head"><div><h2>本周值得研究</h2><p>基于 Knowledge State 和进行中项目，生成 3 个有上下文的方向。</p></div><span class="small">点击选题即可开始</span></div><div id="frArea"></div></div>
 <div class="tab" id="t-research">
   <div class="section-head"><div><h2>研究问题</h2><p>写下你真正想知道的事，Lodestar 会保留来源和研究轨迹。</p></div></div>
   <div class="card"><textarea id="goal" placeholder="研究目标，如：研究最近 Agent Memory 有哪些值得关注的新方向"></textarea>
-  <div class="row"><button id="startBtn">开始研究</button><span class="mut small" id="runNote"></span></div></div>
+  <div class="row"><button class="primary" id="startBtn">开始研究</button><span class="mut small" id="runNote"></span></div></div>
   <div id="resArea"></div>
 </div>
 <div class="tab" id="t-knowledge">
   <div class="card"><div class="row"><input type="text" id="kq" placeholder="搜索概念…（回车）"><button class="ghost" onclick="loadK()">搜索</button></div>
   <div class="row"><button id="kseedBtn" class="ghost">seed 已知概念</button><input type="text" id="kseed" placeholder="Agent,Skill,Eval…"></div></div>
   <div id="kArea"></div>
-  <div class="card" style="margin-top:14px"><div class="row"><button id="quizBtn">评估我的掌握</button>
+  <div class="card" style="margin-top:14px"><div class="row"><button class="primary" id="quizBtn">评估我的掌握</button>
   <span class="mut small" id="quizNote">agent 出题 → 你回答 → 自动更新 Knowledge State</span></div><div id="quizArea"></div></div>
 </div>
 <div class="tab" id="t-history"><div id="hArea"></div></div>
@@ -527,7 +527,7 @@ function renderTask(d){const t=d.task,b=d.brief_md,upd=d.updates.filter(u=>u.sta
    const p=u.proposal;return '<label class="upd" style="display:block;cursor:pointer"><input type="checkbox" class="updbox" value="'+u.id+'" checked> '+
    '<b>'+esc(u.concept)+'</b> <span class="arrow">'+(p.old_status?esc(p.old_status)+'/':'')+(p.old_confidence?esc(p.old_confidence)+' → ':'')+
    esc(p.new_status)+'/'+esc(p.new_confidence)+'</span><br><span class="small">'+esc(p.claim||'')+'</span></label>';}).join('')+
-   '<div class="row"><button onclick="applyChecked(\''+t.id+'\')">应用选中的更新</button></div>';}
+   '<div class="row"><button class="primary" onclick="applyChecked(\''+t.id+'\')">应用选中的更新</button></div>';}
  if(t.status==='finished'&&d.opportunities&&d.opportunities.length){
   h+='<div class="row" style="margin-top:10px"><select id="oppSel">'+d.opportunities.map((o,i)=>'<option value="'+(i+1)+'">'+(i+1)+'. '+esc(o.slice(0,46))+'…</option>').join('')+'</select>'+
   '<button class="ghost" onclick="saveExpPick(\''+t.id+'\')">存为实验</button></div>';}
@@ -584,7 +584,7 @@ async function quizStart(){$('#quizNote').innerHTML='<span class="spin"></span>�
 function showQuizQ(c,q){quiz.q=q;
  $('#quizArea').innerHTML='<div class="card"><b>'+esc(c)+'</b>：'+esc(q)+
  '<br><textarea id="quizA" placeholder="你的回答…" style="margin-top:8px"></textarea>'+
- '<div class="row"><button onclick="quizSubmit()">提交评估</button><span class="mut small" id="quizV"></span></div></div>';}
+ '<div class="row"><button class="primary" onclick="quizSubmit()">提交评估</button><span class="mut small" id="quizV"></span></div></div>';}
 async function quizSubmit(){const a=$('#quizA').value.trim();if(!a){alert('先写点回答');return;}
  const c=quiz.concepts[quiz.idx];$('#quizV').innerHTML='<span class="spin"></span>评估中…';
  const r=await jpost('/api/quiz/answer',{concept:c,question:quiz.q,answer:a},60000);

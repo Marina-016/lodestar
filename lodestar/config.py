@@ -75,6 +75,7 @@ def load_config() -> Config:
 
     c = Config()
     c.llm_mode = os.getenv("LODESTAR_LLM_MODE", c.llm_mode)
+    c.search_mode = os.getenv("LODESTAR_SEARCH_MODE", c.search_mode)
     c.model = os.getenv("LODESTAR_MODEL", c.model)
     c.judge_model = os.getenv("LODESTAR_JUDGE_MODEL", c.judge_model)
     c.llm_thinking = os.getenv("LODESTAR_LLM_THINKING", str(c.llm_thinking)).lower() in {"1", "true", "yes", "on"}

@@ -395,7 +395,7 @@ th{background:var(--bg);color:var(--mut);font-weight:600;font-size:11px;letter-s
 .row{display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap}
 .row input[type=text]{width:auto;flex:1;min-width:140px}
 .row .mut{white-space:nowrap}::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}::-webkit-scrollbar-thumb:hover{background:var(--mut)}
-[data-theme=light]{--card-2:#f0ebe3;--hair:#b9ad9d;--bg:#f7f3ec;--card:#fffdf8;--line:#c8bfb2;--fg:#1d1b18;--mut:#5c554c;--acc:#8f4f12;--acc-dim:#a96f36;--ok:#356442;--warn:#8f3f1c}body{position:relative;z-index:1;font-family:"Segoe UI","Microsoft YaHei","Noto Sans SC",Arial,sans-serif;font-weight:450}main,header,.tabs{position:relative;z-index:1}.card,.item{position:relative;z-index:1}
+[data-theme=light]{--card-2:#f4ecdf;--hair:#d0bea3;--bg:#fcf8f0;--card:#fffefa;--line:#dfd2bf;--fg:#211c16;--mut:#665d51;--acc:#c4772b;--acc-dim:#d69a58;--ok:#356c45;--warn:#a95022}body{position:relative;z-index:1;font-family:"Segoe UI","Microsoft YaHei","Noto Sans SC",Arial,sans-serif;font-weight:450}main,header,.tabs{position:relative;z-index:1}.card,.item{position:relative;z-index:1}
 :root{--card-2:#151c29;--hair:#263247;--shadow:0 18px 50px rgba(0,0,0,.18)}
 body{background:radial-gradient(circle at 82% -10%,rgba(232,148,58,.08),transparent 30%),var(--bg)}
 header{max-width:1120px;margin:0 auto;padding:24px 32px 18px;border-bottom:1px solid var(--hair)}
@@ -426,8 +426,8 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 [data-theme=light] .mut,[data-theme=light] .small{color:#5c554c}
 [data-theme=light] .warn{color:#8f3f1c;font-weight:600}
 [data-theme=light] .hero-title,[data-theme=light] .section-head h2{color:#1d1b18}
-[data-theme=light] .tab button:not(.ghost){color:#fff8ed;font-weight:700}
-[data-theme=light] .hero{background:linear-gradient(135deg,rgba(183,119,49,.12),transparent 48%),var(--card);box-shadow:0 16px 36px rgba(80,57,28,.08)}
+[data-theme=light] .tab button:not(.ghost){color:#2b180a;font-weight:700}
+[data-theme=light] .hero{background:linear-gradient(135deg,rgba(225,156,74,.14),transparent 48%),var(--card);box-shadow:0 16px 36px rgba(122,84,36,.08)}
 [data-theme=light] .stat{background:#fffdf8}
 [data-theme=light] .badge.run{background:#e5f0e5;color:#3d6b48;border-color:#8fb193}
 [data-theme=light] .badge.err{background:#f8e8e2;color:#9b4c25;border-color:#d59d84}
@@ -536,7 +536,22 @@ async function loadExp(){const d=await jget('/api/experiments');
 async function buildExp(id){const r=await jpost('/api/experiment/build',{exp_id:id});
  alert(r.project?('骨架已生成：'+r.project):(r.error||'生成失败'));loadExp();}
 // ---- 选题 ----
-$('#frBtn').onclick=async()=>{$('#frNote').innerHTML='<span class="spin"></span>生成中…';
+const demoFrontier=[
+ {topic:"Lodestar \u5982\u4f55\u628a Research Trace \u53d8\u6210 Skill Promotion",priority:"high",related_projects:["Marina-016/lodestar"],why:"\u5df2\u6709\u7814\u7a76\u3001\u77e5\u8bc6\u72b6\u6001\u548c\u5b9e\u9a8c\u95ed\u73af\u5df2\u7ecf\u5177\u5907\uff0c\u4e0b\u4e00\u6b65\u662f\u628a\u8bc1\u636e\u94fe\u53d8\u6210\u53ef\u590d\u7528\u80fd\u529b\u3002"},
+ {topic:"Agent Memory \u5982\u4f55\u51cf\u5c11\u4e0b\u4e00\u6b21\u7814\u7a76\u7684\u91cd\u590d\u68c0\u7d22",priority:"medium",related_projects:["Marina-016/lodestar"],why:"\u4ece Knowledge State \u7684 partial \u6982\u5ff5\u51fa\u53d1\uff0c\u4f18\u5148\u8865\u9f50\u6700\u5f71\u54cd\u4e0b\u4e00\u6b21\u5224\u65ad\u7684\u4e0a\u4e0b\u6587\u3002"},
+ {topic:"Weekly Frontier \u5982\u4f55\u76f4\u63a5\u9a71\u52a8 Experiment",priority:"high",related_projects:["Marina-016/lodestar"],why:"\u628a\u9009\u9898\u3001\u7814\u7a76\u7b80\u62a5\u548c\u53ef\u9a8c\u8bc1\u5047\u8bbe\u8fde\u8d77\u6765\uff0c\u6700\u9002\u5408\u5c55\u793a Lodestar \u7684\u5b8c\u6574\u95ed\u73af\u3002"}
+];
+function renderDemoFrontier(items){
+ $('#frArea').innerHTML=items.map((s)=>{
+  const t=esc(s.topic).replace(/'/g,"\\'");
+  return '<div class="item"><b>'+esc(s.topic)+'</b> <span class="badge">'+s.priority+'</span>'+
+   (s.related_projects&&s.related_projects.length?' <span class="badge run">'+s.related_projects.map(esc).join('\u3001')+'</span>':'')+
+   '<div class="small">'+esc(s.why)+'</div>'+
+   '<div class="row" style="margin:6px 0 0"><button class="ghost" onclick="researchTopic(\''+t+'\')">\u7814\u7a76\u8fd9\u6761</button>'+
+   '<button class="ghost" onclick="useTopic(\''+t+'\')">\u586b\u5230\u7814\u7a76\u6846</button></div></div>';
+ }).join('');
+}
+renderDemoFrontier(demoFrontier);$('#frBtn').onclick=async()=>{$('#frNote').innerHTML='<span class="spin"></span>生成中…';
  try{
   const r=await jpost('/api/frontier',{},60000);$('#frNote').innerHTML='';
   if(r.error){$('#frNote').innerHTML='<span class="warn">'+esc(r.error)+'</span>';}

@@ -168,6 +168,11 @@ def _cmd_ui(args, cfg):
     from lodestar.ui import serve
     serve(port=args.port, open_browser=not args.no_browser)
 
+def cmd_demo(args, cfg):
+    from lodestar.demo import seed_demo
+    result = seed_demo(cfg)
+    print(json.dumps(result, ensure_ascii=False))
+
 
 def cmd_project(args, cfg):
     """Projects：GitHub 摄入 + 进行中状态。"""
@@ -363,6 +368,10 @@ def main(argv=None):
     pui.add_argument("--port", type=int, default=8123)
     pui.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
     pui.set_defaults(fn=lambda a, c: _cmd_ui(a, c))
+
+    pd = sub.add_parser("demo", help="准备录屏用的 Lodestar 示例数据")
+    dsub = pd.add_subparsers(dest="action", required=True)
+    dsub.add_parser("seed", help="向当前 workspace 幂等写入示例数据").set_defaults(fn=cmd_demo)
 
     pj = sub.add_parser("project", help="Projects：GitHub 摄入 + 进行中状态")
     pjsub = pj.add_subparsers(dest="action", required=True)

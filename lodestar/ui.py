@@ -352,23 +352,25 @@ PAGE_HTML = r"""<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Lodestar（导星）</title>
 <style>
-:root{--bg:#0a0e14;--card:#111620;--line:#1e2736;--fg:#e0e4ec;--mut:#6b7280;--acc:#d4a35a;--acc-dim:#8b6d3f;--ok:#5b8c5a;--warn:#c0784a}
+:root{--bg:#0a0e14;--card:#111620;--line:#1e2736;--fg:#e0e4ec;--mut:#6b7280;--acc:#e8943a;--acc-dim:#a06830;--ok:#5b8c5a;--warn:#c0784a}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.65 "Inter","Segoe UI",system-ui,sans-serif;letter-spacing:-.002em}
 header{display:flex;align-items:baseline;gap:12px;padding:20px 28px 0}
 header h1{font-size:15px;margin:0;font-weight:600;color:var(--fg);letter-spacing:.01em}
 header .v{color:var(--mut);font-size:11px;font-weight:400}
-.tabs{display:flex;gap:4px;padding:18px 28px 0;border-bottom:1px solid var(--line)}
-.tabs button{background:none;border:none;color:var(--mut);font-size:13px;padding:8px 0;margin-right:20px;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;transition:color .15s,border-color .15s}
-.tabs button:hover{color:var(--fg)}
-.tabs button.on{color:var(--acc);border-bottom-color:var(--acc);font-weight:600}
+.tabs{display:flex;gap:0;padding:22px 28px 0;border-bottom:1px solid var(--line)}
+.tabs button{position:relative;background:none;border:none;color:var(--mut);font-size:14px;padding:10px 0;margin-right:28px;cursor:pointer;letter-spacing:.02em;transition:color .2s,transform .15s}
+.tabs button::after{content:'';position:absolute;left:0;right:0;bottom:-1px;height:2px;background:linear-gradient(90deg,transparent,var(--acc),transparent);opacity:0;transition:opacity .25s;border-radius:2px}
+.tabs button:hover{color:var(--fg);transform:translateY(-1px)}
+.tabs button.on{color:var(--acc);font-weight:600;transform:none}
+.tabs button.on::after{opacity:1}
 main{padding:28px;max-width:960px;margin:0 auto}
 .tab{display:none}.tab.on{display:block}
 .card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:20px 24px;margin-bottom:18px}
 textarea{width:100%;min-height:72px;background:var(--bg);border:1px solid var(--line);color:var(--fg);border-radius:6px;padding:12px 14px;font:inherit;resize:vertical;transition:border-color .15s}
 textarea:focus,input[type=text]:focus{outline:none;border-color:var(--acc-dim)}
 input[type=text]{width:100%;background:var(--bg);border:1px solid var(--line);color:var(--fg);border-radius:6px;padding:9px 12px;font:inherit;transition:border-color .15s}
-button{background:var(--acc);color:#0a0e14;border:none;border-radius:6px;padding:8px 18px;font-weight:600;cursor:pointer;font-size:13px;letter-spacing:.01em;transition:opacity .15s}
+button{background:var(--acc);color:#090d12;border:none;border-radius:6px;padding:8px 18px;font-weight:600;cursor:pointer;font-size:13px;letter-spacing:.01em;transition:opacity .15s}
 button:hover{opacity:.88}
 button.ghost{background:transparent;color:var(--acc);border:1px solid var(--acc-dim);font-weight:500}
 button:disabled{opacity:.35;cursor:wait}

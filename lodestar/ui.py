@@ -356,17 +356,17 @@ PAGE_HTML = r"""<!doctype html>
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.65 "Inter","Segoe UI",system-ui,sans-serif;letter-spacing:-.002em}
 header{display:flex;align-items:baseline;gap:12px;padding:20px 28px 0}
-header h1{font-size:15px;margin:0;font-weight:600;color:var(--fg);letter-spacing:.01em}
+header h1{font-size:15px;margin:0;font-weight:600;color:var(--fg);letter-spacing:.01em}header h1::before{content:'✦';color:var(--acc);font-size:16px;margin-right:7px;vertical-align:-1px}
 header .v{color:var(--mut);font-size:11px;font-weight:400}
 .tabs{display:flex;gap:0;padding:22px 28px 0;border-bottom:1px solid var(--line)}
 .tabs button{position:relative;background:none;border:none;color:var(--mut);font-size:14px;padding:10px 0;margin-right:28px;cursor:pointer;letter-spacing:.02em;transition:color .2s,transform .15s}
 .tabs button::after{content:'';position:absolute;left:0;right:0;bottom:-1px;height:2px;background:linear-gradient(90deg,transparent,var(--acc),transparent);opacity:0;transition:opacity .25s;border-radius:2px}
 .tabs button:hover{color:var(--fg);transform:translateY(-1px)}
-.tabs button.on{color:var(--acc);font-weight:600;transform:none}
+.tabs button.on{color:var(--acc);font-weight:600;transform:none;text-shadow:0 0 12px rgba(232,148,58,.15)}
 .tabs button.on::after{opacity:1}
 main{padding:28px;max-width:960px;margin:0 auto}
 .tab{display:none}.tab.on{display:block}
-.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:20px 24px;margin-bottom:18px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:20px 24px;margin-bottom:18px;transition:border-color .25s}.card:hover{border-color:var(--acc-dim)}
 textarea{width:100%;min-height:72px;background:var(--bg);border:1px solid var(--line);color:var(--fg);border-radius:6px;padding:12px 14px;font:inherit;resize:vertical;transition:border-color .15s}
 textarea:focus,input[type=text]:focus{outline:none;border-color:var(--acc-dim)}
 input[type=text]{width:100%;background:var(--bg);border:1px solid var(--line);color:var(--fg);border-radius:6px;padding:9px 12px;font:inherit;transition:border-color .15s}
@@ -387,14 +387,14 @@ th{background:var(--bg);color:var(--mut);font-weight:600;font-size:11px;letter-s
 .brief h2{font-size:16px;margin:24px 0 10px;color:var(--acc);font-weight:600;letter-spacing:.01em}
 .brief h3{font-size:14px;margin:18px 0 8px}
 .brief table{font-size:12.5px}
-.brief a{color:var(--acc)}
+.brief a{color:var(--acc)}.brief p{margin:8px 0;line-height:1.7}.brief ul,.brief ol{padding-left:20px;margin:8px 0}.brief li{margin:4px 0}.brief strong{color:var(--fg);font-weight:600}.brief blockquote{border-left:3px solid var(--acc-dim);margin:12px 0;padding:4px 14px;color:var(--mut);font-style:italic}.brief code{background:var(--bg);padding:1px 5px;border-radius:3px;font-size:12.5px}
 .upd{border:1px solid var(--line);border-radius:6px;padding:12px 14px;margin-bottom:8px}
 .upd .arrow{color:var(--mut)}
 @keyframes spin{to{transform:rotate(360deg)}}
 .spin{display:inline-block;width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--acc);border-radius:50%;animation:spin 1s linear infinite;vertical-align:-2px;margin-right:6px}
 .row{display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap}
 .row input[type=text]{width:auto;flex:1;min-width:140px}
-.row .mut{white-space:nowrap}
+.row .mut{white-space:nowrap}::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}::-webkit-scrollbar-thumb:hover{background:var(--mut)}
 </style></head><body>
 <header><h1>Lodestar（导星）<span class="v" id="ver"></span></h1></header>
 <div class="tabs" id="tabs">

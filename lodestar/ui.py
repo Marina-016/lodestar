@@ -395,13 +395,13 @@ th{background:var(--bg);color:var(--mut);font-weight:600;font-size:11px;letter-s
 .row{display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap}
 .row input[type=text]{width:auto;flex:1;min-width:140px}
 .row .mut{white-space:nowrap}::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}::-webkit-scrollbar-thumb:hover{background:var(--mut)}
-[data-theme=light]{--card-2:#f0ede8;--hair:#d4cec5;--bg:#f5f3f0;--card:#ffffff;--line:#e0dcd6;--fg:#1a1a1a;--mut:#6b6560;--acc:#c47a20;--acc-dim:#8c5a1a;--ok:#3d7a4a;--warn:#b85a20}body{position:relative;z-index:1}main,header,.tabs{position:relative;z-index:1}.card,.item{position:relative;z-index:1}
+[data-theme=light]{--card-2:#f0ebe3;--hair:#d4cabc;--bg:#f7f3ec;--card:#fffdf8;--line:#dfd7ca;--fg:#2c2a27;--mut:#756e63;--acc:#9a5a1d;--acc-dim:#b18154;--ok:#3d6b48;--warn:#9b4c25}body{position:relative;z-index:1}main,header,.tabs{position:relative;z-index:1}.card,.item{position:relative;z-index:1}
 :root{--card-2:#151c29;--hair:#263247;--shadow:0 18px 50px rgba(0,0,0,.18)}
 body{background:radial-gradient(circle at 82% -10%,rgba(232,148,58,.08),transparent 30%),var(--bg)}
 header{max-width:1120px;margin:0 auto;padding:24px 32px 18px;border-bottom:1px solid var(--hair)}
 header h1{font-size:16px;letter-spacing:.02em}
 .tabs{max-width:1120px;margin:0 auto;padding:16px 32px 0;overflow-x:auto}
-main{max-width:1120px;padding:32px}
+main{max-width:1120px;padding:32px}#frArea{scroll-margin-top:18px}
 .card{box-shadow:var(--shadow);border-color:var(--hair)}
 .hero{position:relative;overflow:hidden;padding:32px 36px;margin-bottom:24px;background:linear-gradient(135deg,rgba(232,148,58,.12),transparent 48%),var(--card);border:1px solid var(--hair);border-radius:12px}
 .hero:after{content:'✦';position:absolute;right:30px;top:16px;color:var(--acc);font-size:76px;opacity:.11;transform:rotate(18deg)}
@@ -418,7 +418,12 @@ main{max-width:1120px;padding:32px}
 button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid var(--acc);outline-offset:2px;box-shadow:none}
 @media(max-width:760px){header{padding:18px 18px 14px}.tabs{padding:12px 18px 0}main{padding:20px 16px}.hero{padding:24px 22px}.hero-title{font-size:30px}.stat-strip{grid-template-columns:1fr}.result-layout{grid-template-columns:1fr}.result-aside{position:static}.section-head{display:block}.section-head p{margin-top:4px}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;transition:none!important;animation:none!important}}
-</style></head><body>
+[data-theme=light] body{background:radial-gradient(circle at 82% -10%,rgba(183,119,49,.10),transparent 32%),var(--bg)}
+[data-theme=light] .hero{background:linear-gradient(135deg,rgba(183,119,49,.12),transparent 48%),var(--card);box-shadow:0 16px 36px rgba(80,57,28,.08)}
+[data-theme=light] .stat{background:rgba(255,253,248,.82)}
+[data-theme=light] .badge.run{background:#e5f0e5;color:#3d6b48;border-color:#8fb193}
+[data-theme=light] .badge.err{background:#f8e8e2;color:#9b4c25;border-color:#d59d84}
+[data-theme=light] th{background:#f0ebe3}</style></head><body>
 <header><h1>Lodestar（导星）<span class="v" id="ver"></span></h1><button class="ghost" id="themeBtn" onclick="toggleTheme()" style="font-size:11px;padding:3px 10px;margin-left:auto" title="切换浅色/深色主题">☀</button></header>
 <div class="tabs" id="tabs" role="tablist" aria-label="Lodestar 工作区">
 <button data-t="frontier" class="on">选题</button>
@@ -530,7 +535,7 @@ $('#frBtn').onclick=async()=>{$('#frNote').innerHTML='<span class="spin"></span>
    (s.related_projects&&s.related_projects.length?' <span class="badge run">'+s.related_projects.map(esc).join('、')+'</span>':'')+
    '<div class="small">'+esc(s.why)+'</div>'+
    '<div class="row" style="margin:6px 0 0"><button class="ghost" onclick="researchTopic(\''+t+'\')">研究这条</button>'+
-   '<button class="ghost" onclick="useTopic(\''+t+'\')">填到研究框</button></div></div>';}).join('');}
+   '<button class="ghost" onclick="useTopic(\''+t+'\')">填到研究框</button></div></div>';}).join('');$('#frArea').scrollIntoView({behavior:'smooth',block:'start'});}
   else{$('#frArea').innerHTML='<p class="warn">（无选题返回）</p>';}
  }catch(e){$('#frNote').innerHTML='<span class="warn">请求失败：'+esc(e.message||e)+'</span>';}};
 function useTopic(t){$('#goal').value=t;$('#tabs').querySelector('button[data-t=research]').click();}

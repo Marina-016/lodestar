@@ -367,7 +367,7 @@ PAGE_HTML = r"""<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Lodestar（导星）</title>
 <style>
-:root{--bg:#0a0e14;--card:#111620;--line:#1e2736;--fg:#e7eaf0;--mut:#9aa3b1;--acc:#e8943a;--acc-dim:#c07834;--ok:#79b77b;--warn:#e39a70}
+:root{--bg:#0b0f14;--card:#131a22;--line:#2a3542;--fg:#f4efe6;--mut:#a7a29a;--acc:#f09a45;--acc-dim:#c8752a;--ok:#83c28b;--warn:#e8a07b}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.65 "Segoe UI","Microsoft YaHei","Noto Sans SC",Arial,sans-serif;letter-spacing:-.002em}body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;background-image:radial-gradient(circle,var(--line) 1px,transparent 1px);background-size:44px 44px;opacity:.18}[data-theme=light] body::before{opacity:.06}body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:-1;background:var(--bg)}
 header{display:flex;align-items:baseline;gap:12px;padding:20px 28px 0}
@@ -410,8 +410,8 @@ th{background:var(--bg);color:var(--mut);font-weight:600;font-size:11px;letter-s
 .row{display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap}
 .row input[type=text]{width:auto;flex:1;min-width:140px}
 .row .mut{white-space:nowrap}::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}::-webkit-scrollbar-thumb:hover{background:var(--mut)}
-[data-theme=light]{--card-2:#f4ecdf;--hair:#d0bea3;--bg:#fcf8f0;--card:#fffefa;--line:#dfd2bf;--fg:#211c16;--mut:#50483f;--acc:#c4772b;--acc-dim:#d69a58;--ok:#356c45;--warn:#a95022}body{position:relative;z-index:1;font-family:"Segoe UI","Microsoft YaHei","Noto Sans SC",Arial,sans-serif;font-weight:450}main,header,.tabs{position:relative;z-index:1}.card,.item{position:relative;z-index:1}
-:root{--card-2:#151c29;--hair:#263247;--shadow:0 18px 50px rgba(0,0,0,.18)}
+[data-theme=light]{--card-2:#f0e5d5;--hair:#d5c3aa;--bg:#f7f3ea;--card:#fffdf8;--line:#e5d7c4;--fg:#1b1814;--mut:#6e6255;--acc:#c8752a;--acc-dim:#a85a18;--ok:#356c45;--warn:#a95022}body{position:relative;z-index:1;font-family:"Segoe UI","Microsoft YaHei","Noto Sans SC",Arial,sans-serif;font-weight:450}main,header,.tabs{position:relative;z-index:1}.card,.item{position:relative;z-index:1}
+:root{--card-2:#1b2430;--hair:#2a3542;--shadow:0 18px 50px rgba(0,0,0,.18)}
 body{background:radial-gradient(circle at 82% -10%,rgba(232,148,58,.08),transparent 30%),var(--bg)}
 header{max-width:1120px;margin:0 auto;padding:24px 32px 18px;border-bottom:1px solid var(--hair)}
 header h1{font-size:16px;letter-spacing:.02em}
@@ -448,8 +448,8 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 [data-theme=light] .badge.err{background:#f8e8e2;color:#9b4c25;border-color:#d59d84}
 [data-theme=light] th{background:#f0ebe3}
 [data-theme=light] .small.ok{color:var(--ok)}
-[data-theme=light] .small.warn{color:var(--warn)}[data-theme=light] button.primary{background:#b5671f;color:#fffaf2;border-color:#b5671f;font-weight:800;text-shadow:0 1px 1px rgba(66,30,8,.18)}[data-theme=light] button.primary:hover{background:#9f5718;color:#fffaf2}[data-theme=light] .stat strong{font-size:30px;font-weight:800;color:#211c16;letter-spacing:-.02em}[data-theme=light] .stat span:not(.stat-caption){color:#211c16;font-size:13px;font-weight:750;letter-spacing:.01em}[data-theme=light] .stat .stat-caption{color:#50483f;font-size:11px;font-weight:600}</style></head><body>
-<header><h1>Lodestar（导星）<span class="v" id="ver"></span></h1><button class="ghost" id="themeBtn" onclick="toggleTheme()" style="font-size:11px;padding:3px 10px;margin-left:auto" title="切换浅色/深色主题">☀</button></header>
+[data-theme=light] .small.warn{color:var(--warn)}[data-theme=light] button.primary{background:#b5671f;color:#fffaf2;border-color:#b5671f;font-weight:800;text-shadow:0 1px 1px rgba(66,30,8,.18)}[data-theme=light] button.primary:hover{background:#9f5718;color:#fffaf2}[data-theme=light] .stat strong{font-size:30px;font-weight:800;color:#211c16;letter-spacing:-.02em}[data-theme=light] .stat span:not(.stat-caption){color:#211c16;font-size:13px;font-weight:750;letter-spacing:.01em}[data-theme=light] .stat .stat-caption{color:#50483f;font-size:11px;font-weight:600}[data-theme=light]{--card-2:#f0e5d5;--hair:#d5c3aa;--shadow:0 18px 50px rgba(122,84,36,.10)}.theme-toggle{letter-spacing:.02em}.hero,.result-head,.exp-card,.item,.card{transition:background-color .18s ease,border-color .18s ease,box-shadow .18s ease,color .18s ease}.frontier-item{border-left:3px solid var(--acc)}.frontier-item:hover{border-left-color:var(--acc-dim)}.exp-card{border-left:3px solid var(--hair)}.exp-card.focus{border-left-color:var(--acc)}#kArea,#hArea,#pArea{display:grid;gap:12px}#kArea .item,#hArea .item,#pArea .item{border-left:3px solid var(--hair);box-shadow:0 8px 24px rgba(0,0,0,.04)}#kArea .item:hover,#hArea .item:hover,#pArea .item:hover{border-left-color:var(--acc);box-shadow:0 12px 28px rgba(0,0,0,.08)}#hArea .item{position:relative;padding-left:26px}#hArea .item:before{content:"";position:absolute;left:-7px;top:22px;width:9px;height:9px;border-radius:50%;background:var(--acc);box-shadow:0 0 0 4px var(--card)}[data-theme=light] #kArea .item,[data-theme=light] #hArea .item,[data-theme=light] #pArea .item{box-shadow:0 8px 24px rgba(122,84,36,.06)}</style></head><body>
+<header><h1>Lodestar（导星）<span class="v" id="ver"></span></h1><button class="ghost theme-toggle" id="themeBtn" onclick="toggleTheme()" style="font-size:11px;padding:5px 11px;margin-left:auto" title="切换浅色/深色主题">☀ 浅色</button></header>
 <div class="tabs" id="tabs" role="tablist" aria-label="Lodestar 工作区">
 <button data-t="frontier" class="on">选题</button>
 <button data-t="research">研究</button>
@@ -466,16 +466,16 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
   <div class="row"><button class="primary" id="startBtn">开始研究</button><span class="mut small" id="runNote"></span></div></div>
   <div id="resArea"></div>
 </div>
-<div class="tab" id="t-knowledge">
+<div class="tab" id="t-knowledge"><div class="section-head"><div><div class="eyebrow">KNOWLEDGE STATE</div><h2>可复用的认知资产</h2><p>把概念、证据与掌握程度放在同一条研究航迹上。</p></div></div>
   <div class="card"><div class="row"><input type="text" id="kq" placeholder="搜索概念…（回车）"><button class="ghost" onclick="loadK()">搜索</button></div>
   <div class="row"><button id="kseedBtn" class="ghost">seed 已知概念</button><input type="text" id="kseed" placeholder="Agent,Skill,Eval…"></div></div>
   <div id="kArea"></div>
   <div class="card" style="margin-top:14px"><div class="row"><button class="primary" id="quizBtn">评估我的掌握</button>
   <span class="mut small" id="quizNote">agent 出题 → 你回答 → 自动更新 Knowledge State</span></div><div id="quizArea"></div></div>
 </div>
-<div class="tab" id="t-history"><div id="hArea"></div></div>
+<div class="tab" id="t-history"><div class="section-head"><div><div class="eyebrow">RESEARCH LOG</div><h2>研究历史</h2><p>每一次研究都留下问题、来源和下一步动作。</p></div></div><div id="hArea"></div></div>
 <div class="tab" id="t-experiment"><div class="section-head"><div><div class="eyebrow">EXPERIMENT LAB</div><h2>从研究结论到可运行骨架</h2><p>每个实验都保留假设、来源任务和可复现的 A/B 验证入口。</p></div><button onclick="loadExp()" class="ghost">刷新实验</button></div><div id="eSummary"></div><div id="eArea"></div></div>
-<div class="tab" id="t-project">
+<div class="tab" id="t-project"><div class="section-head"><div><div class="eyebrow">PROJECTS</div><h2>进行中的项目</h2><p>把研究问题、代码仓库与实验骨架放在同一处管理。</p></div></div>
   <div class="card"><div class="row"><input type="text" id="purl" placeholder="GitHub 仓库链接，如 https://github.com/xxx/repo">
   <button id="paddBtn" class="ghost">登记项目</button></div>
   <div class="row"><label class="mut small">标记状态（研究只关联「active」）：</label>
@@ -484,7 +484,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 </div>
 </main>
 <script>
-function toggleTheme(){const h=document.documentElement;const cur=h.getAttribute("data-theme");const nxt=cur==="light"?"":"light";h.setAttribute("data-theme",nxt);localStorage.setItem("lodestar-theme",nxt);document.querySelector("#themeBtn").textContent=nxt==="light"?"☾":"☀"}if(localStorage.getItem("lodestar-theme")==="light"){document.documentElement.setAttribute("data-theme","light")}
+function updateThemeLabel(){const light=document.documentElement.getAttribute("data-theme")==="light";document.querySelector("#themeBtn").textContent=light?"☾ 深色":"☀ 浅色";}function toggleTheme(){const h=document.documentElement;const cur=h.getAttribute("data-theme");const nxt=cur==="light"?"":"light";h.setAttribute("data-theme",nxt);localStorage.setItem("lodestar-theme",nxt);updateThemeLabel();}if(localStorage.getItem("lodestar-theme")==="light"){document.documentElement.setAttribute("data-theme","light")}updateThemeLabel();
 const $=s=>document.querySelector(s);
 function goResearch(){$('#tabs').querySelector('button[data-t=research]').click();setTimeout(()=>$('#goal').focus(),0);}
 async function loadSummary(){try{const s=await jget('/api/summary');$('#statTasks').textContent=s.tasks;$('#statKnowledge').textContent=s.knowledge;$('#statProjects').textContent=s.projects;}catch(e){}}

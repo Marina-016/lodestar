@@ -116,6 +116,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, PAGE_HTML, "text/html; charset=utf-8")
         if path == "/api/health":
             return self._send(200, {"ok": True, "version": __import__("lodestar").__version__})
+        if path == "/api/summary":
+            ws = _ws()
+            try:
+                return self._send(200, {
+                    "tasks": ws.conn.execute("SELECT COUNT(*) FROM research_tasks").fetchone()[0],
+                    "knowledge": ws.conn.execute("SELECT COUNT(*) FROM concepts").fetchone()[0],
+                    "projects": ws.conn.execute("SELECT COUNT(*) FROM projects WHERE status='active'").fetchone()[0],
+                })
+            finally:
+                ws.close()
         if path == "/api/tasks":
             ws = _ws()
             try:
@@ -472,7 +482,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 function toggleTheme(){const h=document.documentElement;const cur=h.getAttribute("data-theme");const nxt=cur==="light"?"":"light";h.setAttribute("data-theme",nxt);localStorage.setItem("lodestar-theme",nxt);document.querySelector("#themeBtn").textContent=nxt==="light"?"☾":"☀"}if(localStorage.getItem("lodestar-theme")==="light"){document.documentElement.setAttribute("data-theme","light")}
 const $=s=>document.querySelector(s);
 function goResearch(){$('#tabs').querySelector('button[data-t=research]').click();setTimeout(()=>$('#goal').focus(),0);}
-async function loadSummary(){try{const [tasks,knowledge,projects]=await Promise.all([jget('/api/tasks'),jget('/api/knowledge'),jget('/api/projects')]);$('#statTasks').textContent=tasks.length;$('#statKnowledge').textContent=knowledge.length;$('#statProjects').textContent=projects.filter(p=>p.status==='active').length;}catch(e){}}
+async function loadSummary(){try{const s=await jget('/api/summary');$('#statTasks').textContent=s.tasks;$('#statKnowledge').textContent=s.knowledge;$('#statProjects').textContent=s.projects;}catch(e){}}
 async function jget(p,t){const c=new AbortController();const to=setTimeout(()=>c.abort(),t||120000);
  const r=await fetch(p,{signal:c.signal});clearTimeout(to);if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}
 async function jpost(p,b,t){const c=new AbortController();const to=setTimeout(()=>c.abort(),t||120000);

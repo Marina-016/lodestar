@@ -12,6 +12,7 @@ import webbrowser
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
+from pathlib import Path
 
 from lodestar.agent.loop import ResearchAgent
 from lodestar.config import load_config
@@ -150,7 +151,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/experiments":
             ws = _ws()
             try:
-                return self._send(200, repo.list_experiments(ws.conn))
+                items = repo.list_experiments(ws.conn)
+                for item in items:
+                    output = Path(item["output_dir"]) if item.get("output_dir") else None
+                    item["files"] = sorted(p.name for p in output.iterdir() if p.is_file()) if output and output.exists() else []
+                return self._send(200, items)
             finally:
                 ws.close()
         if path == "/api/projects":
@@ -319,7 +324,7 @@ class Handler(BaseHTTPRequestHandler):
                 idx = (int(data.get("pick") or 1)) - 1
                 idx = max(0, min(idx, len(opts) - 1))
                 exp_id = repo.add_experiment(ws.conn, opts[idx], task_id=task["id"],
-                                            description="(UI 保存)")
+                                            description="从 Research Brief 提取的可验证假设，下一步比较 baseline / candidate 并运行 eval.py。")
                 return self._send(200, {"exp_id": exp_id, "hypothesis": opts[idx][:80]})
             finally:
                 ws.close()
@@ -384,10 +389,10 @@ button{background:var(--acc);color:#090d12;border:none;border-radius:6px;padding
 button:hover{opacity:.92;box-shadow:0 0 14px rgba(232,148,58,.12)}
 button.ghost{background:transparent;color:var(--acc);border:1px solid var(--acc-dim);font-weight:650}
 button:disabled{opacity:.35;cursor:wait}
-select{background:var(--bg);border:1px solid var(--line);color:var(--fg);border-radius:6px;padding:7px 10px;font:inherit;font-size:13px}::placeholder{color:var(--mut);opacity:.82}
+select{appearance:none;background-color:var(--card);background-image:linear-gradient(45deg,transparent 50%,var(--acc) 50%),linear-gradient(135deg,var(--acc) 50%,transparent 50%);background-position:calc(100% - 15px) 50%,calc(100% - 10px) 50%;background-size:5px 5px,5px 5px;background-repeat:no-repeat;border:1px solid var(--hair);color:var(--fg);border-radius:8px;padding:9px 34px 9px 12px;font:inherit;font-size:13px;min-height:38px}::placeholder{color:var(--mut);opacity:.82}
 .mut{color:var(--mut)}.ok{color:var(--ok)}.warn{color:var(--warn)}
 .item{background:var(--card);border:1px solid var(--line);border-left:3px solid transparent;border-radius:6px;padding:14px 18px;margin-bottom:10px;cursor:pointer;transition:border-color .12s,border-left-color .2s}
-.item:hover{border-color:var(--acc-dim);border-left-color:var(--acc)}
+.item:hover{border-color:var(--acc-dim);border-left-color:var(--acc)}.frontier-item{padding:18px 20px;border-left:0}.frontier-top{display:flex;align-items:center;justify-content:space-between;gap:10px}.frontier-item h3{margin:9px 0 5px;font-size:16px;line-height:1.4;color:var(--fg)}.frontier-meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:13px}.frontier-meta span{padding:4px 8px;background:var(--bg);border:1px solid var(--line);border-radius:5px;color:var(--mut);font-size:11px}.frontier-item .row{margin-top:14px}
 .small{font-size:12px;color:var(--mut);font-weight:500}.small.ok{color:var(--ok)}.small.warn{color:var(--warn)}
 .badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10.5px;background:var(--bg);color:var(--mut);margin-left:6px;border:1px solid var(--line);letter-spacing:.02em;font-weight:600}
 .badge.run{background:#132618;color:var(--ok);border-color:var(--ok)}.badge.err{background:#241414;color:#e87a7a;border-color:#e87a7a}
@@ -419,12 +424,12 @@ main{max-width:1120px;padding:32px}#frArea{scroll-margin-top:18px}
 .hero-title{max-width:720px;margin:14px 0 8px;font-size:clamp(26px,4vw,42px);line-height:1.12;letter-spacing:-.035em;font-weight:650}
 .hero-copy{max-width:650px;margin:0;color:var(--mut);font-size:15px;line-height:1.75;font-weight:500}
 .hero-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:24px}
-.stat-strip{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin-top:28px;background:var(--hair);border:1px solid var(--hair);border-radius:8px;overflow:hidden}
-.stat{padding:13px 16px;background:rgba(10,14,20,.35)}.stat strong{display:block;font-size:20px;color:var(--fg);line-height:1.1}.stat span{display:block;margin-top:4px;color:var(--mut);font-size:12px;font-weight:500}
+.stat-strip{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:28px;background:transparent;border:0;overflow:visible}
+.stat{position:relative;min-height:104px;padding:17px 18px 14px;background:linear-gradient(145deg,var(--card),var(--card-2));border:1px solid var(--hair);border-radius:10px;box-shadow:0 8px 22px rgba(87,61,31,.07);overflow:hidden}.stat:after{content:"";position:absolute;right:-18px;top:-22px;width:74px;height:74px;border:1px solid var(--acc-dim);border-radius:50%;opacity:.22}.stat strong{display:block;font-size:28px;color:var(--fg);line-height:1;font-weight:750}.stat span{display:block;margin-top:8px;color:var(--fg);font-size:13px;font-weight:700;letter-spacing:.01em}.stat .stat-caption{display:block;margin-top:2px;color:var(--mut);font-size:11px;font-weight:500;letter-spacing:0}
 .section-head{display:flex;justify-content:space-between;align-items:end;gap:16px;margin:26px 0 12px}.section-head h2{margin:0;font-size:18px;letter-spacing:-.015em}.section-head p{margin:0;color:var(--mut);font-size:13px;font-weight:500}
 .result-head{border-left:3px solid var(--acc)}.result-title{margin:10px 0 4px;font-size:22px;line-height:1.25}.result-meta{display:flex;gap:8px;flex-wrap:wrap;color:var(--mut);font-size:11px}.meta-chip{padding:3px 8px;background:var(--bg);border:1px solid var(--line);border-radius:999px}
-.result-layout{display:grid;grid-template-columns:minmax(0,1fr) 220px;gap:18px;align-items:start}.result-layout>.brief{margin:0}.result-aside{display:grid;gap:12px;position:sticky;top:18px}.side-card{padding:15px 16px;background:var(--card-2);border:1px solid var(--hair);border-radius:8px}.side-card p{margin:8px 0 0;color:var(--mut);font-size:12px;line-height:1.65}
-.empty{padding:32px 20px;text-align:center;color:var(--mut);border:1px dashed var(--hair);border-radius:8px}.empty-mark{display:block;margin-bottom:7px;color:var(--acc);font-size:20px}
+.result-layout{display:grid;grid-template-columns:minmax(0,1fr) 238px;gap:20px;align-items:start}.result-layout>.brief{margin:0}.result-aside{display:grid;gap:12px;position:sticky;top:18px}.side-card{padding:17px 17px;background:linear-gradient(145deg,var(--card-2),var(--card));color:var(--fg);border:1px solid var(--hair);border-radius:10px;box-shadow:0 8px 22px rgba(87,61,31,.07)}.side-card p{margin:8px 0 0;color:var(--fg);font-size:12px;line-height:1.7}
+.empty{padding:32px 20px;text-align:center;color:var(--mut);border:1px dashed var(--hair);border-radius:10px}.empty-mark{display:block;margin-bottom:7px;color:var(--acc);font-size:20px}.save-confirm{display:flex;align-items:center;gap:12px;width:100%;padding:12px 14px;background:linear-gradient(135deg,#edf7ec,#fbfff8);border:1px solid #a7c6a3;border-radius:9px;color:#294c2f}.save-confirm .save-check{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;background:#4d8b57;color:#fff;font-weight:800}.save-confirm .save-copy{flex:1}.save-confirm .save-copy strong{display:block;font-size:13px}.save-confirm .save-copy span{display:block;margin-top:2px;font-size:12px;color:#4f6d54}.exp-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:0 0 18px}.exp-summary-card{padding:14px 16px;background:var(--card);border:1px solid var(--hair);border-radius:10px}.exp-summary-card strong{display:block;font-size:22px;line-height:1}.exp-summary-card span{display:block;margin-top:5px;color:var(--mut);font-size:11px}.exp-card{padding:18px 20px;background:var(--card);border:1px solid var(--hair);border-radius:11px;margin-bottom:12px;box-shadow:0 6px 18px rgba(87,61,31,.05)}.exp-card.focus{border-color:var(--acc);box-shadow:0 0 0 3px rgba(196,119,43,.12),0 10px 24px rgba(87,61,31,.09)}.exp-top,.exp-meta{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.exp-index{font-size:12px;color:var(--mut);font-weight:700;letter-spacing:.08em}.exp-card h3{margin:12px 0 7px;font-size:17px;line-height:1.4;color:var(--fg)}.exp-description{margin:0;color:var(--mut);font-size:12px;line-height:1.65}.exp-meta{margin-top:14px;justify-content:flex-start;color:var(--mut);font-size:11px}.path-chip{display:flex;align-items:center;gap:8px;margin-top:12px;padding:9px 11px;background:var(--bg);border:1px solid var(--line);border-radius:7px;color:var(--ok);font:11px/1.5 Consolas,"Microsoft YaHei",monospace;overflow-wrap:anywhere}.file-list{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}.file-list span{padding:3px 7px;background:var(--card-2);border:1px solid var(--hair);border-radius:5px;color:var(--mut);font-size:10px}.exp-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:14px}.exp-feedback{font-size:12px;color:var(--ok)}
 button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid var(--acc);outline-offset:2px;box-shadow:none}
 @media(max-width:760px){header{padding:18px 18px 14px}.tabs{padding:12px 18px 0}main{padding:20px 16px}.hero{padding:24px 22px}.hero-title{font-size:30px}.stat-strip{grid-template-columns:1fr}.result-layout{grid-template-columns:1fr}.result-aside{position:static}.section-head{display:block}.section-head p{margin-top:4px}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;transition:none!important;animation:none!important}}
@@ -435,7 +440,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 [data-theme=light] .stat span{color:var(--mut);font-size:12px;font-weight:600;letter-spacing:.01em}
 [data-theme=light] .mut,[data-theme=light] .small{color:var(--mut)}
 [data-theme=light] .warn{color:var(--warn);font-weight:600}
-[data-theme=light] .hero-title,[data-theme=light] .section-head h2{color:var(--fg)}
+[data-theme=light] .hero-title,[data-theme=light] .section-head h2{color:var(--fg)}[data-theme=light] .side-card{background:linear-gradient(145deg,#fff7ea,#f2e7d5);border-color:#d7b98f;box-shadow:0 8px 22px rgba(122,84,36,.09)}[data-theme=light] .side-card p{color:#40372e}[data-theme=light] .side-card .eyebrow{color:#a85d1f}[data-theme=light] .file-list span{background:#f4ecdf}
 [data-theme=light] button.primary{color:#2b180a;font-weight:700}
 [data-theme=light] .hero{background:linear-gradient(135deg,rgba(225,156,74,.14),transparent 48%),var(--card);box-shadow:0 16px 36px rgba(122,84,36,.08)}
 [data-theme=light] .stat{background:var(--card)}
@@ -454,7 +459,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 <button data-t="project">项目</button>
 </div>
 <main>
-<div class="tab on" id="t-frontier"><div class="hero"><div class="eyebrow">AI RESEARCH CONSOLE <span class="badge run">LOCAL WORKSPACE</span></div><h2 class="hero-title">把一个问题，变成一份可追踪的研究简报。</h2><p class="hero-copy">从研究目标出发，沿着来源、证据、洞察和知识更新走完一条完整航迹。</p><div class="hero-actions"><button class="primary" onclick="goResearch()">开始一次研究</button><button id="frBtn" class="ghost">生成本周选题</button><span class="mut small" id="frNote"></span></div><div class="stat-strip"><div class="stat"><strong id="statTasks">—</strong><span>历史研究</span></div><div class="stat"><strong id="statKnowledge">—</strong><span>知识概念</span></div><div class="stat"><strong id="statProjects">—</strong><span>进行中项目</span></div></div></div><div class="section-head"><div><h2>本周值得研究</h2><p>基于 Knowledge State 和进行中项目，生成 3 个有上下文的方向。</p></div><span class="small">点击选题即可开始</span></div><div id="frArea"></div></div>
+<div class="tab on" id="t-frontier"><div class="hero"><div class="eyebrow">AI RESEARCH CONSOLE <span class="badge run">LOCAL WORKSPACE</span></div><h2 class="hero-title">把一个问题，变成一份可追踪的研究简报。</h2><p class="hero-copy">从研究目标出发，沿着来源、证据、洞察和知识更新走完一条完整航迹。</p><div class="hero-actions"><button class="primary" onclick="goResearch()">开始一次研究</button><button id="frBtn" class="ghost">生成本周选题</button><span class="mut small" id="frNote"></span></div><div class="stat-strip"><div class="stat"><strong id="statTasks">—</strong><span>历史研究</span><span class="stat-caption">可追踪的研究轨迹</span></div><div class="stat"><strong id="statKnowledge">—</strong><span>知识概念</span><span class="stat-caption">持续沉淀的认知资产</span></div><div class="stat"><strong id="statProjects">—</strong><span>进行中项目</span><span class="stat-caption">正在推进的实验方向</span></div></div></div><div class="section-head"><div><h2>本周值得研究</h2><p>基于 Knowledge State 和进行中项目，生成 3 个有上下文的方向。</p></div><span class="small">点击选题即可开始</span></div><div id="frArea"></div></div>
 <div class="tab" id="t-research">
   <div class="section-head"><div><h2>研究问题</h2><p>写下你真正想知道的事，Lodestar 会保留来源和研究轨迹。</p></div></div>
   <div class="card"><textarea id="goal" placeholder="研究目标，如：研究最近 Agent Memory 有哪些值得关注的新方向"></textarea>
@@ -469,7 +474,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
   <span class="mut small" id="quizNote">agent 出题 → 你回答 → 自动更新 Knowledge State</span></div><div id="quizArea"></div></div>
 </div>
 <div class="tab" id="t-history"><div id="hArea"></div></div>
-<div class="tab" id="t-experiment"><button onclick="loadExp()" class="ghost">刷新</button><div id="eArea"></div></div>
+<div class="tab" id="t-experiment"><div class="section-head"><div><div class="eyebrow">EXPERIMENT LAB</div><h2>从研究结论到可运行骨架</h2><p>每个实验都保留假设、来源任务和可复现的 A/B 验证入口。</p></div><button onclick="loadExp()" class="ghost">刷新实验</button></div><div id="eSummary"></div><div id="eArea"></div></div>
 <div class="tab" id="t-project">
   <div class="card"><div class="row"><input type="text" id="purl" placeholder="GitHub 仓库链接，如 https://github.com/xxx/repo">
   <button id="paddBtn" class="ghost">登记项目</button></div>
@@ -501,7 +506,7 @@ function md(t){if(!t)return'';t=t.replace(/&/g,'&amp;').replace(/</g,'&lt;');
  t=t.replace(/\*\*(.*?)\*\*/g,'<b>$1</b>').replace(/\*([^*]+)\*/g,'<i>$1</i>');
  t=t.replace(/\[([^\]]+)\]\((https?:[^)]+)\)/g,'<a href="$2" target="_blank">$1</a>');
  t=t.replace(/^\|(.+)\|$/gm,(m,row)=>{const c=row.split('|').slice(1,-1);return c.every(x=>/^:?-{2,}:?$/.test(x.trim()))?'': '<tr>'+c.map(x=>'<td>'+x.trim()+'</td>').join('')+'</tr>';});
- t=t.replace(/<tr>\s*<\/tr>/g,'');
+ t=t.replace(/<tr>\s*<\/tr>/g,''); t=t.replace(/((?:<tr>.*?<\/tr>\s*)+)/g,'<table><tbody>$1</tbody></table>');
  t=t.replace(/^(?!<)((?:[^<][^\n]*)$)/gm,'<p>$1</p>');
  return t.replace(/\n\n/g,'\n');}
 function esc(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;');}
@@ -529,48 +534,24 @@ function renderTask(d){const t=d.task,b=d.brief_md,upd=d.updates.filter(u=>u.sta
    esc(p.new_status)+'/'+esc(p.new_confidence)+'</span><br><span class="small">'+esc(p.claim||'')+'</span></label>';}).join('')+
    '<div class="row"><button class="primary" onclick="applyChecked(\''+t.id+'\')">应用选中的更新</button></div>';}
  if(t.status==='finished'&&d.opportunities&&d.opportunities.length){
-  h+='<div class="row" style="margin-top:10px"><select id="oppSel">'+d.opportunities.map((o,i)=>'<option value="'+(i+1)+'">'+(i+1)+'. '+esc(o.slice(0,46))+'…</option>').join('')+'</select>'+
+  h+='<div id="experimentSaveRow" class="row experiment-save-row" style="margin-top:10px"><select id="oppSel">'+d.opportunities.map((o,i)=>'<option value="'+(i+1)+'">'+(i+1)+'. '+esc(o.slice(0,46))+'…</option>').join('')+'</select>'+
   '<button class="ghost" onclick="saveExpPick(\''+t.id+'\')">存为实验</button></div>';}
  h+='</div><div class="result-layout"><div class="brief card">'+md(b)+'</div><aside class="result-aside"><div class="side-card"><div class="eyebrow">NEXT MOVE</div><p>'+esc(next)+'</p></div><div class="side-card"><div class="eyebrow">TRACE</div><p>每一步检索、阅读和判断都会保存在这次研究的轨迹里。</p></div></aside></div>';$('#resArea').innerHTML=h;}
 function applyChecked(id){const ids=[...document.querySelectorAll('.updbox:checked')].map(x=>+x.value);
  if(!ids.length){alert('请先勾选要应用的更新');return;}
  jpost('/api/task/apply',{task_id:id,update_ids:ids}).then(r=>{alert('已应用 '+r.count+' 条更新');pollTask(id);});}
-function saveExpPick(id){const pick=+$('#oppSel').value;
- jpost('/api/experiment/save',{task_id:id,pick}).then(r=>{alert(r.exp_id?('已保存为实验 #'+r.exp_id):(r.error||'保存失败'));});}
-async function loadExp(){const d=await jget('/api/experiments');
- $('#eArea').innerHTML=(d.map(e=>'<div class="item"><b>#'+e.id+'</b> <span class="badge '+(e.build_status==='built'?'run':e.build_status==='failed'?'err':'')+'">'+e.build_status+'</span>'+
- '<div>'+esc((e.hypothesis||'').slice(0,80))+'</div>'+
- '<div class="small">task '+esc(e.task_id||'-')+'</div>'+
- (e.output_dir?'<div class="small ok">'+esc(e.output_dir)+'</div>':'')+
- '<div class="row" style="margin:6px 0 0"><button class="ghost" onclick="buildExp('+e.id+')">生成骨架</button></div></div>').join(''))||'<div class="empty"><span class="empty-mark">✦</span>还没有实验，从研究 Brief 里保存一个机会吧。</div>';}
-async function buildExp(id){const r=await jpost('/api/experiment/build',{exp_id:id});
- alert(r.project?('骨架已生成：'+r.project):(r.error||'生成失败'));loadExp();}
+function saveExpPick(id){const pick=+$("#oppSel").value;const row=$("#experimentSaveRow");if(!row)return;row.insertAdjacentHTML("beforeend","<span class=\"small\">保存中…</span>");jpost("/api/experiment/save",{task_id:id,pick}).then(r=>{if(r.error){row.innerHTML="<span class=\"warn\">"+esc(r.error)+"</span>";return;}row.innerHTML="<div class=\"save-confirm\"><span class=\"save-check\">✓</span><div class=\"save-copy\"><strong>已保存为实验 #"+r.exp_id+"</strong><span>"+esc(r.hypothesis||"")+"</span></div><button class=\"primary\" onclick=\"openExperiment("+r.exp_id+")\">查看实验</button></div>";}).catch(e=>{row.innerHTML="<span class=\"warn\">保存失败："+esc(e.message||e)+"</span>";});}
+function openExperiment(id){document.querySelector("#tabs button[data-t=experiment]").click();setTimeout(()=>loadExp(id),0);}
+async function loadExp(focusId){const d=await jget("/api/experiments");const built=d.filter(e=>e.build_status==="built").length;const draft=d.length-built;document.querySelector("#eSummary").innerHTML=`<div class="exp-summary"><div class="exp-summary-card"><strong>${d.length}</strong><span>全部实验</span></div><div class="exp-summary-card"><strong>${built}</strong><span>已生成骨架</span></div><div class="exp-summary-card"><strong>${draft}</strong><span>待验证假设</span></div></div>`;document.querySelector("#eArea").innerHTML=(d.map(e=>{const files=e.files||[];const fileHtml=files.length?`<div class="file-list">${files.map(f=>`<span>${esc(f)}</span>`).join("")}</div>`:"";const path=e.output_dir?`<div class="path-chip">骨架目录 · ${esc(e.output_dir)}</div>`:"";const taskLink=e.task_id?`<button class="ghost" onclick="openTask(&quot;${esc(e.task_id)}&quot;)">查看研究</button>`:"";return `<article class="exp-card ${focusId==e.id?"focus":""}" id="exp-${e.id}"><div class="exp-top"><div><span class="exp-index">EXPERIMENT #${e.id}</span> <span class="badge ${e.build_status==="built"?"run":e.build_status==="failed"?"err":""}">${esc(e.build_status)}</span></div><span class="small">${esc(e.created_at||"")}</span></div><h3>${esc(e.hypothesis||"未命名实验")}</h3><p class="exp-description">${esc(e.description||"从研究 Brief 提取的可验证假设，等待生成 A/B 骨架。")}</p><div class="exp-meta"><span>来源任务 ${esc(e.task_id||"—")}</span><span>${e.build_status==="built"?"已具备可运行目录":"下一步：生成骨架并运行 eval.py"}</span></div>${path}${fileHtml}<div class="exp-actions">${taskLink}<button class="primary" onclick="buildExp(${e.id})">${e.build_status==="built"?"重新生成骨架":"生成骨架"}</button><span class="exp-feedback" id="exp-feedback-${e.id}"></span></div></article>`}).join(""))||`<div class="empty"><span class="empty-mark">✦</span>还没有实验，从研究 Brief 的 Project Opportunities 保存一个假设吧。</div>`;if(focusId){const node=document.querySelector("#exp-"+focusId);if(node){node.scrollIntoView({behavior:"smooth",block:"center"});}}}
+async function buildExp(id){const feedback=document.querySelector("#exp-feedback-"+id);if(feedback)feedback.textContent="正在生成骨架…";try{const r=await jpost("/api/experiment/build",{exp_id:id});await loadExp(id);const done=document.querySelector("#exp-feedback-"+id);if(done)done.innerHTML=r.project?"<span class=\"ok\">骨架已生成，目录已更新</span>":"<span class=\"warn\">"+esc(r.error||"生成失败")+"</span>";}catch(e){const done=document.querySelector("#exp-feedback-"+id);if(done)done.innerHTML="<span class=\"warn\">生成失败："+esc(e.message||e)+"</span>";}}
 // ---- 选题 ----
-const demoFrontier=[
- {topic:"Lodestar \u5982\u4f55\u628a Research Trace \u53d8\u6210 Skill Promotion",priority:"high",related_projects:["Marina-016/lodestar"],why:"\u5df2\u6709\u7814\u7a76\u3001\u77e5\u8bc6\u72b6\u6001\u548c\u5b9e\u9a8c\u95ed\u73af\u5df2\u7ecf\u5177\u5907\uff0c\u4e0b\u4e00\u6b65\u662f\u628a\u8bc1\u636e\u94fe\u53d8\u6210\u53ef\u590d\u7528\u80fd\u529b\u3002"},
- {topic:"Agent Memory \u5982\u4f55\u51cf\u5c11\u4e0b\u4e00\u6b21\u7814\u7a76\u7684\u91cd\u590d\u68c0\u7d22",priority:"medium",related_projects:["Marina-016/lodestar"],why:"\u4ece Knowledge State \u7684 partial \u6982\u5ff5\u51fa\u53d1\uff0c\u4f18\u5148\u8865\u9f50\u6700\u5f71\u54cd\u4e0b\u4e00\u6b21\u5224\u65ad\u7684\u4e0a\u4e0b\u6587\u3002"},
- {topic:"Weekly Frontier \u5982\u4f55\u76f4\u63a5\u9a71\u52a8 Experiment",priority:"high",related_projects:["Marina-016/lodestar"],why:"\u628a\u9009\u9898\u3001\u7814\u7a76\u7b80\u62a5\u548c\u53ef\u9a8c\u8bc1\u5047\u8bbe\u8fde\u8d77\u6765\uff0c\u6700\u9002\u5408\u5c55\u793a Lodestar \u7684\u5b8c\u6574\u95ed\u73af\u3002"}
-];
-function renderDemoFrontier(items){
- $('#frArea').innerHTML=items.map((s)=>{
-  const t=esc(s.topic).replace(/'/g,"\\'");
-  return '<div class="item"><b>'+esc(s.topic)+'</b> <span class="badge">'+s.priority+'</span>'+
-   (s.related_projects&&s.related_projects.length?' <span class="badge run">'+s.related_projects.map(esc).join('\u3001')+'</span>':'')+
-   '<div class="small">'+esc(s.why)+'</div>'+
-   '<div class="row" style="margin:6px 0 0"><button class="ghost" onclick="researchTopic(\''+t+'\')">\u7814\u7a76\u8fd9\u6761</button>'+
-   '<button class="ghost" onclick="useTopic(\''+t+'\')">\u586b\u5230\u7814\u7a76\u6846</button></div></div>';
- }).join('');
-}
+const demoFrontier=[{topic:"Lodestar 如何把 Research Trace 变成 Skill Promotion",priority:"high",label:"能力晋升",related_projects:["Marina-016/lodestar"],why:"把一次研究里的证据、判断和 Eval 结果，沉淀成下一次可以复用的 Skill。",deliverable:"Skill Promotion 证据面板",signal:"Trace · Eval · Knowledge"},{topic:"Agent Memory 如何减少下一次研究的重复检索",priority:"medium",label:"记忆更新",related_projects:["Marina-016/lodestar"],why:"从 partial 概念开始补齐可引用上下文，让下一次研究更快进入真正的新问题。",deliverable:"Memory 更新策略与回归集",signal:"Recall · Confidence · Reuse"},{topic:"Weekly Frontier 如何直接驱动 Experiment",priority:"high",label:"研究闭环",related_projects:["Lodestar / Skill Evaluation Lab"],why:"把选题、Brief、可验证假设和骨架目录串成一条适合演示的产品主线。",deliverable:"一键生成 A/B 实验骨架",signal:"Brief · Hypothesis · Build"}];
+function renderDemoFrontier(items){document.querySelector("#frArea").innerHTML=items.map(s=>{const t=esc(s.topic).replace(/"/g,"&quot;");const project=(s.related_projects||[]).map(esc).join(" · ");return `<div class="item frontier-item"><div class="frontier-top"><span class="eyebrow">${esc(s.label||"RESEARCH DIRECTION")}</span><span class="badge">${esc(s.priority||"medium")}</span></div><h3>${esc(s.topic)}</h3><div class="small">${esc(s.why||"")}</div><div class="frontier-meta"><span>${esc(s.deliverable||"研究 Brief")}</span><span>${esc(s.signal||project)}</span></div><div class="row"><button class="ghost" onclick="researchTopic(&quot;${t}&quot;)">研究这条</button><button class="ghost" onclick="useTopic(&quot;${t}&quot;)">填到研究框</button></div></div>`}).join("");}
 renderDemoFrontier(demoFrontier);$('#frBtn').onclick=async()=>{$('#frNote').innerHTML='<span class="spin"></span>生成中…';
  try{
   const r=await jpost('/api/frontier',{},60000);$('#frNote').innerHTML='';
   if(r.error){$('#frNote').innerHTML='<span class="warn">'+esc(r.error)+'</span>';}
-  if(r.suggestions&&r.suggestions.length){$('#frArea').innerHTML=r.suggestions.map((s,i)=>{const t=esc(s.topic).replace(/'/g,"\\'");
-   return '<div class="item"><b>'+esc(s.topic)+'</b> <span class="badge">'+s.priority+'</span>'+
-   (s.related_projects&&s.related_projects.length?' <span class="badge run">'+s.related_projects.map(esc).join('、')+'</span>':'')+
-   '<div class="small">'+esc(s.why)+'</div>'+
-   '<div class="row" style="margin:6px 0 0"><button class="ghost" onclick="researchTopic(\''+t+'\')">研究这条</button>'+
-   '<button class="ghost" onclick="useTopic(\''+t+'\')">填到研究框</button></div></div>';}).join('');$('#frArea').scrollIntoView({behavior:'smooth',block:'start'});}
+  if(r.suggestions&&r.suggestions.length){renderDemoFrontier(r.suggestions);document.querySelector("#frArea").scrollIntoView({behavior:"smooth",block:"start"});}
   else{$('#frArea').innerHTML='<p class="warn">（无选题返回）</p>';}
  }catch(e){$('#frNote').innerHTML='<span class="warn">请求失败：'+esc(e.message||e)+'</span>';}};
 function useTopic(t){$('#goal').value=t;$('#tabs').querySelector('button[data-t=research]').click();}

@@ -395,9 +395,32 @@ th{background:var(--bg);color:var(--mut);font-weight:600;font-size:11px;letter-s
 .row{display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap}
 .row input[type=text]{width:auto;flex:1;min-width:140px}
 .row .mut{white-space:nowrap}::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}::-webkit-scrollbar-thumb:hover{background:var(--mut)}
-[data-theme=light]{--bg:#f5f3f0;--card:#ffffff;--line:#e0dcd6;--fg:#1a1a1a;--mut:#6b6560;--acc:#c47a20;--acc-dim:#8c5a1a;--ok:#3d7a4a;--warn:#b85a20}body{position:relative;z-index:1}main,header,.tabs{position:relative;z-index:1}.card,.item{position:relative;z-index:1}</style></head><body>
+[data-theme=light]{--card-2:#f0ede8;--hair:#d4cec5;--bg:#f5f3f0;--card:#ffffff;--line:#e0dcd6;--fg:#1a1a1a;--mut:#6b6560;--acc:#c47a20;--acc-dim:#8c5a1a;--ok:#3d7a4a;--warn:#b85a20}body{position:relative;z-index:1}main,header,.tabs{position:relative;z-index:1}.card,.item{position:relative;z-index:1}
+:root{--card-2:#151c29;--hair:#263247;--shadow:0 18px 50px rgba(0,0,0,.18)}
+body{background:radial-gradient(circle at 82% -10%,rgba(232,148,58,.08),transparent 30%),var(--bg)}
+header{max-width:1120px;margin:0 auto;padding:24px 32px 18px;border-bottom:1px solid var(--hair)}
+header h1{font-size:16px;letter-spacing:.02em}
+.tabs{max-width:1120px;margin:0 auto;padding:16px 32px 0;overflow-x:auto}
+main{max-width:1120px;padding:32px}
+.card{box-shadow:var(--shadow);border-color:var(--hair)}
+.hero{position:relative;overflow:hidden;padding:32px 36px;margin-bottom:24px;background:linear-gradient(135deg,rgba(232,148,58,.12),transparent 48%),var(--card);border:1px solid var(--hair);border-radius:12px}
+.hero:after{content:'✦';position:absolute;right:30px;top:16px;color:var(--acc);font-size:76px;opacity:.11;transform:rotate(18deg)}
+.eyebrow{font-size:10px;line-height:1.2;color:var(--acc);font-weight:700;letter-spacing:.16em;text-transform:uppercase}
+.hero-title{max-width:720px;margin:14px 0 8px;font-size:clamp(26px,4vw,42px);line-height:1.12;letter-spacing:-.035em;font-weight:650}
+.hero-copy{max-width:650px;margin:0;color:var(--mut);font-size:15px;line-height:1.75}
+.hero-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:24px}
+.stat-strip{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin-top:28px;background:var(--hair);border:1px solid var(--hair);border-radius:8px;overflow:hidden}
+.stat{padding:13px 16px;background:rgba(10,14,20,.35)}.stat strong{display:block;font-size:20px;color:var(--fg);line-height:1.1}.stat span{display:block;margin-top:4px;color:var(--mut);font-size:11px}
+.section-head{display:flex;justify-content:space-between;align-items:end;gap:16px;margin:26px 0 12px}.section-head h2{margin:0;font-size:18px;letter-spacing:-.015em}.section-head p{margin:0;color:var(--mut);font-size:12px}
+.result-head{border-left:3px solid var(--acc)}.result-title{margin:10px 0 4px;font-size:22px;line-height:1.25}.result-meta{display:flex;gap:8px;flex-wrap:wrap;color:var(--mut);font-size:11px}.meta-chip{padding:3px 8px;background:var(--bg);border:1px solid var(--line);border-radius:999px}
+.result-layout{display:grid;grid-template-columns:minmax(0,1fr) 220px;gap:18px;align-items:start}.result-layout>.brief{margin:0}.result-aside{display:grid;gap:12px;position:sticky;top:18px}.side-card{padding:15px 16px;background:var(--card-2);border:1px solid var(--hair);border-radius:8px}.side-card p{margin:8px 0 0;color:var(--mut);font-size:12px;line-height:1.65}
+.empty{padding:32px 20px;text-align:center;color:var(--mut);border:1px dashed var(--hair);border-radius:8px}.empty-mark{display:block;margin-bottom:7px;color:var(--acc);font-size:20px}
+button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid var(--acc);outline-offset:2px;box-shadow:none}
+@media(max-width:760px){header{padding:18px 18px 14px}.tabs{padding:12px 18px 0}main{padding:20px 16px}.hero{padding:24px 22px}.hero-title{font-size:30px}.stat-strip{grid-template-columns:1fr}.result-layout{grid-template-columns:1fr}.result-aside{position:static}.section-head{display:block}.section-head p{margin-top:4px}}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;transition:none!important;animation:none!important}}
+</style></head><body>
 <header><h1>Lodestar（导星）<span class="v" id="ver"></span></h1><button class="ghost" id="themeBtn" onclick="toggleTheme()" style="font-size:11px;padding:3px 10px;margin-left:auto" title="切换浅色/深色主题">☀</button></header>
-<div class="tabs" id="tabs">
+<div class="tabs" id="tabs" role="tablist" aria-label="Lodestar 工作区">
 <button data-t="frontier" class="on">选题</button>
 <button data-t="research">研究</button>
 <button data-t="knowledge">知识库</button>
@@ -406,8 +429,9 @@ th{background:var(--bg);color:var(--mut);font-weight:600;font-size:11px;letter-s
 <button data-t="project">项目</button>
 </div>
 <main>
-<div class="tab on" id="t-frontier"><div class="card"><p class="mut small" style="margin:0 0 10px">基于你的 Knowledge State 和进行中项目，推荐本周值得研究的 3 个方向。点击建议可直接开始研究。</p><div class="row"><button id="frBtn">生成本周选题</button><span class="mut small" id="frNote"></span></div></div><div id="frArea"></div></div>
+<div class="tab on" id="t-frontier"><div class="hero"><div class="eyebrow">AI RESEARCH CONSOLE <span class="badge run">LOCAL WORKSPACE</span></div><h2 class="hero-title">把一个问题，变成一份可追踪的研究简报。</h2><p class="hero-copy">从研究目标出发，沿着来源、证据、洞察和知识更新走完一条完整航迹。</p><div class="hero-actions"><button onclick="goResearch()">开始一次研究</button><button id="frBtn" class="ghost">生成本周选题</button><span class="mut small" id="frNote"></span></div><div class="stat-strip"><div class="stat"><strong id="statTasks">—</strong><span>历史研究</span></div><div class="stat"><strong id="statKnowledge">—</strong><span>知识概念</span></div><div class="stat"><strong id="statProjects">—</strong><span>进行中项目</span></div></div></div><div class="section-head"><div><h2>本周值得研究</h2><p>基于 Knowledge State 和进行中项目，生成 3 个有上下文的方向。</p></div><span class="small">点击选题即可开始</span></div><div id="frArea"></div></div>
 <div class="tab" id="t-research">
+  <div class="section-head"><div><h2>研究问题</h2><p>写下你真正想知道的事，Lodestar 会保留来源和研究轨迹。</p></div></div>
   <div class="card"><textarea id="goal" placeholder="研究目标，如：研究最近 Agent Memory 有哪些值得关注的新方向"></textarea>
   <div class="row"><button id="startBtn">开始研究</button><span class="mut small" id="runNote"></span></div></div>
   <div id="resArea"></div>
@@ -417,7 +441,7 @@ th{background:var(--bg);color:var(--mut);font-weight:600;font-size:11px;letter-s
   <div class="row"><button id="kseedBtn" class="ghost">seed 已知概念</button><input type="text" id="kseed" placeholder="Agent,Skill,Eval…"></div></div>
   <div id="kArea"></div>
   <div class="card" style="margin-top:14px"><div class="row"><button id="quizBtn">评估我的掌握</button>
-  <span class="mut small">agent 出题 → 你回答 → 自动更新 Knowledge State</span></div><div id="quizArea"></div></div>
+  <span class="mut small" id="quizNote">agent 出题 → 你回答 → 自动更新 Knowledge State</span></div><div id="quizArea"></div></div>
 </div>
 <div class="tab" id="t-history"><div id="hArea"></div></div>
 <div class="tab" id="t-experiment"><button onclick="loadExp()" class="ghost">刷新</button><div id="eArea"></div></div>
@@ -432,6 +456,8 @@ th{background:var(--bg);color:var(--mut);font-weight:600;font-size:11px;letter-s
 <script>
 function toggleTheme(){const h=document.documentElement;const cur=h.getAttribute("data-theme");const nxt=cur==="light"?"":"light";h.setAttribute("data-theme",nxt);localStorage.setItem("lodestar-theme",nxt);document.querySelector("#themeBtn").textContent=nxt==="light"?"☾":"☀"}if(localStorage.getItem("lodestar-theme")==="light"){document.documentElement.setAttribute("data-theme","light")}
 const $=s=>document.querySelector(s);
+function goResearch(){$('#tabs').querySelector('button[data-t=research]').click();setTimeout(()=>$('#goal').focus(),0);}
+async function loadSummary(){try{const [tasks,knowledge,projects]=await Promise.all([jget('/api/tasks'),jget('/api/knowledge'),jget('/api/projects')]);$('#statTasks').textContent=tasks.length;$('#statKnowledge').textContent=knowledge.length;$('#statProjects').textContent=projects.filter(p=>p.status==='active').length;}catch(e){}}
 async function jget(p,t){const c=new AbortController();const to=setTimeout(()=>c.abort(),t||120000);
  const r=await fetch(p,{signal:c.signal});clearTimeout(to);if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}
 async function jpost(p,b,t){const c=new AbortController();const to=setTimeout(()=>c.abort(),t||120000);
@@ -443,7 +469,7 @@ $('#tabs').onclick=e=>{const b=e.target.closest('button');if(!b)return;
  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
  b.classList.add('on');$('#t-'+b.dataset.t).classList.add('on');
  if(b.dataset.t==='knowledge')loadK(); if(b.dataset.t==='history')loadH(); if(b.dataset.t==='experiment')loadExp(); if(b.dataset.t==='project')loadProjects();};
-jget('/api/health').then(h=>$('#ver').textContent='v'+h.version);
+jget('/api/health').then(h=>$('#ver').textContent='v'+h.version); loadSummary();
 // ---- md 渲染（够用）----
 function md(t){if(!t)return'';t=t.replace(/&/g,'&amp;').replace(/</g,'&lt;');
  t=t.replace(/^### (.*)$/gm,'<h3>$1</h3>').replace(/^## (.*)$/gm,'<h2>$1</h2>').replace(/^# (.*)$/gm,'<h2>$1</h2>');
@@ -455,19 +481,21 @@ function md(t){if(!t)return'';t=t.replace(/&/g,'&amp;').replace(/</g,'&lt;');
  return t.replace(/\n\n/g,'\n');}
 function esc(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;');}
 // ---- 研究 ----
-async function startResearch(){const g=$('#goal').value.trim();if(!g)return;
- $('#runNote').innerHTML='<span class="spin"></span>研究启动中…';const r=await jpost('/api/research',{goal:g});
- $('#runNote').innerHTML='';if(r.error){$('#runNote').innerHTML='<span class="warn">'+esc(r.error)+'</span>';return;}
- pollTask(r.task_id);}
+async function startResearch(){const g=$('#goal').value.trim();if(!g){$('#runNote').innerHTML='<span class="warn">先写下一个研究问题。</span>';return;}
+ $('#runNote').innerHTML='<span class="spin"></span>研究启动中…';
+ try{const r=await jpost('/api/research',{goal:g});$('#runNote').innerHTML='';if(r.error){$('#runNote').innerHTML='<span class="warn">'+esc(r.error)+'</span>';return;}pollTask(r.task_id);}
+ catch(e){$('#runNote').innerHTML='<span class="warn">请求失败：'+esc(e.message||e)+'</span>';}
+}
 $('#startBtn').onclick=startResearch;
 function researchTopic(t){$('#goal').value=t;startResearch();$('#tabs').querySelector('button[data-t=research]').click();}
 let pv=0;
 async function pollTask(id){$('#runNote').innerHTML='<span class="spin"></span>研究中…';
  const iv=setInterval(async()=>{const d=await jget('/api/task/'+id);
   if(d.task&&(d.task.status==='finished'||d.task.status==='error')){clearInterval(iv);$('#runNote').innerHTML='';
-   renderTask(d);pv=0;}else{$('#runNote').innerHTML='<span class="spin"></span>研究中…（'+(++pv)+'s · 步骤 '+(d.trace?d.trace.length:0)+'）';}},2000);}
+   renderTask(d);loadSummary();pv=0;}else{$('#runNote').innerHTML='<span class="spin"></span>研究中…（'+(++pv)+'s · 步骤 '+(d.trace?d.trace.length:0)+'）';}},2000);}
 function renderTask(d){const t=d.task,b=d.brief_md,upd=d.updates.filter(u=>u.status==='pending');
- let h='<div class="card"><h3 style="margin:0 0 6px">'+esc(t.goal)+'</h3><span class="mut small">task '+t.id+' · '+t.status+'</span>';
+ const next=upd.length?'先确认知识更新，再把结论沉淀进 Knowledge State。':'可以继续从本次 Brief 的 Project Opportunities 创建一个实验。';
+ let h='<div class="card result-head"><div class="eyebrow">RESEARCH RUN <span class="badge">'+esc(t.status)+'</span></div><h2 class="result-title">'+esc(t.goal)+'</h2><div class="result-meta"><span class="meta-chip">task '+t.id+'</span><span class="meta-chip">'+esc(t.status)+'</span></div>';
  if(t.metrics&&t.metrics.degraded){h+='<p class="warn">⚠️ 实时研究失败，以下为示例数据（mock 降级）。</p>';}
  else if(t.status==='error'){h+='<p class="warn">'+esc((t.metrics||{}).error||'执行失败')+'</p>';}
  if(upd.length){h+='<h4>待应用的知识更新</h4>'+upd.map(u=>{
@@ -478,7 +506,7 @@ function renderTask(d){const t=d.task,b=d.brief_md,upd=d.updates.filter(u=>u.sta
  if(t.status==='finished'&&d.opportunities&&d.opportunities.length){
   h+='<div class="row" style="margin-top:10px"><select id="oppSel">'+d.opportunities.map((o,i)=>'<option value="'+(i+1)+'">'+(i+1)+'. '+esc(o.slice(0,46))+'…</option>').join('')+'</select>'+
   '<button class="ghost" onclick="saveExpPick(\''+t.id+'\')">存为实验</button></div>';}
- h+='</div><div class="brief">'+md(b)+'</div>';$('#resArea').innerHTML=h;}
+ h+='</div><div class="result-layout"><div class="brief card">'+md(b)+'</div><aside class="result-aside"><div class="side-card"><div class="eyebrow">NEXT MOVE</div><p>'+esc(next)+'</p></div><div class="side-card"><div class="eyebrow">TRACE</div><p>每一步检索、阅读和判断都会保存在这次研究的轨迹里。</p></div></aside></div>';$('#resArea').innerHTML=h;}
 function applyChecked(id){const ids=[...document.querySelectorAll('.updbox:checked')].map(x=>+x.value);
  if(!ids.length){alert('请先勾选要应用的更新');return;}
  jpost('/api/task/apply',{task_id:id,update_ids:ids}).then(r=>{alert('已应用 '+r.count+' 条更新');pollTask(id);});}
@@ -489,7 +517,7 @@ async function loadExp(){const d=await jget('/api/experiments');
  '<div>'+esc((e.hypothesis||'').slice(0,80))+'</div>'+
  '<div class="small">task '+esc(e.task_id||'-')+'</div>'+
  (e.output_dir?'<div class="small ok">'+esc(e.output_dir)+'</div>':'')+
- '<div class="row" style="margin:6px 0 0"><button class="ghost" onclick="buildExp('+e.id+')">生成骨架</button></div></div>').join(''))||'<p class="mut">（无实验）</p>';}
+ '<div class="row" style="margin:6px 0 0"><button class="ghost" onclick="buildExp('+e.id+')">生成骨架</button></div></div>').join(''))||'<div class="empty"><span class="empty-mark">✦</span>还没有实验，从研究 Brief 里保存一个机会吧。</div>';}
 async function buildExp(id){const r=await jpost('/api/experiment/build',{exp_id:id});
  alert(r.project?('骨架已生成：'+r.project):(r.error||'生成失败'));loadExp();}
 // ---- 选题 ----
@@ -540,7 +568,7 @@ async function loadProjects(){const d=await jget('/api/projects');
  '<div class="small">技术栈: '+esc((p.tech_stack||[]).slice(0,8).join(', '))+'</div>'+
  '<div class="row" style="margin:6px 0 0"><select onchange="projectStatus('+p.id+',this.value)">'+
  ['active','paused','archived','idea'].map(s=>'<option value="'+s+'"'+(p.status===s?' selected':'')+'>'+s+'</option>').join('')+
- '</select></div></div>').join(''))||'<p class="mut">（无项目）登记一个 GitHub 仓库试试</p>';}
+ '</select></div></div>').join(''))||'<div class="empty"><span class="empty-mark">✦</span>还没有项目，登记一个 GitHub 仓库试试。</div>';}
 async function projectAdd(){const url=$('#purl').value.trim();if(!url){alert('先填 GitHub 链接');return;}
  const r=await jpost('/api/project/add',{url:url,status:$('#pstatus').value},90000);
  if(r.error){alert(r.error);return;}alert('已登记 '+r.name+'（技术栈: '+(r.tech_stack||[]).join(', ')+'）');loadProjects();}
@@ -548,7 +576,7 @@ function projectStatus(id,s){jpost('/api/project/status',{id:id,status:s}).then(
 // ---- 知识库 ----
 async function loadK(){const q=$('#kq').value.trim();const d=await jget('/api/knowledge'+(q?'?q='+encodeURIComponent(q):''));
  $('#kArea').innerHTML=(d.map(c=>'<div class="item"><b>'+esc(c.name)+'</b><span class="badge">'+c.status+'/'+c.confidence+'</span>'+
-  (c.notes&&c.notes.length?'<div class="small">'+esc(c.notes.slice(-2).join('；'))+'</div>':'')+'</div>').join(''))||'<p class="mut">（空）</p>';}
+  (c.notes&&c.notes.length?'<div class="small">'+esc(c.notes.slice(-2).join('；'))+'</div>':'')+'</div>').join(''))||'<div class="empty"><span class="empty-mark">✦</span>还没有知识概念，先 seed 一组你熟悉的主题。</div>';}
 $('#kq').onkeydown=e=>{if(e.key==='Enter')loadK();};
 $('#kseedBtn').onclick=async()=>{const v=$('#kseed').value.trim();if(!v)return;
  const r=await jpost('/api/knowledge/seed',{names:v});loadK();};
@@ -556,6 +584,6 @@ $('#kseedBtn').onclick=async()=>{const v=$('#kseed').value.trim();if(!v)return;
 async function loadH(){const d=await jget('/api/tasks');
  $('#hArea').innerHTML=d.map(t=>'<div class="item" onclick="openTask(\''+t.id+'\')"><b>'+esc((t.goal||'').slice(0,70))+'</b>'+
  '<span class="badge '+(t.status==='running'?'run':t.status==='error'?'err':'')+'">'+t.status+'</span>'+
- '<div class="small">'+t.created_at+'</div></div>').join('')||'<p class="mut">（无任务）</p>';}
+ '<div class="small">'+t.created_at+'</div></div>').join('')||'<div class="empty"><span class="empty-mark">✦</span>还没有研究记录，从首页开始一次研究。</div>';}
 async function openTask(id){const d=await jget('/api/task/'+id);renderTask(d);$('#tabs').querySelector('button[data-t=research]').click();}
 </script></body></html>"""

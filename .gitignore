@@ -13,6 +13,7 @@ venv/
 # 运行产物（数据库、每任务 trace/产物）
 lodestar/data/
 workspace/
+experiments/
 !lodestar/data/.gitkeep
 !workspace/.gitkeep
 

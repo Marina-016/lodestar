@@ -63,22 +63,26 @@ def render_sources_block(sources: list[dict]) -> str:
 # 1. Research Planner（§8.2）
 # ----------------------------------------------------------------------
 def plan_prompt(cfg: Config, goal: str, knowledge_ctx: list[dict]):
-    system = SYSTEM_ROLE_MARKER.format(role="planner") + "\n\n" + SYSTEM_BASE + (
-        "你负责把一个模糊的研究目标拆解成可执行的研究计划。"
-        "计划必须动态生成、切中用户的知识基础，不要输出固定模板。\n"
-        "只输出如下 JSON：\n"
-        "{\n"
-        '  "goal": "规范化后的研究目标",\n'
-        '  "research_questions": ["要回答的研究问题，3-6 个，按优先级排序"],\n'
-        '  "search_strategy": ["检索策略，说明查什么、去哪查、查几类"],\n'
-        '  "expected_output": ["研究完成后应交付的内容清单"]\n'
+    nl = chr(10)
+    system = SYSTEM_ROLE_MARKER.format(role="planner") + nl + nl + SYSTEM_BASE + (
+        "把模糊的研究目标拆解成可执行的研究计划，并根据任务类型选择最合适的检索工具。" +
+        "search_papers 适合论文、学术基准和方法；search_web 适合项目文档、代码仓库、产品资料和网页证据。" +
+        "不要默认同时选择所有工具；只选择确实有助于回答本题的工具。只输出 JSON：" + nl +
+        "{" + nl +
+        '  "goal": "规范化后的研究目标",' + nl +
+        '  "research_questions": ["需要回答的研究问题，3-6 个，按优先级排序"],' + nl +
+        '  "search_strategy": ["检索策略，说明查什么、去哪查、查几类"],' + nl +
+        '  "expected_output": ["研究完成后应交付的内容清单"],' + nl +
+        '  "tool_plan": [{"tool": "search_papers|search_web", "purpose": "为什么需要这个工具", "when": "什么时候使用"}]' + nl +
         "}"
     )
-    user = f"## 研究目标\n{goal}\n\n{render_knowledge_ctx(knowledge_ctx)}\n\n请输出研究计划 JSON。"
+    user = (
+        "## 研究目标" + nl + goal + nl + nl +
+        render_knowledge_ctx(knowledge_ctx) + nl + nl +
+        "请输出研究计划 JSON。"
+    )
     return system, user
 
-
-# ----------------------------------------------------------------------
 # 2. Query Rewrite / Expansion（§8.3）
 # ----------------------------------------------------------------------
 def queries_prompt(cfg: Config, goal: str, plan: dict, knowledge_ctx: list[dict]):

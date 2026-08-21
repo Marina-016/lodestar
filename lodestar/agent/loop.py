@@ -72,6 +72,7 @@ class ResearchAgent:
         # 2. Plan（PRD §8.2）
         plan = planner_mod.plan(cfg, self.llm, goal, knowledge_ctx)
         trace.log("plan", plan)
+        search_tools = self._select_search_tools(plan, trace)
 
         # 3. Query Rewrite / Expansion（PRD §8.3）
         queries = queries_mod.expand_queries(cfg, self.llm, goal, plan, knowledge_ctx)
@@ -79,7 +80,7 @@ class ResearchAgent:
         repo.create_task(ws.conn, task_id, goal, plan, queries, cfg.llm_mode)
 
         # 4. Research Loop：Search → Dedup → Rerank → Read（PRD §17）
-        candidates, searches = self._collect(queries, trace)
+        candidates, searches = self._collect(queries, trace, tools=search_tools)
         sources = self._dedup(candidates)
         trace.log("sources_collected", {"candidates": len(candidates), "unique": len(sources),
                                         "searches": searches})
@@ -130,7 +131,7 @@ class ResearchAgent:
             replans += 1
             extra_queries = self._gaps_to_queries(assess["gaps"] or [])
             trace.log("replan", {"extra_queries": extra_queries, "reason": assess["reason"]})
-            extra, searches = self._collect(extra_queries, trace, searches=searches)
+            extra, searches = self._collect(extra_queries, trace, searches=searches, tools=search_tools)
             seen = {s["dedup_key"] for s in sources}
             added = [s for s in self._dedup(extra) if s["dedup_key"] not in seen]
             if added:
@@ -196,14 +197,32 @@ class ResearchAgent:
     # ------------------------------------------------------------------
     # 研究循环子步骤
     # ------------------------------------------------------------------
-    def _collect(self, queries: list[dict], trace: Trace, searches: int = 0) -> tuple[list[dict], int]:
+    @staticmethod
+    def _tool_names(tool_plan) -> list[str]:
+        allowed = {"search_papers", "search_web"}
+        names = []
+        for item in tool_plan or []:
+            name = item.get("tool") if isinstance(item, dict) else item
+            if name in allowed and name not in names:
+                names.append(name)
+        return names or ["search_papers", "search_web"]
+
+    def _select_search_tools(self, plan: dict, trace: Trace) -> list[str]:
+        selected = self._tool_names(plan.get("tool_plan"))
+        trace.log("tool_policy", {
+            "selected_tools": selected,
+            "source": "planner" if plan.get("tool_plan") else "safe_default",
+            "reason": [item.get("purpose") for item in (plan.get("tool_plan") or []) if isinstance(item, dict)],
+        })
+        return selected
+    def _collect(self, queries: list[dict], trace: Trace, searches: int = 0, tools: list[str] | None = None) -> tuple[list[dict], int]:
         """对每个 query 跑 search_papers + search_web，收集候选来源。"""
         ws, cfg = self.ws, self.cfg
         candidates: list[dict] = []
         for q in queries[: cfg.max_search_queries]:
             if searches >= cfg.max_agent_steps:
                 break
-            for tool in ("search_papers", "search_web"):
+            for tool in self._tool_names(tools):
                 params = {"query": q["text"]}
                 trace.tool_call(tool, params)
                 result = call_tool(ws, tool, params)

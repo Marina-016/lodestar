@@ -133,17 +133,71 @@ def seed_concepts(conn: sqlite3.Connection, items: list[dict]) -> int:
 # Research Memory
 # ----------------------------------------------------------------------
 def create_task(conn: sqlite3.Connection, task_id: str, goal: str, plan: dict,
-                queries: Optional[list] = None, llm_mode: str = "live") -> None:
-    """幂等：任务行已存在（Web UI 预建 running 行）则更新 goal/plan/queries，否则插入。"""
+                queries: Optional[list] = None, llm_mode: str = "live",
+                conversation_id: Optional[str] = None) -> None:
+    """Create or refresh a research task without losing its conversation link."""
     if conn.execute("SELECT 1 FROM research_tasks WHERE id=?", (task_id,)).fetchone():
-        conn.execute("UPDATE research_tasks SET goal=?, plan=?, queries=? WHERE id=?",
-                     (goal, _dumps(plan), _dumps(queries or []), task_id))
+        conn.execute("UPDATE research_tasks SET goal=?, plan=?, queries=?, conversation_id=COALESCE(?, conversation_id) WHERE id=?",
+                     (goal, _dumps(plan), _dumps(queries or []), conversation_id, task_id))
     else:
         conn.execute(
-            "INSERT INTO research_tasks(id,goal,plan,queries,status,llm_mode,created_at) VALUES(?,?,?,?,?,?,?)",
-            (task_id, goal, _dumps(plan), _dumps(queries or []), "running", llm_mode, _now()),
+            "INSERT INTO research_tasks(id,goal,conversation_id,plan,queries,status,llm_mode,created_at) VALUES(?,?,?,?,?,?,?,?)",
+            (task_id, goal, conversation_id, _dumps(plan), _dumps(queries or []), "running", llm_mode, _now()),
         )
     conn.commit()
+
+
+# ----------------------------------------------------------------------
+# Conversation memory
+# ----------------------------------------------------------------------
+def create_conversation(conn: sqlite3.Connection, conversation_id: str, title: str = "新对话") -> dict:
+    now = _now()
+    conn.execute("INSERT INTO conversations(id,title,created_at,updated_at) VALUES(?,?,?,?)",
+                 (conversation_id, title or "新对话", now, now))
+    conn.commit()
+    return get_conversation(conn, conversation_id)
+
+
+def get_conversation(conn: sqlite3.Connection, conversation_id: str) -> Optional[dict]:
+    row = conn.execute("SELECT * FROM conversations WHERE id=?", (conversation_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def list_conversations(conn: sqlite3.Connection, limit: int = 30) -> list[dict]:
+    rows = conn.execute("SELECT * FROM conversations ORDER BY updated_at DESC LIMIT ?", (limit,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def update_conversation(conn: sqlite3.Connection, conversation_id: str, title: Optional[str] = None) -> None:
+    if title:
+        conn.execute("UPDATE conversations SET title=?, updated_at=? WHERE id=?", (title[:80], _now(), conversation_id))
+    else:
+        conn.execute("UPDATE conversations SET updated_at=? WHERE id=?", (_now(), conversation_id))
+    conn.commit()
+
+
+def add_message(conn: sqlite3.Connection, conversation_id: str, role: str, content: str,
+                kind: str = "text", task_id: Optional[str] = None, metadata: Optional[dict] = None) -> dict:
+    conn.execute(
+        "INSERT INTO messages(conversation_id,role,kind,content,task_id,metadata,created_at) VALUES(?,?,?,?,?,?,?)",
+        (conversation_id, role, kind, content or "", task_id, _dumps(metadata or {}), _now()),
+    )
+    update_conversation(conn, conversation_id)
+    row = conn.execute("SELECT * FROM messages WHERE id=last_insert_rowid()").fetchone()
+    d = dict(row)
+    d["metadata"] = _loads(d.get("metadata"), {})
+    return d
+
+
+def list_messages(conn: sqlite3.Connection, conversation_id: str, limit: int = 100) -> list[dict]:
+    rows = conn.execute("SELECT * FROM messages WHERE conversation_id=? ORDER BY id ASC LIMIT ?",
+                        (conversation_id, limit)).fetchall()
+    out = []
+    for row in rows:
+        d = dict(row)
+        d["metadata"] = _loads(d.get("metadata"), {})
+        out.append(d)
+    return out
 
 
 def finish_task(conn: sqlite3.Connection, task_id: str, brief_md: str,

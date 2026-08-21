@@ -37,6 +37,7 @@ END;
 CREATE TABLE IF NOT EXISTS research_tasks(
   id TEXT PRIMARY KEY,
   goal TEXT NOT NULL,
+  conversation_id TEXT,
   plan TEXT,                        -- json
   queries TEXT,                     -- json
   status TEXT NOT NULL DEFAULT 'running',   -- running | finished | error
@@ -65,6 +66,27 @@ CREATE TABLE IF NOT EXISTS sources(
   FOREIGN KEY(task_id) REFERENCES research_tasks(id)
 );
 CREATE INDEX IF NOT EXISTS idx_sources_task ON sources(task_id);
+
+CREATE TABLE IF NOT EXISTS conversations(
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL DEFAULT '新对话',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS messages(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  conversation_id TEXT NOT NULL,
+  role TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'text',
+  content TEXT NOT NULL DEFAULT '',
+  task_id TEXT,
+  metadata TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  FOREIGN KEY(conversation_id) REFERENCES conversations(id),
+  FOREIGN KEY(task_id) REFERENCES research_tasks(id)
+);
+CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, id);
 
 CREATE TABLE IF NOT EXISTS knowledge_updates(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -141,6 +163,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
     for col, ddl in (("venue", "TEXT"), ("is_published", "INTEGER"), ("external_ids", "TEXT")):
         if col not in cols:
             conn.execute(f"ALTER TABLE sources ADD COLUMN {col} {ddl}")
+    task_cols = {r[1] for r in conn.execute("PRAGMA table_info(research_tasks)").fetchall()}
+    if "conversation_id" not in task_cols:
+        conn.execute("ALTER TABLE research_tasks ADD COLUMN conversation_id TEXT")
     conn.commit()
 
 

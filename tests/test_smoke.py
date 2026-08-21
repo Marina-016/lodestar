@@ -228,9 +228,10 @@ class SmokeTestCase(unittest.TestCase):
             h = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=10).read())
             self.assertEqual(h["ok"], True)
             html = urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=10).read().decode("utf-8")
+            self.assertIn("AI RESEARCH COMPANION", html)
             self.assertTrue(html.lstrip().startswith("<!doctype html"),
                             "HTML 必须原样输出，不能被 JSON 转义")
-            self.assertIn(".tab{display:none}", html)
+            self.assertIn(".view{display:none}", html)
             self.assertNotIn("\\n\\n", html[:200])  # 防 JSON 化残留
             tasks = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/api/tasks", timeout=10).read())
             self.assertIsInstance(tasks, list)

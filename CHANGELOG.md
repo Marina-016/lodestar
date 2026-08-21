@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased] - 2026-08-21
+
+### Added
+
+- Added `docs/demo-video-script.md` with the v0 recording narrative and operator checklist.
+- Defined the demo story as a full loop from research question to evidence, Knowledge State, and experiment scaffold.
+- Separated the first clean recording cut from later subtitle, voice-over, and motion-design passes.
+
+### Documentation
+
+- Linked the demo video script from the README.
+
 All notable changes to Lodestar are documented here.
 
 ## [0.4.7] - 2026-08-20

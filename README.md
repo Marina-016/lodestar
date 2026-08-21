@@ -72,6 +72,68 @@ python -m lodestar project status <id> active|paused|archived|idea
 lodestar ui                            # 或 python -m lodestar ui --port 8123
 ```
 
+## Codex Harness / MCP
+
+### 当前接入的 Harness
+
+本项目接入的是 **OpenAI Codex CLI 的开源 Harness**，不是 Claude Code Harness，也不是另一个独立的 Agent 框架。Codex Harness 负责对话上下文、工具选择、工具调用和会话执行；Lodestar 负责研究领域能力、知识库、Trace 和研究结果存储。
+
+当前架构是：
+
+```text
+用户对话
+   ↓
+Codex CLI Harness（可自主判断下一步）
+   ↓ MCP stdio
+Lodestar MCP Server
+   ├─ search_papers / search_web
+   ├─ read_paper / read_webpage
+   ├─ search_knowledge / read_knowledge
+   ├─ save_research_note / update_knowledge_proposal
+   └─ 将工具调用写回当前 Research Trace
+   ↓
+Knowledge State / Research Memory / Workspace
+```
+
+Lodestar 原有的 `ResearchAgent` 仍然保留。当网页对话未开启 Codex Harness、Codex 不可用或调用失败时，系统会自动回退到原有 Research Loop，保证 V0 demo 仍然可运行。
+
+### 启动和注册 MCP
+
+从 Lodestar 仓库根目录启动工具服务：
+
+```bash
+python -m lodestar mcp
+```
+
+在 Codex 中注册：
+
+```bash
+codex mcp add lodestar -- python -m lodestar mcp
+```
+
+检查注册状态：
+
+```bash
+codex mcp get lodestar
+```
+
+### 网页对话如何切换
+
+默认配置仍为稳定的 Lodestar Research Loop：
+
+```env
+LODESTAR_CONVERSATION_HARNESS=loop
+```
+
+如果要让网页里的对话由 Codex 自主选择搜索、阅读和知识库工具，设置：
+
+```env
+LODESTAR_CONVERSATION_HARNESS=codex
+```
+
+Codex 模式下，每次对话会获得一个 Lodestar MCP 工具服务，并通过 `LODESTAR_MCP_TASK_ID` 将工具调用记录回该研究任务的 Trace。只有用户明确要求“记住”时，Harness 才应该调用知识写入工具。
+
+这套设计参考了 [OpenAI Codex](https://github.com/openai/codex) 的开源 CLI 和 [Codex agent loop](https://openai.com/index/unrolling-the-codex-agent-loop/)；Lodestar 没有复制 Codex 源码，而是通过 MCP 接入其 Harness。
 ## 产物位置
 
 - 数据库（Knowledge State / Research Memory / Trace / Eval runs）：`lodestar/data/lodestar.db`
@@ -133,6 +195,16 @@ PowerShell commands:
 Open http://127.0.0.1:8123/.
 
 The demo workspace includes:
+
+### Demo video script
+
+The recording script is maintained in [`docs/demo-video-script.md`](docs/demo-video-script.md). It presents the product as a research companion rather than a search box:
+
+```text
+Question → Research path → Evidence → Knowledge State → Experiment
+```
+
+The first clean cut is intentionally without subtitles, voice-over, or decorative motion. Those layers are added only after the screen-flow and narrative are confirmed.
 
 - curated Lodestar research topics and project context;
 - light/dark theme switching with persistent preference;

@@ -174,6 +174,11 @@ def cmd_demo(args, cfg):
     print(json.dumps(result, ensure_ascii=False))
 
 
+def cmd_mcp(args, cfg):
+    """Expose Lodestar's registered tools to an external agent harness."""
+    from lodestar.mcp_server import serve_stdio
+    serve_stdio(cfg)
+
 def cmd_project(args, cfg):
     """Projects：GitHub 摄入 + 进行中状态。"""
     ws = Workspace(cfg)
@@ -373,6 +378,8 @@ def main(argv=None):
     dsub = pd.add_subparsers(dest="action", required=True)
     dsub.add_parser("seed", help="向当前 workspace 幂等写入示例数据").set_defaults(fn=cmd_demo)
 
+    pmcp = sub.add_parser("mcp", help="Expose Lodestar tools over MCP stdio")
+    pmcp.set_defaults(fn=cmd_mcp)
     pj = sub.add_parser("project", help="Projects：GitHub 摄入 + 进行中状态")
     pjsub = pj.add_subparsers(dest="action", required=True)
     pjsub.add_parser("list").set_defaults(fn=cmd_project)

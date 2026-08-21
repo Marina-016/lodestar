@@ -27,6 +27,7 @@ class Config:
     temperature: float = 0.2
     llm_timeout_s: int = 120
     llm_thinking: bool = False   # True=允许思考块；False=传 thinking disabled（更便宜、防空输出）
+    conversation_harness: str = "loop"  # loop | codex（codex 需显式开启）
     # --- Agent Loop 预算（PRD §17，Eval 后续调）---
     max_agent_steps: int = 15
     max_search_queries: int = 8
@@ -79,6 +80,7 @@ def load_config() -> Config:
     c.model = os.getenv("LODESTAR_MODEL", c.model)
     c.judge_model = os.getenv("LODESTAR_JUDGE_MODEL", c.judge_model)
     c.llm_thinking = os.getenv("LODESTAR_LLM_THINKING", str(c.llm_thinking)).lower() in {"1", "true", "yes", "on"}
+    c.conversation_harness = os.getenv("LODESTAR_CONVERSATION_HARNESS", c.conversation_harness).lower()
     c.brief_language = os.getenv("LODESTAR_BRIEF_LANGUAGE", c.brief_language)
     c.web_search_backend = os.getenv("LODESTAR_WEB_SEARCH_BACKEND", c.web_search_backend)
     c.enrich_venues = os.getenv("LODESTAR_ENRICH_VENUES", str(c.enrich_venues)).lower() in {"1", "true", "yes", "on"}

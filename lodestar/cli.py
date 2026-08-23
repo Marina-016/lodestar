@@ -85,6 +85,15 @@ def cmd_knowledge(args, cfg):
             print(f"[{u['status']}] id={u['id']} [{u['action']}] {u['concept']}: "
                   f"{p.get('old_status')}/{p.get('old_confidence')} → {p['new_status']}/{p['new_confidence']}")
             print(f"    依据: {p.get('claim')}（novelty={p.get('novelty')}）")
+    elif args.action == "review":
+        rows = repo.list_memory_review_candidates(ws.conn, older_than_days=args.days, limit=args.limit)
+        if not rows:
+            print("No memory concepts need review.")
+        for c in rows:
+            print(f"- {c['name']} [{c['status']}] reason={c['review_reason']} updated_at={c['updated_at']}")
+    elif args.action == "decide":
+        result = repo.record_memory_review(ws.conn, args.name, args.decision, args.reason or "")
+        print(json.dumps(result, ensure_ascii=False))
     elif args.action == "rollback":
         upd = next((u for u in repo.list_knowledge_updates(ws.conn, status="applied")
                     if u["id"] == int(args.update_id)), None)
@@ -170,7 +179,7 @@ def _cmd_ui(args, cfg):
 
 def cmd_demo(args, cfg):
     from lodestar.demo import seed_demo
-    result = seed_demo(cfg)
+    result = seed_demo(cfg, clean=args.action == "reset")
     print(json.dumps(result, ensure_ascii=False))
 
 
@@ -210,6 +219,30 @@ def cmd_project(args, cfg):
         if args.action == "status":
             repo.set_project_status(ws.conn, int(args.id), args.status)
             print(f"项目 #{args.id} 状态 → {args.status}")
+            return
+        if args.action == "index":
+            project = repo.get_project(ws.conn, int(args.id))
+            if not project:
+                print(f"[error] project not found: #{args.id}")
+                sys.exit(1)
+            from lodestar.project_index import index_project
+            try:
+                docs = index_project(project, local_path=args.path)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[error] project index failed: {exc}")
+                sys.exit(1)
+            count = repo.replace_project_documents(ws.conn, project["id"], docs)
+            origin = args.path or project.get("url") or "unknown"
+            print(f"indexed project #{project['id']}: {count} text files (source: {origin})")
+            return
+        if args.action == "search":
+            docs = repo.search_project_documents(ws.conn, args.query, project_id=args.id, limit=args.limit)
+            if not docs:
+                print("No matches. Run project index first.")
+                return
+            for doc in docs:
+                print(f"[{doc['id']}] #{doc['project_id']} {doc['path']}")
+                print(f"  {doc['excerpt'].replace(chr(10), ' ')[:260]}")
             return
     finally:
         ws.close()
@@ -279,31 +312,57 @@ def cmd_experiment(args, cfg):
         if args.action == "build":
             exp = repo.get_experiment(ws.conn, args.exp_id)
             if not exp:
-                print(f"[error] 找不到 Experiment #{args.exp_id}")
+                print(f"[error] experiment not found: #{args.exp_id}")
                 sys.exit(1)
             out_dir = Path(args.out)
             if args.scaffold_only:
                 project = experiment_mod.scaffold_experiment(exp, out_dir)
-                repo.set_experiment_build(ws.conn, exp["id"], "built", str(project))
-                print(f"[scaffold-only] 已生成：{project}")
+                repo.set_experiment_build(ws.conn, exp["id"], "scaffolded", str(project))
+                print(f"[scaffold-only] created: {project}; run experiment run {exp['id']} to evaluate")
                 return
             try:
                 ex = _make_build_executor(cfg, args.executor or cfg.build_executor)
-            except (ValueError, RuntimeError) as e:
-                print(f"[error] {e}")
+            except (ValueError, RuntimeError) as exc:
+                print(f"[error] {exc}")
                 sys.exit(1)
             if not ex.available():
-                print(f"[error] executor {ex.name} 不可用")
+                print(f"[error] executor {ex.name} unavailable")
                 sys.exit(1)
             repo.set_experiment_build(ws.conn, exp["id"], "building")
-            project, result = experiment_mod.build_experiment(exp, out_dir, ex, timeout=args.timeout)
-            status = "built" if result.ok else "failed"
-            repo.set_experiment_build(ws.conn, exp["id"], status, str(project))
-            print(f"[build] {'成功' if result.ok else '失败'}：{project}")
-            if not result.ok:
-                print(f"[error] {result.error[:400]}")
+            project, build_result = experiment_mod.build_experiment(exp, out_dir, ex, timeout=args.timeout)
+            if not build_result.ok:
+                repo.record_experiment_run(ws.conn, exp["id"], {"ok": False, "error": build_result.error, "metrics": {}}, str(project))
+                print(f"[build] failed: {project}; error: {build_result.error[:400]}")
                 sys.exit(1)
-            print(result.output[:1500])
+            result = experiment_mod.run_experiment(project, timeout=args.eval_timeout)
+            repo.record_experiment_run(ws.conn, exp["id"], result, str(project))
+            print(json.dumps({"project": str(project), **result}, ensure_ascii=False, indent=2))
+            if not result["ok"]:
+                sys.exit(1)
+            return
+        if args.action == "run":
+            exp = repo.get_experiment(ws.conn, args.exp_id)
+            if not exp or not exp.get("output_dir"):
+                print(f"[error] experiment #{args.exp_id} has no scaffolded output")
+                sys.exit(1)
+            result = experiment_mod.run_experiment(Path(exp["output_dir"]), timeout=args.timeout)
+            repo.record_experiment_run(ws.conn, exp["id"], result)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            if not result["ok"]:
+                sys.exit(1)
+            return
+    finally:
+        ws.close()
+
+
+def cmd_harness_eval(args, cfg):
+    from lodestar.eval.harness import evaluate_harness_task
+    ws = Workspace(cfg)
+    try:
+        report = evaluate_harness_task(ws, args.task_id, expected_tools=args.expect_tool)
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        if report["verdict"] == "fail":
+            sys.exit(1)
     finally:
         ws.close()
 
@@ -346,9 +405,22 @@ def main(argv=None):
     kseed.add_argument("--confidence", default="high")
     kdiff = ksub.add_parser("diff")
     kdiff.add_argument("task_id")
+    krev = ksub.add_parser("review")
+    krev.add_argument("--days", type=int, default=30)
+    krev.add_argument("--limit", type=int, default=30)
+    kdecide = ksub.add_parser("decide")
+    kdecide.add_argument("name")
+    kdecide.add_argument("decision", choices=["retain", "needs_review", "archive"])
+    kdecide.add_argument("--reason", default="")
     kroll = ksub.add_parser("rollback")
     kroll.add_argument("update_id")
     pk.set_defaults(fn=cmd_knowledge)
+
+    ph = sub.add_parser("harness-eval", help="Evaluate observable Codex/MCP trace contracts")
+    ph.add_argument("task_id")
+    ph.add_argument("--expect-tool", action="append", default=[],
+                    help="Tool that must appear in harness_tool_call; repeatable")
+    ph.set_defaults(fn=cmd_harness_eval)
 
     pt = sub.add_parser("trace", help="查看某 task 的 Trace")
     pt.add_argument("task_id")
@@ -377,6 +449,7 @@ def main(argv=None):
     pd = sub.add_parser("demo", help="准备录屏用的 Lodestar 示例数据")
     dsub = pd.add_subparsers(dest="action", required=True)
     dsub.add_parser("seed", help="向当前 workspace 幂等写入示例数据").set_defaults(fn=cmd_demo)
+    dsub.add_parser("reset", help="Back up and rebuild a clean recording dataset").set_defaults(fn=cmd_demo)
 
     pmcp = sub.add_parser("mcp", help="Expose Lodestar tools over MCP stdio")
     pmcp.set_defaults(fn=cmd_mcp)
@@ -389,6 +462,13 @@ def main(argv=None):
     pjs = pjsub.add_parser("status")
     pjs.add_argument("id", type=int)
     pjs.add_argument("status", choices=["active", "paused", "archived", "idea"])
+    pji = pjsub.add_parser("index", help="Index project source/documents for MCP retrieval")
+    pji.add_argument("id", type=int)
+    pji.add_argument("--path", default=None, help="Local project directory; omit to index the project GitHub URL")
+    pjsearch = pjsub.add_parser("search", help="Search indexed project context")
+    pjsearch.add_argument("query")
+    pjsearch.add_argument("--id", type=int, default=None, help="Restrict search to one project")
+    pjsearch.add_argument("--limit", type=int, default=6)
     pj.set_defaults(fn=cmd_project)
 
     pe = sub.add_parser("experiment", help="V3：Research→Experiment→Build")
@@ -405,6 +485,10 @@ def main(argv=None):
     eb.add_argument("--executor", default=None, help="codex | claude（缺省用 config）")
     eb.add_argument("--timeout", type=int, default=300)
     eb.add_argument("--scaffold-only", action="store_true", help="只生成确定性骨架，不调 coding agent")
+    eb.add_argument("--eval-timeout", type=int, default=30)
+    erun = exsub.add_parser("run", help="Run a scaffolded experiment and persist metrics")
+    erun.add_argument("exp_id", type=int)
+    erun.add_argument("--timeout", type=int, default=30)
     pe.set_defaults(fn=cmd_experiment)
 
     args = p.parse_args(argv)

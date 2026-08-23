@@ -95,7 +95,9 @@ class ResearchAgent:
         if not sources:
             brief_md = NO_EVIDENCE_BRIEF_TEMPLATE.format(goal=goal)
             metrics = {"queries": len(queries), "searches": searches, "candidates_collected": 0,
-                       "unique_sources": 0, "sources_read": 0, "replans": 0}
+                       "unique_sources": 0, "sources_read": 0, "replans": 0,
+                       "conversation_harness": "loop", "agent_mode": "deterministic_research_loop",
+                       "full_text_enabled": cfg.full_text_enabled}
             repo.finish_task(ws.conn, task_id, brief_md, "finished", metrics)
             trace.log("finish", {"metrics": metrics, "note": "无证据，Brief 为占位"})
             trace.dump_jsonl()
@@ -175,7 +177,9 @@ class ResearchAgent:
         # 9. Brief + Finish
         metrics = {"queries": len(queries), "searches": searches,
                    "candidates_collected": len(candidates), "unique_sources": len(sources),
-                   "sources_read": len(read_sources), "replans": replans}
+                   "sources_read": len(read_sources), "replans": replans,
+                   "conversation_harness": "loop", "agent_mode": "deterministic_research_loop",
+                   "full_text_enabled": cfg.full_text_enabled}
         # 把读取深度回填到 key_sources，保证 Brief 的「读取」列正确显示（全文/摘要/未读）
         depth_by_url = {rs["url"]: rs.get("read_depth", "none") for rs in read_sources}
         for ks in key_sources:

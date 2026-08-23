@@ -7,141 +7,209 @@ does not touch user-created research history.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+import re
+import shutil
+import sqlite3
 
+from lodestar.config import PROJECT_ROOT
 from lodestar.context import Workspace
+from lodestar.experiment import scaffold_experiment
 from lodestar.memory import repo
+from lodestar.project_index import index_local_project
 
 
-DEMO_RELEASE = "2026-week34"
+DEMO_RELEASE = "2026-week34-trusted-memory"
 
 DEMO_PROJECTS = [
     {
-        "name": "Marina-016/lodestar",
-        "url": "https://github.com/Marina-016/lodestar",
-        "description": "把学术热点变成可追溯的 Research → Knowledge → Experiment 工作流。",
-        "tech_stack": ["Python", "Agent", "LLM", "SQLite", "Research UI"],
-        "status": "active",
-    },
-    {
         "name": "Lodestar / Agent Research Lab",
         "url": "https://github.com/Marina-016/lodestar",
-        "description": "围绕长期任务、记忆、技能选择与评测闭环，记录论文证据并生成可运行实验。",
-        "tech_stack": ["Research Trace", "Memory", "Skill", "Eval"],
+        "description": "Research agent that maps weekly AI techniques to repository evidence, user-confirmed memory, and evaluation-gated experiments.",
+        "tech_stack": ["Python", "Agent", "MCP", "SQLite", "Research Trace", "Memory", "Eval"],
         "status": "active",
     },
 ]
 
 DEMO_CONCEPTS = [
-    ("Scientific Discovery Agent", "known", "high", "本周论文把科学发现型 Agent 描述为任务条件化的动态编排问题。"),
-    ("Obligation Graph", "known", "high", "长任务需要显式的义务节点、验收语义和可回溯的证书。"),
-    ("Adaptive Agent Memory", "partial", "high", "记忆不只是检索，还要和反思、路由、共识及风险审查一起工作。"),
-    ("Reflection Loop", "partial", "medium", "反思应当产生可验证的下一步，而不是只增加一段解释文本。"),
-    ("Skill Selection", "partial", "high", "长轨迹中，选择读取哪个 Skill 本身就是需要单独训练的决策。"),
-    ("Selector Credit", "partial", "medium", "结果奖励会把长链路的信用稀释到 Skill 选择 token 上。"),
-    ("Evaluator Blind Spots", "partial", "medium", "评测器也会有盲点，需要用反例驱动的方式暴露和补齐。"),
-    ("Evidence Certificate", "known", "high", "研究结论要能连回来源、判断和验收结果，才能进入下一轮工作流。"),
+    ("Agent Memory Lifecycle", "known", "high", "Agent memory 需要覆盖写入、召回、更新、重审与归档，而不只是向量检索。"),
+    ("Memory Provenance", "partial", "medium", "长期记忆应保留来源、时间与变更理由，才能在冲突时回溯。"),
+    ("Explicit Memory Consent", "known", "high", "长期记忆写入必须经过用户确认，不由 Agent 静默改写。"),
+    ("Memory Review", "partial", "medium", "过期或低置信记忆需要进入 retain、revise、archive 的人工重审流程。"),
+    ("Research Trace", "known", "high", "研究步骤、工具调用、证据和状态变更需要绑定到同一条可审计轨迹。"),
+    ("Skill Memory", "partial", "medium", "成功轨迹可以沉淀为 Skill candidate，但必须先验证跨任务迁移。"),
+    ("Context Budget", "partial", "high", "检索结果和 Skill 都会消耗上下文预算，选择策略必须考虑边际收益。"),
+    ("Eval Gate", "partial", "medium", "候选能力只有在固定对照集上通过质量与安全门槛后才能晋升。"),
 ]
 
 DEMO_TASKS = [
     {
         "id": "demo-ls-001",
-        "goal": "科学发现型 Agent 如何把长任务编译成可验证的研究图？",
-        "days": 0,
-        "takeaway": "本周的 Eureka 论文把科学发现从“让一个模型一直思考”推进到“按任务形成局部架构”：动态 obligation graph、专用 memory / tools / verifiers，以及带验收语义的证书。论文报告其递归任务实验完成 170/170 个任务并生成 3,948 个证书。",
+        "goal": "Tool Calling 为什么开始前移到模型的中期训练？",
+        "days": 3,
+        "takeaway": "MidTool 把真实 API、MCP Skill 与文档工作流合成为中期训练语料，说明通用 Tool Calling 不应完全依赖后训练临时学会。它对 Lodestar 的直接启发不是训练基础模型，而是把可审计工具轨迹沉淀成高质量的 tool-use eval 与训练样本。",
         "signals": [
-            "研究任务需要显式拆成 obligation、依赖关系和 acceptance criteria",
-            "不同子任务可以拥有不同的 memory、operator、tool 和 verifier",
-            "重复出现的瓶颈应触发受约束的架构升级，而不是无条件增加上下文",
+            "Tool use 的关键不只是选中工具，还包括识别 affordance、补齐参数与错误恢复",
+            "真实 API、MCP Skill 和文档工作流可以统一成可复用的交互轨迹",
+            "工具轨迹需要保留失败样本，否则只会教会模型理想路径",
         ],
         "opportunities": [
-            "把 Lodestar Research Trace 的每个阶段映射成可验收的 obligation graph",
-            "为每条洞察生成带来源、判断和下一步的 evidence certificate",
+            "把 Lodestar 的 MCP 调用、参数、结果和恢复动作导出为脱敏 tool-use eval 数据",
+            "为每个工具增加 affordance、参数 grounding 和 failure recovery 的固定测试用例",
         ],
-        "next": "先选一个真实学术主题，跑通“选题 → 来源 → 证据 → 验收条件 → 实验骨架”的最小闭环。",
+        "next": "先从 20 条本地 Research Trace 提取 tool-call pair，人工检查脱敏、参数完整性和失败恢复标签。",
         "sources": [
-            ("Eureka: Task-Conditioned Meta-Agent Orchestration（PDF）", "https://arxiv.org/pdf/2608.19047", "8 月 19 日提交；提出动态 obligation graph、任务条件化的 Macro-Agent、局部工具/记忆/验证器和受约束的架构演化。"),
-            ("Eureka arXiv 摘要页", "https://arxiv.org/abs/2608.19047", "原始摘要给出 170/170 递归任务、3,948 个证书和无 false acceptance 的论文报告结果。"),
-            ("Lodestar 项目仓库", "https://github.com/Marina-016/lodestar", "用于把论文中的可验证节点落到当前 Research → Experiment → Build 产品主线。"),
+            ("MidTool: Mid-training Data Synthesis for Agentic Tool Use", "https://arxiv.org/abs/2608.20314", "8 月 20 日提交；用 Web、PDF、代码、真实 API、MCP Skill 和文档工作流构造通用工具使用语料。"),
+            ("MidTool PDF", "https://arxiv.org/pdf/2608.20314", "论文在 BFCL、tau2-Bench 与 MCP Universe 上评估中期训练、SFT 和 RL 的组合。"),
+            ("Lodestar 项目仓库", "https://github.com/Marina-016/lodestar", "项目已有 MCP、Tool Registry 与 Research Trace，可把运行轨迹转成固定评测数据。"),
         ],
     },
     {
         "id": "demo-ls-002",
-        "goal": "Agent Memory 如何从静态检索升级为带反思的研究协作？",
-        "days": 1,
-        "takeaway": "本周的 AMR 论文把 agent-specific memory、reflection、external retrieval、复杂度路由和伦理审查放进同一条多智能体 QA 流程。对 Lodestar 来说，关键启发是：知识更新不应只是写入概念，而要改变下一次检索和判断路径。",
+        "goal": "可信记忆：Agent 如何判断一条记忆该不该被使用？",
+        "days": 0,
+        "takeaway": "本周两篇最新论文把问题从“如何记得更多”推进到“何时不该使用记忆”：MemTrapBench 发现真实且相关的记忆也会造成推理固化与信念偏移；CAMA 指出多个 Agent 可能重复引用同一上游来源，制造虚假多数。对 Lodestar 来说，召回之后、注入上下文之前需要一层可审计的 Memory Trust Gate。",
         "signals": [
-            "复杂度评估决定走单 Agent、协作 Agent 还是升级流程",
-            "专用记忆与反思反馈需要和外部检索共同参与，而非彼此孤立",
-            "共识与 overseer 让高风险结论拥有额外的审查节点",
+            "语义相关且记录准确的记忆仍可能把当前推理锁定在错误路径上",
+            "多条记忆若来自同一上游证据，不能被当作多份独立支持重复计票",
+            "记忆召回需要同时判断相关性、来源独立性、冲突风险与时效性",
         ],
         "opportunities": [
-            "把 Knowledge State 的 known / partial / low confidence 变成检索路由信号",
-            "在 Research Trace 中记录“哪条记忆改变了哪一个研究判断”",
+            "在 memory/repo.py 的召回结果进入 agent/loop.py 前增加 Memory Trust Gate：评估相关性、来源独立性、冲突风险和时效性",
+            "在 Research Trace 中记录每条记忆被 admitted、rejected 或 escalated 的理由，而不是只记录最终答案",
         ],
-        "next": "先用一组有冲突来源的论文做回归：比较只检索、检索加记忆、检索加记忆加反思三种路径。",
+        "next": "用相同问题和上下文预算比较 Top-K 直接注入与 Trust Gate 两组，重点测 memory trap rate、false-majority rate、任务正确率和 Token 成本。",
         "sources": [
-            ("Adaptive Memory and Reflection Multi-Agent System（PDF）", "https://arxiv.org/pdf/2608.19029", "8 月 19 日提交；把专用记忆、反思反馈、外部检索、复杂度路由、共识与伦理审查组合成 AMR 系统。"),
-            ("Adaptive Memory and Reflection arXiv 摘要页", "https://arxiv.org/abs/2608.19029", "原始摘要说明其在 MedQA / MedMCQA 上比较了多种基线，并用消融分析记忆、反思和检索的组合效果。"),
-            ("GroupMemBench：多方对话记忆基准（PDF）", "https://arxiv.org/pdf/2605.14498", "补充长期记忆的真实难点：多用户身份、知识更新、术语歧义、时间推理和拒答。"),
+            ("MemTrapBench: Benchmarking Cognitive Traps in LLM Memory Use", "https://arxiv.org/abs/2608.20202", "8 月 20 日提交；所有受测记忆策略都低于 no-memory 设置，最强方案也下降超过 10%。"),
+            ("MemTrapBench PDF", "https://arxiv.org/pdf/2608.20202", "论文把失败拆成 Reasoning Fixation 与 Belief Distortion，并提出推理时的 AdaptiveMem 缓解方法。"),
+            ("Beyond Memory Majority: Latent-Source Reasoning for Multi-Agent Memory Arbitration", "https://arxiv.org/abs/2608.19701", "8 月 20 日提交；提出 Memory Correlation Bias 与结合来源追踪的 CAMA 仲裁框架。"),
+            ("Beyond Memory Majority PDF", "https://arxiv.org/pdf/2608.19701", "论文通过估计独立证据源数量，抑制相关记忆形成的虚假多数。"),
         ],
     },
     {
         "id": "demo-ls-003",
-        "goal": "长任务里的 Skill 选择为什么需要独立的信用分配？",
-        "days": 2,
-        "takeaway": "SkillGate 把“读哪个 Skill”视为长轨迹中的独立策略决策，并指出 outcome reward 会产生 selector credit starvation：轨迹越长，选择动作分到的信用越少、符号也越容易错。论文报告 9B policy 在五个 agent benchmark 上从 40.8% 提升到 53.2%。",
+        "goal": "什么样的 Skill Memory 才能跨任务迁移？",
+        "days": 1,
+        "takeaway": "Break It Down, Pass It On 发现完整任务级 Skill 经常让 Agent 低于 no-memory baseline；子任务级 Skill 平均带来提升，而且文本 Skill 比代码 Skill 更容易迁移。真正可复用的经验不是整段成功轨迹，而是粒度适当、具体性与抽象性平衡的能力单元。",
         "signals": [
-            "技能库变大后，选择读取哪个 Skill 本身成为策略瓶颈",
-            "执行失败不应自动惩罚一个本来正确的 Skill 选择",
-            "动作局部的 selector advantage 与执行阶段 outcome credit 应分开",
+            "完整任务级经验可能携带过多任务特定细节，导致跨任务负迁移",
+            "子任务级 Skill 在可执行的具体性和跨任务抽象性之间更容易取得平衡",
+            "Skill utility 可以在执行新任务前，仅根据 Skill 与任务描述进行诊断",
         ],
         "opportunities": [
-            "为 Lodestar 的候选 Skill 记录选择理由、命中结果和后续执行质量",
-            "把通过 Eval 的 Research Trace 转为下一次可复用的 Skill candidate，而不是直接晋升",
+            "把通过 Eval 的 Research Trace 拆成子任务级 text Skill candidate，再决定是否进入 Skill Library",
+            "记录 specificity、abstractness 与跨任务收益，避免一次成功就自动晋升为长期 Skill",
         ],
-        "next": "先做一个 16 候选 Skill 的离线回放集，测选择准确率、误读率、执行成功率和平均读取数量。",
+        "next": "从 20 条成功 Trace 分别生成 task-level 与 subtask-level Skill，在未见任务上比较成功率和负迁移率。",
         "sources": [
-            ("SkillGate：Training In-Policy Skill Selection（PDF）", "https://arxiv.org/pdf/2608.18852", "8 月 19 日提交；提出 selector credit starvation 和双信用通道，论文报告成功率由 40.8% 提升到 53.2%。"),
-            ("SkillGate arXiv 摘要页", "https://arxiv.org/abs/2608.18852", "原始摘要说明其在 16-candidate slate 上减少误导候选暴露，并读取更少 Skill。"),
-            ("ComponentBench：Computer-Use Agent 组件级诊断（PDF）", "https://arxiv.org/pdf/2608.18307", "本周同批提交的组件级评测，适合借鉴如何把长任务失败拆成可定位的环节。"),
+            ("Break It Down, Pass It On: Cross-Task Skill Transfer in LLM Agents", "https://arxiv.org/abs/2608.20274", "8 月 20 日提交；系统比较 task/subtask induction 与 text/code format 对跨任务迁移的影响。"),
+            ("Break It Down, Pass It On PDF", "https://arxiv.org/pdf/2608.20274", "论文提出结合 specificity 与 abstractness 的 skill utility score，可在新任务执行前诊断 Skill。"),
+            ("Lodestar Research Trace", "https://github.com/Marina-016/lodestar", "项目已有可审计研究轨迹与 Eval Gate，可作为候选 Skill 的来源和晋升条件。"),
         ],
     },
     {
         "id": "demo-ls-004",
-        "goal": "评测器如何暴露自己的盲点，并反过来驱动研究迭代？",
-        "days": 3,
-        "takeaway": "Metrics That Write Themselves 把评测器看成一组可组合的小型 defect operators，用 counterexample-guided 的碰撞搜索来发现“两个答案得分相同但质量不同”的盲点。这个方向很适合 Lodestar：让 Eval 不只给分，还能告诉我们下一条规则应该测什么。",
+        "goal": "有限上下文里应该加载哪一组 Skill？",
+        "days": 2,
+        "takeaway": "Optimal Skill Selection 把 Skill 选择建模为带硬 Token 预算的集合优化，而不是逐条相似度 Top-K。论文中的 BPS 同时考虑 Skill 组合收益、冗余与上下文惩罚，在受控 BigCodeBench 变体上以更少 Token 获得更高任务成功率。",
         "signals": [
-            "报告生成、研究 Brief 等开放任务通常缺少稳定的单一评分函数",
-            "反例比再次请求一个更长的 judge prompt 更适合作为评测规则的作者请求",
-            "评测规则应能在沙箱中运行、记录命中缺陷并回归到未见任务",
+            "逐条相关性高不代表组合在一起仍有高边际收益",
+            "重复 Skill 会占用上下文并可能干扰执行，需要显式惩罚",
+            "选择器应同时报告任务收益、Token 成本与被排除候选的理由",
         ],
         "opportunities": [
-            "从用户反馈和失败 Trace 中收集成对反例，驱动 Lodestar Eval 增加一条规则",
-            "把 evidence coverage、novelty、next-step quality 拆成可回归的局部指标",
+            "把 Lodestar 的 Skill 检索从逐条 Top-K 改成预算约束下的集合选择实验",
+            "在 Trace 中记录候选集合、冗余惩罚、Token 预算和最终选择理由",
         ],
-        "next": "先建立 20 条演示 Brief 的人工标注集，找出当前评分器最容易漏掉的两类缺陷，再生成第一版 operator。",
+        "next": "固定 8k 上下文预算，对比 semantic Top-K 与 budget-aware selection 的成功率、读取 Token 和冗余率。",
         "sources": [
-            ("Metrics That Write Themselves（PDF）", "https://arxiv.org/pdf/2608.18744", "8 月 19 日提交；用 counterexample-guided abstraction refinement 演化小型 Python defect operators。"),
-            ("Metrics That Write Themselves arXiv 摘要页", "https://arxiv.org/abs/2608.18744", "原始摘要报告在 MBPP+ / HumanEval+ 上用 55 行 operator 缩小 15.4% 的过滤差距。"),
-            ("SESSE：Structured Decomposition for LLM-as-a-Judge（PDF）", "https://arxiv.org/pdf/2608.18303", "同周评测方向论文，提供将 judge 过程拆成结构化步骤的对照路线。"),
+            ("Optimal Skill Selection for LLM Agents with Provable Bicriteria Guarantees", "https://arxiv.org/abs/2608.19993", "8 月 20 日提交；将 Skill set selection 表述为带上下文惩罚的子模优化。"),
+            ("Optimal Skill Selection PDF", "https://arxiv.org/pdf/2608.19993", "论文报告 BPS 达到 0.73 task success，并比最强已发布 router 少用 28% Token。"),
+            ("Lodestar Tool Registry", "https://github.com/Marina-016/lodestar", "当前工具注册与 Harness 已可提供候选 Skill、调用结果和 Token 预算的实验接口。"),
         ],
     },
 ]
 
 
-def _brief(task: dict) -> str:
+DEMO_FRONTIER = {
+    "id": "demo-frontier-weekly",
+    "goal": "本周 Agent 研究有哪些值得 Lodestar 优先验证的新进展？",
+    "takeaway": "最新批次呈现出一条共同主线：长期状态和可复用能力不是越多越好，Agent 需要判断什么值得进入上下文、哪些来源真正独立、以及一次成功经验能否迁移。结合 Lodestar 当前代码，优先级最高的是可信记忆。",
+    "signals": [
+        f"1. 可信记忆 - {DEMO_TASKS[1]['goal']}",
+        f"2. Skill 迁移 - {DEMO_TASKS[2]['goal']}",
+        f"3. 上下文预算 - {DEMO_TASKS[3]['goal']}",
+    ],
+    "opportunities": [DEMO_TASKS[1]["opportunities"][0], DEMO_TASKS[2]["opportunities"][0]],
+    "next": DEMO_TASKS[1]["next"],
+    "sources": [DEMO_TASKS[1]["sources"][0], DEMO_TASKS[2]["sources"][0], DEMO_TASKS[3]["sources"][0]],
+}
+
+DEMO_PROJECT_LINKS = {
+    "demo-frontier-weekly": {
+        "query": "memory skill tool project",
+        "gap": "Lodestar can scan papers and index project code, but weekly signals still need to be ranked by a concrete implementation gap.",
+        "fit": "The active project profile and code index make trusted memory more actionable than model-training-only directions.",
+        "integration": "Frontier selection -> project evidence -> research brief",
+        "files": ["lodestar/frontier.py", "lodestar/relevance.py", "lodestar/project_index.py"],
+    },
+    "demo-ls-001": {
+        "query": "tool MCP trace",
+        "gap": "Lodestar logs tool calls, but does not yet export them as a curated tool-use dataset with recovery labels.",
+        "fit": "MidTool supplies a data contract for turning real API, MCP and document workflows into reusable evaluation material.",
+        "integration": "MCP server, tool registry and trace recorder",
+        "files": ["lodestar/mcp_server.py", "lodestar/tools/registry.py", "lodestar/trace/recorder.py"],
+        "memory_concept": "Tool-Use Training Data",
+    },
+    "demo-ls-002": {
+        "query": "memory knowledge review provenance trace",
+        "gap": "Knowledge State supports explicit confirmation and review, but recalled memories still enter reasoning without a trust decision.",
+        "fit": "MemTrapBench and CAMA identify the missing product layer: reject misleading, stale or source-correlated memories before context injection.",
+        "integration": "Memory repository -> Trust Gate -> Research loop -> Trace",
+        "files": ["lodestar/memory/repo.py", "lodestar/agent/loop.py", "lodestar/trace/recorder.py", "lodestar/tools/knowledge.py"],
+        "memory_concept": "Memory Trust Gate",
+    },
+    "demo-ls-003": {
+        "query": "harness tool skill trace eval",
+        "gap": "Lodestar can preserve successful traces, but has no promotion rule for converting only transferable subtask knowledge into Skills.",
+        "fit": "Cross-task transfer results provide a measurable gate for granularity, format and negative transfer.",
+        "integration": "Research Trace -> Skill candidate -> Eval gate",
+        "files": ["lodestar/harness/codex.py", "lodestar/trace/recorder.py", "lodestar/eval/harness.py"],
+        "memory_concept": "Skill Transfer",
+    },
+    "demo-ls-004": {
+        "query": "tool registry harness budget selection",
+        "gap": "Tool and Skill candidates are retrieved independently; redundancy and total context cost are not optimized as a set.",
+        "fit": "Budget-aware set selection turns context assembly into an explicit product decision with cost and quality metrics.",
+        "integration": "Tool registry -> selector -> Harness -> Eval",
+        "files": ["lodestar/tools/registry.py", "lodestar/harness/codex.py", "lodestar/eval/harness.py"],
+        "memory_concept": "Budget-Aware Skill Selection",
+    },
+}
+
+
+def _brief(task: dict, project: dict | None = None, code_matches: list[dict] | None = None) -> str:
     signals = "\n".join(f"- {item}" for item in task["signals"])
-    opportunities = "\n".join(f"- **可验证方向**：{item}" for item in task["opportunities"])
-    sources = "\n".join(f"- [{title}]({url})：{reason}" for title, url, reason in task["sources"])
+    opportunities = "\n".join(f"- **\u53ef\u9a8c\u8bc1\u65b9\u5411**\uff1a{item}" for item in task["opportunities"])
+    sources = "\n".join(f"- [{title}]({url})\uff1a{reason}" for title, url, reason in task["sources"])
+    link = DEMO_PROJECT_LINKS.get(task["id"], {})
+    project = project or DEMO_PROJECTS[0]
+    paths = [match.get("path") for match in (code_matches or []) if match.get("path")]
+    if not paths:
+        paths = link.get("files") or []
+    code_evidence = "\n".join(f"  - `{item}`" for item in paths[:4]) or "  - No indexed implementation match"
     return (
         f"# {task['goal']}\n\n"
-        f"> **一句话结论**：{task['takeaway']}\n\n"
+        f"> **\u4e00\u53e5\u8bdd\u7ed3\u8bba**\uff1a{task['takeaway']}\n\n"
         "## Key Signals\n\n"
         f"{signals}\n\n"
         "## Project Relevance\n\n"
-        "这条研究线与 **Marina-016/lodestar** 的 Research → Knowledge → Experiment 主路径直接相关。\n"
-        "它适合在演示中展示：论文证据如何被压缩成判断，再变成下一步可运行的实验。\n\n"
+        f"- **Current project**: `{project['name']}`\n"
+        f"- **Observed gap**: {link.get('gap', 'No project gap recorded.')}\n"
+        f"- **Why this matches**: {link.get('fit', 'The research direction matches the active project profile.')}\n"
+        f"- **Integration surface**: {link.get('integration', 'Research -> Knowledge -> Experiment')}\n"
+        "- **Indexed code evidence**:\n"
+        f"{code_evidence}\n\n"
         "## Project Opportunities\n\n"
         f"{opportunities}\n\n"
         "## Key Sources\n\n"
@@ -151,104 +219,138 @@ def _brief(task: dict) -> str:
     )
 
 
-def seed_demo(cfg) -> dict:
-    """Refresh the curated showcase rows without touching user-created rows."""
+def _archive_current_state(conn, cfg) -> dict:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    backup_dir = Path(cfg.workspace_dir) / "demo_backups" / stamp
+    backup_dir.mkdir(parents=True, exist_ok=False)
+    db_backup = backup_dir / "lodestar-before-reset.db"
+    target = sqlite3.connect(str(db_backup))
+    try:
+        conn.backup(target)
+    finally:
+        target.close()
+
+    artifacts_dir = backup_dir / "artifacts"
+    archived = []
+    for child in list(Path(cfg.workspace_dir).iterdir()):
+        if child.name == "demo_backups":
+            continue
+        if child.is_dir() and (child.name == "experiments" or re.fullmatch(r"[0-9a-f]{12}", child.name)):
+            artifacts_dir.mkdir(exist_ok=True)
+            shutil.move(str(child), str(artifacts_dir / child.name))
+            archived.append(child.name)
+    return {"backup_dir": str(backup_dir), "database": str(db_backup), "artifacts": archived}
+
+
+def _clear_application_state(conn) -> None:
+    tables = [
+        "messages", "knowledge_updates", "memory_reviews", "feedback", "trace_events",
+        "sources", "eval_runs", "experiments", "research_tasks", "project_documents",
+        "projects", "conversations", "concepts",
+    ]
+    for table in tables:
+        conn.execute(f"DELETE FROM {table}")
+    conn.execute("DELETE FROM sqlite_sequence")
+    conn.commit()
+
+
+def seed_demo(cfg, clean: bool = False) -> dict:
+    """Install the curated recording dataset; optionally reset all app state first."""
     ws = Workspace(cfg)
     conn = ws.conn
     created_tasks = 0
     refreshed_tasks = 0
     created_experiments = 0
+    backup = None
     try:
+        if clean:
+            backup = _archive_current_state(conn, cfg)
+            _clear_application_state(conn)
+
+        canonical_project = DEMO_PROJECTS[0]
+        project_id = repo.upsert_project(conn, **canonical_project)
+        project_documents = index_local_project(PROJECT_ROOT)
+        indexed_files = repo.replace_project_documents(conn, project_id, project_documents)
+        indexed_paths = {doc["path"] for doc in project_documents}
+
         now = datetime.now(timezone.utc)
         demo_ids = [item["id"] for item in DEMO_TASKS]
         placeholders = ",".join("?" for _ in demo_ids)
-        # These IDs are reserved by this module for the recording dataset.
-        # Removing their old child rows prevents stale sources from mixing with
-        # the refreshed papers; no non-demo task is affected.
         conn.execute(f"DELETE FROM sources WHERE task_id IN ({placeholders})", demo_ids)
         conn.execute(f"DELETE FROM knowledge_updates WHERE task_id IN ({placeholders})", demo_ids)
+        conn.execute(f"DELETE FROM trace_events WHERE task_id IN ({placeholders})", demo_ids)
         conn.execute(f"DELETE FROM experiments WHERE task_id IN ({placeholders})", demo_ids)
 
         for index, item in enumerate(DEMO_TASKS):
             exists = conn.execute("SELECT 1 FROM research_tasks WHERE id=?", (item["id"],)).fetchone()
+            link = DEMO_PROJECT_LINKS[item["id"]]
+            code_matches = [{"path": path} for path in link["files"] if path in indexed_paths]
             repo.create_task(
-                conn,
-                item["id"],
-                item["goal"],
-                {"demo": True, "demo_release": DEMO_RELEASE, "source_window": "2026-08-15/2026-08-21"},
-                queries=[item["goal"]],
-                llm_mode="mock",
+                conn, item["id"], item["goal"],
+                {"demo": True, "demo_release": DEMO_RELEASE, "source_window": "2026-08-15/2026-08-21",
+                 "project": canonical_project["name"], "project_query": link["query"]},
+                queries=[item["goal"]], llm_mode="mock",
             )
-            repo.finish_task(conn, item["id"], _brief(item), "finished", metrics={
-                "demo": True,
-                "demo_release": DEMO_RELEASE,
-                "source_count": len(item["sources"]),
-                "evidence_coverage": round(0.86 + index * 0.03, 2),
-                "novelty": "high",
+            repo.finish_task(conn, item["id"], _brief(item, canonical_project, code_matches), "finished", metrics={
+                "demo": True, "demo_release": DEMO_RELEASE, "source_count": len(item["sources"]),
+                "project": canonical_project["name"], "project_matches": len(code_matches),
+                "evidence_coverage": round(0.86 + index * 0.03, 2), "novelty": "high",
             })
             created_at = (now - timedelta(days=item["days"])).isoformat(timespec="seconds")
             conn.execute("UPDATE research_tasks SET created_at=?, finished_at=? WHERE id=?",
                          (created_at, created_at, item["id"]))
             for rank, (title, url, reason) in enumerate(item["sources"], start=1):
-                sid = repo.add_source(conn, item["id"], {
-                    "source_type": "paper" if "arxiv.org" in url else "web",
-                    "title": title,
-                    "url": url,
-                    "snippet": reason,
-                    "query": item["goal"],
-                    "rank": rank,
-                    "reason": reason,
-                    "read_depth": "abstract",
-                    "date": "2026-08-19" if "2608." in url else None,
+                source_id = repo.add_source(conn, item["id"], {
+                    "source_type": "paper" if "arxiv.org" in url else "web", "title": title,
+                    "url": url, "snippet": reason, "query": item["goal"],
+                    "date": "2026-08-20" if "2608." in url else None,
                 })
-                conn.execute("UPDATE sources SET rank=?, reason=?, read_depth=? WHERE id=?",
-                             (rank, reason, "abstract", sid))
-            repo.add_knowledge_update(conn, item["id"], "Evidence Certificate", "update", {
-                "old_status": "partial",
-                "new_status": "known",
-                "new_confidence": "medium",
-                "claim": item["takeaway"],
-                "novelty": "high",
-                "evidence": item["sources"][0][0],
+                repo.update_source(conn, source_id, rank=rank, reason=reason, read_depth="abstract")
+            repo.add_trace_event(conn, item["id"], 1, "demo_replay_sources", {"count": len(item["sources"])})
+            repo.add_trace_event(conn, item["id"], 2, "project_context_search", {
+                "project": canonical_project["name"], "query": link["query"],
+                "matches": [match["path"] for match in code_matches], "mapping": link["fit"],
             })
-            if exists:
-                refreshed_tasks += 1
-            else:
-                created_tasks += 1
+            finish_seq = 3
+            if item["id"] == "demo-ls-002":
+                repo.add_trace_event(conn, item["id"], 3, "memory_risk_assessment", {
+                    "factors": ["relevance", "source_independence", "conflict_risk", "recency"],
+                    "finding": "Top-K relevance alone cannot decide whether memory should enter context.",
+                })
+                finish_seq = 4
+            repo.add_trace_event(conn, item["id"], finish_seq, "demo_replay_finish", {"state": "saved_research"})
+            created_tasks += 0 if exists else 1
+            refreshed_tasks += 1 if exists else 0
 
         for name, status, confidence, note in DEMO_CONCEPTS:
             repo.upsert_concept(conn, name, status=status, confidence=confidence,
-                                notes=[f"[演示笔记 · {DEMO_RELEASE}] {note}"])
-
-        for project in DEMO_PROJECTS:
-            repo.upsert_project(conn, **project)
+                                notes=[f"[demo baseline / {DEMO_RELEASE}] {note}"])
 
         experiments = [
-            ("动态 obligation graph 能否提升研究任务的验收完整度？", "built", DEMO_TASKS[0]["id"]),
-            ("带反思的 Knowledge State 是否能减少重复检索？", "draft", DEMO_TASKS[1]["id"]),
-            ("独立的 Skill selector credit 是否提升长任务成功率？", "built", DEMO_TASKS[2]["id"]),
-            ("反例驱动的 Eval operator 能否补齐 Brief 评分盲点？", "draft", DEMO_TASKS[3]["id"]),
+            ("脱敏 Tool Trace 能否形成稳定的 tool-use 回归集？", "scaffolded", DEMO_TASKS[0]["id"]),
+            ("Memory Trust Gate 能否在不降低正常任务正确率的前提下，减少 memory trap 与 false majority？",
+             "draft", DEMO_TASKS[1]["id"]),
+            ("子任务级 text Skill 是否比完整任务级 Skill 更容易跨任务迁移？",
+             "scaffolded", DEMO_TASKS[2]["id"]),
+            ("预算约束的 Skill 集合选择能否用更少 Token 获得更高任务成功率？",
+             "draft", DEMO_TASKS[3]["id"]),
         ]
         for hypothesis, status, task_id in experiments:
-            exp_id = repo.add_experiment(
-                conn,
-                hypothesis,
-                task_id=task_id,
-                description="Lodestar demo：把本周论文中的可验证主张转成可运行实验。",
-                source_claim="来自 Research Brief 的 Project Opportunities 与 Key Sources。",
+            task = next(item for item in DEMO_TASKS if item["id"] == task_id)
+            experiment_id = repo.add_experiment(
+                conn, hypothesis, task_id=task_id, description=task["next"],
+                source_claim="Project opportunity grounded in paper sources and indexed Lodestar files.",
             )
-            if status == "built":
-                repo.set_experiment_build(conn, exp_id, "built",
-                                          str(cfg.workspace_dir / "experiments" / f"experiment_{exp_id}"))
+            if status == "scaffolded":
+                output = scaffold_experiment(repo.get_experiment(conn, experiment_id), cfg.workspace_dir / "experiments")
+                repo.set_experiment_build(conn, experiment_id, "scaffolded", str(output))
             created_experiments += 1
         conn.commit()
         return {
-            "tasks": created_tasks,
-            "refreshed_tasks": refreshed_tasks,
-            "concepts": len(DEMO_CONCEPTS),
-            "projects": len(DEMO_PROJECTS),
-            "experiments": created_experiments,
-            "release": DEMO_RELEASE,
+            "clean": clean, "backup": backup, "tasks": created_tasks,
+            "refreshed_tasks": refreshed_tasks, "concepts": len(DEMO_CONCEPTS),
+            "projects": len(DEMO_PROJECTS), "indexed_files": indexed_files,
+            "experiments": created_experiments, "release": DEMO_RELEASE,
         }
     finally:
         ws.close()

@@ -117,7 +117,8 @@ def render_brief(cfg, task_id: str, goal: str, plan: dict, queries: list[dict], 
             lines.append(f"- {g}")
     else:
         lines.append("- assess 未标出明显缺口。")
-    lines.append("- V0 未覆盖：论文全文深度阅读、GitHub/项目文件检索、Experiment 闭环（V1/V2）。")
+    lines.append("- 当前边界：可选 PDF 全文阅读与 Experiment scaffold 已支持；GitHub/项目文件深度检索、"
+                 "真实实验执行与自动过期复审尚未实现。")
     lines.append("")
 
     # Project Opportunities

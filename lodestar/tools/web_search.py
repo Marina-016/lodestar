@@ -21,7 +21,9 @@ def _normalize_url(url: str) -> str:
 
 
 def _search_duckduckgo(query: str, max_results: int, timeout: int) -> tuple[list[dict], str]:
-    resp = requests.post(LITE_URL, data={"q": query}, timeout=timeout,
+    # DuckDuckGo Lite is occasionally flaky behind corporate proxies. Keep this
+    # attempt short so the caller can use the live scholarly fallback below.
+    resp = requests.post(LITE_URL, data={"q": query}, timeout=min(timeout, 8),
                          headers={"User-Agent": UA, "Accept-Language": "en-US,en;q=0.9"})
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "html.parser")
@@ -71,7 +73,20 @@ def tool_search_web(ws, query: str, max_results: int | None = None):
         sources, note = _search_duckduckgo(query, max_results, cfg.tool_timeout_s)
         return {"sources": sources, "note": note}
     except Exception as e:  # noqa: BLE001
-        return {"sources": [], "error": f"网页搜索失败: {e}", "note": f"query={query!r}"}
+        # Keep live research useful when the general web endpoint is unavailable.
+        # arXiv is an independent, keyless source and preserves evidence provenance.
+        try:
+            from lodestar.tools.arxiv_search import _search_arxiv
+            sources = _search_arxiv(query, max_results=max_results, timeout=min(cfg.tool_timeout_s, 12),
+                                    field=cfg.arxiv_search_field)
+            if sources:
+                return {"sources": sources,
+                        "note": "DuckDuckGo unavailable; live arXiv fallback returned " + str(len(sources)) + " sources.",
+                        "fallback": "arxiv"}
+        except Exception as fallback_error:  # noqa: BLE001
+            return {"sources": [], "error": "web search failed: " + str(e) + "; arXiv fallback failed: " + str(fallback_error),
+                    "note": "query=" + repr(query)}
+        return {"sources": [], "error": "web search failed: " + str(e), "note": "query=" + repr(query)}
 
 
 register(

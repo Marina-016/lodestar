@@ -100,6 +100,17 @@ CREATE TABLE IF NOT EXISTS knowledge_updates(
   FOREIGN KEY(task_id) REFERENCES research_tasks(id)
 );
 
+CREATE TABLE IF NOT EXISTS memory_reviews(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  concept TEXT NOT NULL,
+  decision TEXT NOT NULL,
+  old_status TEXT NOT NULL,
+  new_status TEXT NOT NULL,
+  reason TEXT NOT NULL DEFAULT '',
+  reviewed_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_memory_reviews_concept ON memory_reviews(concept, reviewed_at DESC);
+
 CREATE TABLE IF NOT EXISTS feedback(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   task_id TEXT NOT NULL,
@@ -139,8 +150,10 @@ CREATE TABLE IF NOT EXISTS experiments(
   source_claim TEXT,
   build_status TEXT NOT NULL DEFAULT 'draft',   -- draft | building | built | failed
   output_dir TEXT,
+  metrics TEXT NOT NULL DEFAULT '{}',
   created_at TEXT NOT NULL,
   built_at TEXT,
+  last_run_at TEXT,
   FOREIGN KEY(task_id) REFERENCES research_tasks(id)
 );
 
@@ -154,6 +167,33 @@ CREATE TABLE IF NOT EXISTS projects(
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS project_documents(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL,
+  path TEXT NOT NULL,
+  title TEXT NOT NULL,
+  content TEXT NOT NULL,
+  url TEXT,
+  source TEXT NOT NULL DEFAULT 'local', -- local | github
+  indexed_at TEXT NOT NULL,
+  UNIQUE(project_id, path),
+  FOREIGN KEY(project_id) REFERENCES projects(id)
+);
+CREATE INDEX IF NOT EXISTS idx_project_documents_project ON project_documents(project_id, path);
+CREATE VIRTUAL TABLE IF NOT EXISTS project_documents_fts USING fts5(
+  path, title, content, content='project_documents', content_rowid='id', tokenize='porter unicode61'
+);
+CREATE TRIGGER IF NOT EXISTS project_documents_ai AFTER INSERT ON project_documents BEGIN
+  INSERT INTO project_documents_fts(rowid, path, title, content) VALUES (new.id, new.path, new.title, new.content);
+END;
+CREATE TRIGGER IF NOT EXISTS project_documents_ad AFTER DELETE ON project_documents BEGIN
+  INSERT INTO project_documents_fts(project_documents_fts, rowid, path, title, content) VALUES('delete', old.id, old.path, old.title, old.content);
+END;
+CREATE TRIGGER IF NOT EXISTS project_documents_au AFTER UPDATE ON project_documents BEGIN
+  INSERT INTO project_documents_fts(project_documents_fts, rowid, path, title, content) VALUES('delete', old.id, old.path, old.title, old.content);
+  INSERT INTO project_documents_fts(rowid, path, title, content) VALUES (new.id, new.path, new.title, new.content);
+END;
 """
 
 
@@ -166,6 +206,36 @@ def _migrate(conn: sqlite3.Connection) -> None:
     task_cols = {r[1] for r in conn.execute("PRAGMA table_info(research_tasks)").fetchall()}
     if "conversation_id" not in task_cols:
         conn.execute("ALTER TABLE research_tasks ADD COLUMN conversation_id TEXT")
+    experiment_cols = {r[1] for r in conn.execute("PRAGMA table_info(experiments)").fetchall()}
+    for col, ddl in (("metrics", "TEXT NOT NULL DEFAULT '{}'"), ("last_run_at", "TEXT")):
+        if col not in experiment_cols:
+            conn.execute(f"ALTER TABLE experiments ADD COLUMN {col} {ddl}")
+    # Early snapshots indexed only paths/titles. Rebuild once so body retrieval works too.
+    try:
+        fts_cols = {r[1] for r in conn.execute("PRAGMA table_info(project_documents_fts)").fetchall()}
+        if fts_cols and "content" not in fts_cols:
+            conn.executescript("""
+            DROP TRIGGER IF EXISTS project_documents_ai;
+            DROP TRIGGER IF EXISTS project_documents_ad;
+            DROP TRIGGER IF EXISTS project_documents_au;
+            DROP TABLE IF EXISTS project_documents_fts;
+            CREATE VIRTUAL TABLE project_documents_fts USING fts5(
+              path, title, content, content='project_documents', content_rowid='id', tokenize='porter unicode61'
+            );
+            CREATE TRIGGER project_documents_ai AFTER INSERT ON project_documents BEGIN
+              INSERT INTO project_documents_fts(rowid,path,title,content) VALUES (new.id,new.path,new.title,new.content);
+            END;
+            CREATE TRIGGER project_documents_ad AFTER DELETE ON project_documents BEGIN
+              INSERT INTO project_documents_fts(project_documents_fts,rowid,path,title,content) VALUES('delete',old.id,old.path,old.title,old.content);
+            END;
+            CREATE TRIGGER project_documents_au AFTER UPDATE ON project_documents BEGIN
+              INSERT INTO project_documents_fts(project_documents_fts,rowid,path,title,content) VALUES('delete',old.id,old.path,old.title,old.content);
+              INSERT INTO project_documents_fts(rowid,path,title,content) VALUES (new.id,new.path,new.title,new.content);
+            END;
+            INSERT INTO project_documents_fts(rowid,path,title,content) SELECT id,path,title,content FROM project_documents;
+            """)
+    except sqlite3.OperationalError:
+        pass
     conn.commit()
 
 

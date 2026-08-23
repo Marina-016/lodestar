@@ -30,7 +30,7 @@ def _loads(text: Optional[str], default: Any = None) -> Any:
 # ----------------------------------------------------------------------
 # Knowledge State
 # ----------------------------------------------------------------------
-CONCEPT_STATUS = {"known", "partial", "unknown", "needs_review"}
+CONCEPT_STATUS = {"known", "partial", "unknown", "needs_review", "archived"}
 CONCEPT_CONFIDENCE = {"low", "medium", "high"}
 
 
@@ -298,6 +298,64 @@ def set_update_status(conn: sqlite3.Connection, update_id: int, status: str) -> 
 
 
 # ----------------------------------------------------------------------
+# ----------------------------------------------------------------------
+# Memory lifecycle review
+# ----------------------------------------------------------------------
+MEMORY_REVIEW_DECISIONS = {"retain", "needs_review", "archive"}
+
+
+def list_memory_review_candidates(conn: sqlite3.Connection, older_than_days: int = 30,
+                                  limit: int = 30) -> list[dict]:
+    from datetime import timedelta
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=max(1, int(older_than_days)))).isoformat(timespec="seconds")
+    rows = conn.execute(
+        "SELECT * FROM concepts WHERE status='needs_review' OR (status!='archived' AND updated_at<?) "
+        "ORDER BY status='needs_review' DESC, updated_at ASC LIMIT ?",
+        (cutoff, max(1, min(int(limit), 100))),
+    ).fetchall()
+    out = []
+    for row in rows:
+        item = dict(row)
+        item["notes"] = _loads(item.get("notes"), [])
+        item["related"] = _loads(item.get("related"), [])
+        item["review_reason"] = "explicit_flag" if item["status"] == "needs_review" else "stale"
+        out.append(item)
+    return out
+
+
+def record_memory_review(conn: sqlite3.Connection, concept: str, decision: str,
+                         reason: str = "") -> dict:
+    if decision not in MEMORY_REVIEW_DECISIONS:
+        raise ValueError(f"invalid memory review decision={decision!r}")
+    current = get_concept(conn, concept)
+    if current is None:
+        raise ValueError(f"concept not found: {concept}")
+    old_status = current["status"]
+    new_status = {"archive": "archived", "needs_review": "needs_review"}.get(decision, old_status)
+    now = _now()
+    conn.execute("UPDATE concepts SET status=?, updated_at=? WHERE name=?", (new_status, now, concept))
+    conn.execute(
+        "INSERT INTO memory_reviews(concept,decision,old_status,new_status,reason,reviewed_at) VALUES(?,?,?,?,?,?)",
+        (concept, decision, old_status, new_status, reason.strip()[:500], now),
+    )
+    conn.commit()
+    return {"concept": get_concept(conn, concept), "decision": decision,
+            "old_status": old_status, "new_status": new_status, "reason": reason.strip()[:500],
+            "reviewed_at": now}
+
+
+def list_memory_reviews(conn: sqlite3.Connection, concept: str | None = None,
+                        limit: int = 50) -> list[dict]:
+    sql = "SELECT * FROM memory_reviews"
+    args: list = []
+    if concept:
+        sql += " WHERE concept=?"
+        args.append(concept)
+    sql += " ORDER BY id DESC LIMIT ?"
+    args.append(max(1, min(int(limit), 200)))
+    return [dict(row) for row in conn.execute(sql, args).fetchall()]
+
+
 # Feedback（PRD 缺口 B2：反馈信号采集）
 # ----------------------------------------------------------------------
 def add_feedback(conn: sqlite3.Connection, task_id: str, usefulness: Optional[int] = None,
@@ -329,19 +387,39 @@ def add_experiment(conn: sqlite3.Connection, hypothesis: str, task_id: str | Non
     return cur.lastrowid
 
 
+def _experiment_dict(row) -> Optional[dict]:
+    if row is None:
+        return None
+    item = dict(row)
+    item["metrics"] = _loads(item.get("metrics"), {})
+    return item
+
+
 def get_experiment(conn: sqlite3.Connection, exp_id: int) -> Optional[dict]:
-    row = conn.execute("SELECT * FROM experiments WHERE id=?", (exp_id,)).fetchone()
-    return dict(row) if row else None
+    return _experiment_dict(conn.execute("SELECT * FROM experiments WHERE id=?", (exp_id,)).fetchone())
 
 
 def list_experiments(conn: sqlite3.Connection) -> list[dict]:
-    return [dict(r) for r in conn.execute("SELECT * FROM experiments ORDER BY id DESC").fetchall()]
+    return [_experiment_dict(r) for r in conn.execute("SELECT * FROM experiments ORDER BY id DESC").fetchall()]
 
 
 def set_experiment_build(conn: sqlite3.Connection, exp_id: int, status: str, output_dir: str | None = None) -> None:
     conn.execute(
         "UPDATE experiments SET build_status=?, output_dir=?, built_at=? WHERE id=?",
         (status, output_dir, _now() if status in {"built", "failed"} else None, exp_id),
+    )
+    conn.commit()
+
+
+def record_experiment_run(conn: sqlite3.Connection, exp_id: int, result: dict,
+                          output_dir: str | None = None) -> None:
+    verdict = (result.get("metrics") or {}).get("verdict")
+    status = "built" if result.get("ok") else ("scaffolded" if verdict == "inconclusive" else "failed")
+    now = _now()
+    conn.execute(
+        "UPDATE experiments SET build_status=?, output_dir=COALESCE(?, output_dir), metrics=?, "
+        "built_at=?, last_run_at=? WHERE id=?",
+        (status, output_dir, _dumps(result.get("metrics") or {}), now if status in {"built", "failed"} else None, now, exp_id),
     )
     conn.commit()
 
@@ -401,6 +479,59 @@ def set_project_status(conn: sqlite3.Connection, project_id: int, status: str) -
     conn.execute("UPDATE projects SET status=?, updated_at=? WHERE id=?",
                  (status, _now(), project_id))
     conn.commit()
+
+
+def replace_project_documents(conn: sqlite3.Connection, project_id: int, documents: list[dict]) -> int:
+    """Atomically replace one project's searchable document snapshot."""
+    conn.execute("DELETE FROM project_documents WHERE project_id=?", (project_id,))
+    now = _now()
+    rows = [(project_id, d["path"], d.get("title") or d["path"], d.get("content") or "",
+             d.get("url"), d.get("source", "local"), now) for d in documents]
+    conn.executemany("INSERT INTO project_documents(project_id,path,title,content,url,source,indexed_at) VALUES(?,?,?,?,?,?,?)", rows)
+    conn.commit()
+    return len(rows)
+
+
+def list_project_documents(conn: sqlite3.Connection, project_id: int) -> list[dict]:
+    return [dict(row) for row in conn.execute(
+        "SELECT id,project_id,path,title,url,source,indexed_at,length(content) AS chars FROM project_documents WHERE project_id=? ORDER BY path", (project_id,)).fetchall()]
+
+
+def get_project_document(conn: sqlite3.Connection, document_id: int) -> Optional[dict]:
+    row = conn.execute("SELECT * FROM project_documents WHERE id=?", (document_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def search_project_documents(conn: sqlite3.Connection, query: str, project_id: int | None = None, limit: int = 8) -> list[dict]:
+    import re
+    terms = re.findall(r"[\w.-]+", query or "", flags=re.UNICODE)
+    if not terms:
+        return []
+    match = " OR ".join(terms[:8])
+    sql = ("SELECT d.id,d.project_id,d.path,d.title,d.url,d.source,d.content FROM project_documents_fts f "
+           "JOIN project_documents d ON d.id=f.rowid WHERE project_documents_fts MATCH ?")
+    args: list = [match]
+    if project_id is not None:
+        sql += " AND d.project_id=?"
+        args.append(project_id)
+    sql += " LIMIT ?"
+    args.append(max(1, min(int(limit), 20)))
+    try:
+        rows = [dict(row) for row in conn.execute(sql, args).fetchall()]
+    except Exception:
+        like_sql = "SELECT id,project_id,path,title,url,source,content FROM project_documents WHERE lower(content) LIKE ?"
+        like_args: list = [f"%{terms[0].lower()}%"]
+        if project_id is not None:
+            like_sql += " AND project_id=?"
+            like_args.append(project_id)
+        like_sql += " LIMIT ?"
+        like_args.append(max(1, min(int(limit), 20)))
+        rows = [dict(row) for row in conn.execute(like_sql, like_args).fetchall()]
+    for row in rows:
+        text = row.pop("content", "")
+        pos = max(0, text.lower().find(terms[0].lower()) - 180)
+        row["excerpt"] = text[pos:pos + 700]
+    return rows
 
 
 # ----------------------------------------------------------------------

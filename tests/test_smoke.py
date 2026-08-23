@@ -212,9 +212,12 @@ class SmokeTestCase(unittest.TestCase):
 
     def test_09_ui_server(self):
         """Web UI：本地 server 起得来，health/首页/任务 API 响应。"""
+        import os
         import threading
         from http.server import ThreadingHTTPServer
         import urllib.request
+        os.environ["NO_PROXY"] = "127.0.0.1,localhost"
+        os.environ["no_proxy"] = "127.0.0.1,localhost"
         from lodestar import ui as ui_mod
         cfg = Config(llm_mode="mock", search_mode="mock", db_path=Path(self.tmp) / "ui.db",
                      workspace_dir=Path(self.tmp) / "ws_ui", cases_dir=self.cfg.cases_dir)
@@ -237,6 +240,7 @@ class SmokeTestCase(unittest.TestCase):
             self.assertIsInstance(tasks, list)
         finally:
             server.shutdown()
+            server.server_close()
 
     def test_10_projects_relevance_offline(self):
         """Projects：登记 active 项目后，mock 研究的 Brief 应含 Project Relevance 映射。"""

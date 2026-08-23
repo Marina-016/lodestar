@@ -11,6 +11,7 @@ Codex CLI 是 **Apache-2.0 开源**（github.com/openai/codex），可 fork/内�
 from __future__ import annotations
 
 import os
+import shutil
 
 from lodestar.build.executor import BuildExecutor, ExecutorResult
 
@@ -27,16 +28,37 @@ class CodexExecutor(BuildExecutor):
 
     def __init__(self, model: str | None = None, provider: str | None = None,
                  base_url: str | None = None, api_key: str | None = None,
-                 require_gateway: bool = False, sandbox: str = "workspace-write"):
+                 require_gateway: bool = False, sandbox: str = "workspace-write",
+                 proxy_url: str | None = None, node_bin: str | None = None):
         self.model = model
         self.provider = provider          # 自定义 provider 名（如 lodestar-gw）
         self.base_url = base_url          # 自定义端点（如 http://<gw>/v1）
         self.api_key = api_key            # 注入为 OPENAI_API_KEY 传给子进程
         self.require_gateway = require_gateway
         self.sandbox = sandbox            # read-only | workspace-write | danger-full-access
+        self.proxy_url = proxy_url or ""
+        self.node_bin = node_bin or ""
+
+    def available(self) -> bool:
+        lookup_path = self._runtime_env().get("PATH") or self._runtime_env().get("Path")
+        return shutil.which(self._binary(), path=lookup_path) is not None
 
     def _binary(self) -> str:
         return "codex"
+
+    def _runtime_env(self) -> dict[str, str]:
+        """Scope local runtime requirements to Codex, not the parent process."""
+        env: dict[str, str] = {}
+        if self.node_bin:
+            node_path = self.node_bin + os.pathsep + os.environ.get("PATH", os.environ.get("Path", ""))
+            # Windows environment variable names are case-insensitive, but child-process merging is not.
+            env["PATH"] = node_path
+            env["Path"] = node_path
+        if self.proxy_url:
+            for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+                env[key] = self.proxy_url
+            env["NO_PROXY"] = "127.0.0.1,localhost"
+        return env
 
     def run(self, prompt: str, cwd: str = ".", timeout: int = 300) -> ExecutorResult:
         base = ["codex", "exec", "--skip-git-repo-check", "--sandbox", self.sandbox]
@@ -44,7 +66,8 @@ class CodexExecutor(BuildExecutor):
             if self.require_gateway:
                 return ExecutorResult(ok=False, error=self.GATEWAY_REQUIRED_MSG)
             # 允许默认模式（用户显式关掉 require_gateway 后，走本机 codex 配置 / ChatGPT 登录）
-            return self._exec([*base, prompt], cwd, timeout)
+            model_args = ["--model", self.model] if self.model else []
+            return self._exec([*base, *model_args, prompt], cwd, timeout, env=self._runtime_env())
         cmd = list(base)
         name = self.provider
         cmd += [
@@ -59,4 +82,4 @@ class CodexExecutor(BuildExecutor):
         if not key:
             return ExecutorResult(ok=False, error="codex 网关模式需要 LODESTAR_CODEX_API_KEY / OPENAI_API_KEY")
         cmd.append(prompt)
-        return self._exec(cmd, cwd, timeout, env={"OPENAI_API_KEY": key})
+        return self._exec(cmd, cwd, timeout, env={**self._runtime_env(), "OPENAI_API_KEY": key})

@@ -5,6 +5,7 @@ from lodestar.tools import (  # noqa: E402,F401
     arxiv_search,
     knowledge,
     paper_read,
+    project_context,
     web_read,
     web_search,
 )

@@ -1,16 +1,23 @@
 # Changelog
 
-## [Unreleased] - 2026-08-21
+## [Unreleased] - 2026-08-24
 
 ### Added
 
-- Added `docs/demo-video-script.md` with the v0 recording narrative and operator checklist.
-- Defined the demo story as a full loop from research question to evidence, Knowledge State, and experiment scaffold.
-- Separated the first clean recording cut from later subtitle, voice-over, and motion-design passes.
+- Rebuilt the curated replay around trusted Agent memory using the latest MemTrapBench, CAMA, cross-task Skill transfer, Skill selection and MidTool papers.
+- Added a project-grounded memory risk assessment event to the auditable Agent trajectory.
+- Added trusted-memory experiment cases for misleading relevant memory, correlated false majorities, stale conflicts and useful independent memory.
+- Added a clean reset workflow that backs up the current database before rebuilding recording data.
 
 ### Documentation
 
-- Linked the demo video script from the README.
+- Consolidated recording instructions into `docs/demo-recording-v2.md` and `docs/demo-recording-runbook.md`.
+- Documented the exact two-prompt workflow, narration, truthfulness boundaries and reset procedure.
+
+### Changed
+
+- Replaced the previous AMR/Eureka/SkillGate demonstration narrative with a single coherent flow from weekly research to Memory Trust Gate.
+- Updated offline Agent Memory and Frontier sample responses to match the trusted-memory research question.
 
 All notable changes to Lodestar are documented here.
 

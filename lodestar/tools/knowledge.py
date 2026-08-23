@@ -63,3 +63,32 @@ register(
     parameters={"concept": {"type": "string", "required": True}, "action": {"type": "string", "required": True},
                 "proposal": {"type": "object", "required": True}},
 )
+
+
+def tool_review_memory_candidates(ws, older_than_days: int = 30, limit: int = 20):
+    """Read-only audit queue for stale or explicitly flagged memory."""
+    items = repo.list_memory_review_candidates(ws.conn, older_than_days=older_than_days, limit=limit)
+    return {"candidates": items, "count": len(items),
+            "note": "Review decisions are explicit and auditable; no memory changes were made."}
+
+
+def tool_record_memory_review(ws, concept: str, decision: str, reason: str = ""):
+    """Persist an explicit retain / needs_review / archive decision."""
+    result = repo.record_memory_review(ws.conn, concept, decision, reason)
+    return {"review": result, "note": "Memory lifecycle decision recorded."}
+
+
+register(
+    name="review_memory_candidates",
+    description="List stale or explicitly flagged memory concepts for human review; read-only.",
+    fn=tool_review_memory_candidates,
+    parameters={"older_than_days": {"type": "integer"}, "limit": {"type": "integer"}},
+)
+register(
+    name="record_memory_review",
+    description="Record an explicit memory lifecycle decision: retain, needs_review, or archive.",
+    fn=tool_record_memory_review,
+    parameters={"concept": {"type": "string", "required": True},
+                "decision": {"type": "string", "required": True},
+                "reason": {"type": "string"}},
+)

@@ -20,7 +20,8 @@ class Trace:
         self.conn = conn
         self.task_id = task_id
         self.workspace_dir = workspace_dir
-        self._seq = 0
+        existing = repo.list_trace_events(conn, task_id)
+        self._seq = max((int(event.get("seq") or 0) for event in existing), default=0)
 
     def log(self, kind: str, data) -> int:
         self._seq += 1

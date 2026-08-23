@@ -177,46 +177,43 @@ class MockLLM:
         },
         "agent_memory": {
             "questions": [
-                "Agent Memory 的主要技术路径（存储/检索/更新）是什么",
-                "分层记忆（episodic/semantic/procedural）如何组织",
-                "与 Context Engineering、Eval 的关系",
+                "为什么真实且相关的记忆仍可能伤害当前推理",
+                "多个 Agent 共享上游来源时如何避免虚假多数",
+                "召回结果进入上下文前需要哪些可信度判断",
             ],
             "strategy": [
-                "arXiv: agent memory taxonomy, memory updating, retrieval",
-                "web: memory vs context engineering",
+                "arXiv: memory cognitive traps and adaptive memory",
+                "arXiv: provenance-aware multi-agent memory arbitration",
             ],
             "queries": [
-                {"text": "agent memory episodic semantic procedural taxonomy arxiv", "purpose": "分层记忆分类"},
-                {"text": "agent memory updating retrieval context window", "purpose": "更新与检索路径"},
-                {"text": "agent memory evaluation self-improvement", "purpose": "与 Eval/自改进关系"},
+                {"text": "MemTrapBench cognitive traps LLM memory", "purpose": "识别相关记忆造成的推理风险"},
+                {"text": "multi-agent memory correlation bias provenance arbitration", "purpose": "检查来源相关性与虚假多数"},
+                {"text": "memory trust gate relevance conflict recency", "purpose": "形成可验证的召回闸门"},
             ],
             "synthesis": (
                 "## 共同观点\n"
-                "Agent Memory 正从「向量库即记忆」走向分层记忆：episodic（情景）、semantic（语义）、"
-                "procedural（程序）三类记忆各有侧重。\n\n"
-                "## 主要技术路线\n"
-                "1. 存储：向量数据库与结构化记忆；2. 检索：relevance 检索；"
-                "3. 更新：memory updating（改写/合并）而非仅 append-only；"
-                "4. 自改进：用 evaluation 反馈驱动记忆重写与 skill 沉淀。\n\n"
-                "## 方法差异\n"
-                "差异在检索粒度、更新策略（append vs revise）、以及与 context window 的衔接。\n\n"
-                "## 相互冲突\n"
-                "memory updating 是否安全（遗忘 vs 一致性）是主要分歧。\n\n"
+                "Agent Memory 的最新问题不是存得更多，而是判断召回出的记忆是否应该进入当前上下文。\n\n"
+                "## 两类核心风险\n"
+                "1. Cognitive trap：真实且相关的记忆仍可能造成 reasoning fixation 或 belief distortion；"
+                "2. Correlation bias：多条记忆可能继承同一个上游来源，被错误计作独立多数。\n\n"
+                "## 产品机制\n"
+                "在 retrieval 和 context injection 之间增加 Memory Trust Gate，联合判断 relevance、"
+                "source independence、conflict risk 与 recency，并把 admitted/rejected/escalated 决策写入 Trace。\n\n"
                 "## 研究空白\n"
-                "缺乏跨 memory 架构的统一 benchmark 与 evaluation 协议。\n\n"
+                "可信闸门可能误拒真正有用的记忆，因此必须同时测安全收益、任务正确率和 Token 成本。\n\n"
                 "## 当前趋势\n"
-                "记忆层与 context engineering 融合，检索不再是唯一入口。"
+                "研究重点正从 memory retrieval 转向 memory governance 与可审计仲裁。"
             ),
             "claims": [
                 {
-                    "claim": "Agent Memory 分层化（episodic/semantic/procedural）与 evaluation 反馈驱动的 memory updating 是新增量",
-                    "concept": "Agent Memory", "novelty": "high", "is_repackaging_of": None,
-                    "reason": "把 Memory 从纯检索存储扩展为可更新的记忆层是结构化增量（mock 判定）",
+                    "claim": "相关记忆仍可能伤害推理，召回后需要可信度闸门再决定是否注入上下文",
+                    "concept": "Memory Trust Gate", "novelty": "high", "is_repackaging_of": None,
+                    "reason": "相对只按语义相关性召回，增加来源独立性、冲突与时效判断是结构化增量（mock 判定）",
                 },
                 {
-                    "claim": "记忆与 context window 的衔接需要显式设计",
-                    "concept": "Memory Updating", "novelty": "medium", "is_repackaging_of": "Memory",
-                    "reason": "Memory 已知，更新机制是延伸视角（mock 判定）",
+                    "claim": "多条同源记忆不能被重复计作独立证据",
+                    "concept": "Memory Provenance", "novelty": "medium", "is_repackaging_of": "Agent Memory",
+                    "reason": "Memory provenance 已部分掌握，来源相关性仲裁是新的应用边界（mock 判定）",
                 },
             ],
         },
@@ -438,15 +435,15 @@ class MockLLM:
         proj = re.findall(r"^- ([A-Za-z0-9_.\-/]+)（", user, flags=re.M)
         return json.dumps(
             {"suggestions": [
-                {"topic": "Agent Memory 分层与更新机制的最新进展", "why": "你的 Knowledge State 中 Memory 为 known/medium，"
-                 "但 episodic/procedural 分层与 memory updating 的具体实现未覆盖，本周有多篇相关工作值得关注。",
-                 "priority": "high", "related_projects": proj[:1]},
-                {"topic": "Context Engineering 与 Agent Harness 的融合边界", "why": "Context Engineering 为 known/high，"
-                 "但 Harness 为 partial/low，本周关于两者融合的新框架值得研究。",
+                {"topic": "可信记忆：相关记忆何时会伤害推理", "why": "你的 Knowledge State 已覆盖确认和重审，"
+                 "但召回后还没有判断来源独立性、冲突风险和时效性的 Trust Gate。",
+                  "priority": "high", "related_projects": proj[:1]},
+                {"topic": "Skill Memory 的跨任务迁移边界", "why": "最新结果显示完整任务级 Skill 可能负迁移，"
+                 "Lodestar 可以用已有 Research Trace 验证子任务级文本 Skill。",
+                  "priority": "medium", "related_projects": proj[:1]},
+                {"topic": "预算约束下的 Skill 集合选择", "why": "逐条 Top-K 会忽略冗余与总 Token 成本，"
+                 "可直接映射到现有 Tool Registry 和 Harness。",
                  "priority": "medium", "related_projects": proj[:1]},
-                {"topic": "MCP 生态最近的实现与争议", "why": "MCP 已进入快速迭代期，Tool Protocol 与 Tool Calling 的关系"
-                 "是当前热点，你的 Knowledge State 中 Protocol 为 partial/low。",
-                 "priority": "high", "related_projects": []},
             ]}, ensure_ascii=False)
 
     # --- gap_queries：assess 缺口 → 检索 Query ---

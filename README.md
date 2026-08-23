@@ -187,29 +187,47 @@ Weekly Frontier → Research Brief → Evidence Trace → Knowledge State → Ex
 
 PowerShell commands:
 
-    $env:LODESTAR_LLM_MODE="mock"
-    $env:LODESTAR_SEARCH_MODE="mock"
-    python -m lodestar demo seed
+    $env:LODESTAR_DEMO_REPLAY="true"
+    python -m lodestar demo reset
     python -m lodestar ui --port 8123 --no-browser
 
 Open http://127.0.0.1:8123/.
 
 The demo workspace includes:
 
-### Demo video script
-
-The recording script is maintained in [`docs/demo-video-script.md`](docs/demo-video-script.md). It presents the product as a research companion rather than a search box:
-
-```text
-Question → Research path → Evidence → Knowledge State → Experiment
-```
-
-The first clean cut is intentionally without subtitles, voice-over, or decorative motion. Those layers are added only after the screen-flow and narrative are confirmed.
-
-- curated Lodestar research topics and project context;
+- five current arXiv papers grouped into trusted memory, Skill transfer, context budgeting and tool use;
+- one clean Lodestar project index and eight baseline Knowledge State concepts;
+- a project-grounded trusted-memory workflow with explicit user confirmation;
 - light/dark theme switching with persistent preference;
-- a research trace rail from question to next move;
+- an auditable trace from paper evidence and code matches to memory risk assessment;
 - localized history timestamps and a demo-only history filter;
-- inline experiment saving and scaffold navigation.
+- a trusted-memory experiment comparing direct Top-K injection with a Memory Trust Gate.
 
-Mock mode is for product demonstration and workflow validation. It does not represent the quality of a live research run. See CHANGELOG.md for the current release notes.
+The canonical recording script is [docs/demo-recording-v2.md](docs/demo-recording-v2.md); environment preparation and acceptance checks are in [docs/demo-recording-runbook.md](docs/demo-recording-runbook.md).
+
+Replay mode is visibly labelled in the UI. It does not represent a live model run and does not change the normal live/Luna or local Codex Harness configuration.
+
+
+## Project-grounded retrieval
+
+Index only bounded text files from a registered local project, then make project implementation answers retrievable through the MCP tools search_project_context and read_project_file:
+
+    python -m lodestar project index <id> --path <local-project-path>
+    python -m lodestar project search "knowledge update" --id <id>
+
+The index excludes hidden files, generated dependency folders, and binary content. It is an explicit snapshot: automatic refresh and vector retrieval remain future work.
+
+
+## Memory lifecycle and executable experiments
+
+Memory is not only written: it can be listed for review, explicitly retained, flagged, or archived with an audit record.
+
+    python -m lodestar knowledge review --days 30
+    python -m lodestar knowledge decide "Concept" archive --reason "superseded by newer evidence"
+
+Experiments now distinguish a generated scaffold from a completed measured run.
+
+    python -m lodestar experiment build <id> --scaffold-only --out experiments
+    python -m lodestar experiment run <id>
+
+A run stores machine-readable baseline, candidate, metric deltas and a pass or fail verdict. Only a passing run is marked built.

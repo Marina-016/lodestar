@@ -32,7 +32,8 @@ class BuildExecutor:
 
     def _exec(self, cmd: list[str], cwd: str, timeout: int, env: dict | None = None) -> ExecutorResult:
         # Windows 上 npm 的 shim（如 codex）无扩展名，subprocess 解析不了 → 用 which 解析后的全路径
-        bin_path = shutil.which(self._binary())
+        lookup_path = (env or {}).get("PATH") or (env or {}).get("Path")
+        bin_path = shutil.which(self._binary(), path=lookup_path) if lookup_path else shutil.which(self._binary())
         if not bin_path:
             return ExecutorResult(ok=False, error=f"找不到 CLI：{self._binary()}（未安装或不在 PATH）")
         cmd[0] = bin_path

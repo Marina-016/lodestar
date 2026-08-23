@@ -24,6 +24,8 @@ class CodexConversationHarness:
             model=cfg.codex_model,
             provider=cfg.codex_provider_name if cfg.codex_base_url else None,
             base_url=cfg.codex_base_url or None,
+            proxy_url=cfg.codex_proxy_url or None,
+            node_bin=cfg.codex_node_bin or None,
             require_gateway=False,
         )
 
@@ -31,33 +33,39 @@ class CodexConversationHarness:
         return self.executor.available()
 
     @staticmethod
-    def _mcp_overrides() -> list[str]:
+    def _mcp_overrides(task_id: str) -> list[str]:
         python = json.dumps(sys.executable)
         args = json.dumps(["-m", "lodestar", "mcp"])
+        task = json.dumps(task_id)
         return [
             "-c", f"mcp_servers.lodestar.command={python}",
             "-c", f"mcp_servers.lodestar.args={args}",
+            "-c", f"mcp_servers.lodestar.env={{LODESTAR_MCP_TASK_ID={task}}}",
         ]
 
     def run(self, task_id: str, goal: str):
-        prompt = f"""
-你是 Lodestar 的研究对话搭档。用户的问题是：
-{goal}
-
-请直接用中文回答用户，先判断需要什么证据，再自主选择 Lodestar MCP 工具完成搜索、阅读或知识库操作。
-不要编造来源；如果证据不足，明确说出缺口并继续检索或向用户追问。
-回答要适合对话阅读：先给结论，再给关键证据和下一步。只有用户明确要求“记住”时才写入知识库。
-当前 Lodestar task_id：{task_id}
-""".strip()
+        compact_goal = " ".join(goal.split())
+        prompt = (
+            "You are Lodestar's research conversation partner. "
+            f"User request: {compact_goal} "
+            "Answer in Chinese. First determine the needed evidence, then autonomously use Lodestar MCP tools for search, reading, or knowledge operations. "
+            "For questions about a registered project implementation, first use search_project_context and then read_project_file before making a code-grounded claim. "
+            "Do not fabricate sources. If a tool returns an error, do not retry the same external request; use available evidence and state the gap. "
+            "Only write to the knowledge base when the user explicitly asks you to remember something. "
+            f"Current Lodestar task_id: {task_id}"
+        )
+        approval_args = (["--approve-for-me"] if self.cfg.codex_auto_approve
+                         else ["--sandbox", "read-only"])
         command = [
-            "codex", "exec", "--skip-git-repo-check", "--sandbox", "read-only",
-            *self._mcp_overrides(), prompt,
+            "codex", "exec", "--model", self.cfg.codex_model,
+            "--skip-git-repo-check", *approval_args,
+            *self._mcp_overrides(task_id), prompt,
         ]
         return self.executor._exec(
             command,
             cwd=str(PROJECT_ROOT),
-            timeout=self.cfg.llm_timeout_s,
-            env={"LODESTAR_MCP_TASK_ID": task_id},
+            timeout=self.cfg.conversation_timeout_s,
+            env={**self.executor._runtime_env(), "LODESTAR_MCP_TASK_ID": task_id},
         )
 
 

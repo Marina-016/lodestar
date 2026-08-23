@@ -26,6 +26,8 @@ class Config:
     judge_max_tokens: int = 1200
     temperature: float = 0.2
     llm_timeout_s: int = 120
+    conversation_timeout_s: int = 60  # UI must return or degrade promptly; Codex-only path
+    demo_replay: bool = False  # curated replay; the UI always labels it as a replay, never live output
     llm_thinking: bool = False   # True=允许思考块；False=传 thinking disabled（更便宜、防空输出）
     conversation_harness: str = "loop"  # loop | codex（codex 需显式开启）
     # --- Agent Loop 预算（PRD §17，Eval 后续调）---
@@ -59,6 +61,9 @@ class Config:
     codex_provider_name: str = "lodestar-gw"
     codex_base_url: str = ""              # 空=用用户自带 codex 配置（ChatGPT 登录）；设了则走内网网关（Responses API）
     codex_require_gateway: bool = True    # 保险：未配 BASE_URL 时拒绝用 codex 默认模式（防误烧 ChatGPT Plus 额度）
+    codex_proxy_url: str = ""             # only injected into the Codex child process
+    codex_node_bin: str = ""              # optional directory containing node.exe for Windows npm shims
+    codex_auto_approve: bool = False    # explicit opt-in: Codex may auto-approve in-workspace actions
     # codex 网关模式的 key 走 LODESTAR_CODEX_API_KEY（.env，gitignore），不在代码里
     # --- 存储 ---
     db_path: Path = DEFAULT_DB_PATH
@@ -78,6 +83,9 @@ def load_config() -> Config:
     c.llm_mode = os.getenv("LODESTAR_LLM_MODE", c.llm_mode)
     c.search_mode = os.getenv("LODESTAR_SEARCH_MODE", c.search_mode)
     c.model = os.getenv("LODESTAR_MODEL", c.model)
+    if os.getenv("LODESTAR_CONVERSATION_TIMEOUT"):
+        c.conversation_timeout_s = max(15, min(int(os.environ["LODESTAR_CONVERSATION_TIMEOUT"]), 120))
+    c.demo_replay = os.getenv("LODESTAR_DEMO_REPLAY", str(c.demo_replay)).lower() in {"1", "true", "yes", "on"}
     c.judge_model = os.getenv("LODESTAR_JUDGE_MODEL", c.judge_model)
     c.llm_thinking = os.getenv("LODESTAR_LLM_THINKING", str(c.llm_thinking)).lower() in {"1", "true", "yes", "on"}
     c.conversation_harness = os.getenv("LODESTAR_CONVERSATION_HARNESS", c.conversation_harness).lower()
@@ -96,6 +104,9 @@ def load_config() -> Config:
     c.codex_model = os.getenv("LODESTAR_CODEX_MODEL", c.codex_model)
     c.codex_base_url = os.getenv("LODESTAR_CODEX_BASE_URL", c.codex_base_url)
     c.codex_require_gateway = os.getenv("LODESTAR_CODEX_REQUIRE_GATEWAY", str(c.codex_require_gateway)).lower() not in {"0", "false", "no", "off"}
+    c.codex_proxy_url = os.getenv("LODESTAR_CODEX_PROXY", c.codex_proxy_url).strip()
+    c.codex_node_bin = os.getenv("LODESTAR_CODEX_NODE_BIN", c.codex_node_bin).strip()
+    c.codex_auto_approve = os.getenv("LODESTAR_CODEX_AUTO_APPROVE", str(c.codex_auto_approve)).lower() in {"1", "true", "yes", "on"}
     if os.getenv("LODESTAR_VENUE_PROVIDERS"):
         c.venue_providers = tuple(p.strip() for p in os.environ["LODESTAR_VENUE_PROVIDERS"].split(",") if p.strip())
     if os.getenv("LODESTAR_VENUE_USER_AGENT"):

@@ -202,6 +202,7 @@ The demo workspace includes:
 - an auditable trace from paper evidence and code matches to memory risk assessment;
 - localized history timestamps and a demo-only history filter;
 - a trusted-memory experiment comparing direct Top-K injection with a Memory Trust Gate.
+- 对话结果通过 SSE 流式呈现，界面默认使用中文；仅保留 Agent、MCP、Codex、GitHub、PDF 等必要专有名词。
 
 The canonical recording script is [docs/demo-recording-v2.md](docs/demo-recording-v2.md); environment preparation and acceptance checks are in [docs/demo-recording-runbook.md](docs/demo-recording-runbook.md).
 

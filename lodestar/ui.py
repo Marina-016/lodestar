@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import webbrowser
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -341,14 +342,71 @@ def _render_page_html() -> str:
   if(!originalDecorateResearch)return;
   const labels={demo_replay_start:'\u542f\u52a8\u6f14\u793a\u56de\u653e',demo_replay_sources:'\u52a0\u8f7d\u6574\u7406\u6765\u6e90',project_context_search:'\u5173\u8054\u9879\u76ee\u4ee3\u7801',demo_replay_finish:'\u7b49\u5f85\u8bb0\u5fc6\u786e\u8ba4',start:'\u5f00\u59cb\u7814\u7a76',knowledge_context:'\u8bfb\u53d6\u5df2\u6709\u77e5\u8bc6',plan:'\u751f\u6210\u7814\u7a76\u8ba1\u5212',tool_policy:'\u9009\u62e9\u68c0\u7d22\u5de5\u5177',queries:'\u6269\u5c55\u68c0\u7d22\u95ee\u9898',tool_call:'\u8c03\u7528\u5de5\u5177',harness_tool_call:'\u901a\u8fc7 MCP \u8c03\u7528\u5de5\u5177',rerank:'\u91cd\u6392\u5019\u9009\u8bc1\u636e',read:'\u9605\u8bfb\u5173\u952e\u8bc1\u636e',assess:'\u68c0\u67e5\u8bc1\u636e\u7f3a\u53e3',replan:'\u8865\u5145\u68c0\u7d22',synthesis:'\u8de8\u6765\u6e90\u7efc\u5408',novelty:'\u8bc6\u522b\u76f8\u5bf9\u65b0\u589e',knowledge_updates_proposed:'\u63d0\u51fa\u8bb0\u5fc6\u66f4\u65b0',knowledge_updates_applied:'\u5904\u7406\u8bb0\u5fc6\u66f4\u65b0',knowledge_updates_confirmed:'\u7528\u6237\u786e\u8ba4\u8bb0\u5fc6\u66f4\u65b0',finish:'\u5b8c\u6210'};
   function detail(e){const d=e.data||{};if(e.kind==='demo_replay_start')return '\u5df2\u9009\u62e9\u5bf9\u5e94\u4e3b\u9898\u7684\u7814\u7a76\u56de\u653e';if(e.kind==='demo_replay_sources')return '\u52a0\u8f7d '+(d.count||0)+' \u6761\u53ef\u8ffd\u6eaf\u6765\u6e90';if(e.kind==='project_context_search')return d.project?'\u547d\u4e2d '+d.project+' \u00b7 '+((d.matches||[]).length)+' \u4e2a\u4ee3\u7801\u4f4d\u7f6e':'';if(e.kind==='demo_replay_finish')return d.state==='selection_required'?'\u7b49\u5f85\u7528\u6237\u9009\u62e9\u7814\u7a76\u65b9\u5411':'\u7814\u7a76\u5b8c\u6210\uff0c\u8bb0\u5fc6\u5f85\u786e\u8ba4';if(e.kind==='tool_call'||e.kind==='harness_tool_call')return d.tool?'\u8c03\u7528 '+d.tool:'';if(e.kind==='knowledge_context')return (d.matched||[]).length?'\u547d\u4e2d\uff1a'+d.matched.join('\u3001'):'\u672a\u547d\u4e2d\u957f\u671f\u8bb0\u5fc6';if(e.kind==='queries')return (d||[]).length?'\u751f\u6210 '+d.length+' \u4e2a\u68c0\u7d22\u95ee\u9898':'';if(e.kind==='sources_collected')return d.unique?'\u5019\u9009 '+d.candidates+' \u2192 \u53bb\u91cd '+d.unique:'';if(e.kind==='replan')return d.reason||'\u8bc1\u636e\u4e0d\u8db3\uff0c\u8865\u5145\u68c0\u7d22';if(e.kind==='finish')return '\u7814\u7a76\u7ed3\u679c\u5df2\u4fdd\u5b58\u5e76\u53ef\u56de\u6eaf';return '';}
-  function runLabel(task){const m=task.metrics||{};if(m.demo_replay)return '\u6f14\u793a\u6a21\u5f0f \u00b7 \u9884\u7f6e\u7814\u7a76\u56de\u653e';if(m.degraded)return '\u672c\u5730\u56de\u9000\u8fd0\u884c';if(m.conversation_harness==='codex')return 'Codex Harness \u00b7 MCP';if(m.conversation_harness==='loop')return 'Research Loop \u00b7 \u53d7\u63a7\u7f16\u6392';return 'Research run';}
+  function runLabel(task){const m=task.metrics||{};if(m.demo_replay)return '\u6f14\u793a\u6a21\u5f0f \u00b7 \u9884\u7f6e\u7814\u7a76\u56de\u653e';if(m.degraded)return '\u672c\u5730\u56de\u9000\u8fd0\u884c';if(m.conversation_harness==='codex')return 'Codex Harness \u00b7 MCP';if(m.conversation_harness==='loop')return '\u7814\u7a76\u5faa\u73af \u00b7 \u53d7\u63a7\u7f16\u6392';return '\u7814\u7a76\u4efb\u52a1';}
   labels.memory_risk_assessment='\u8bc4\u4f30\u8bb0\u5fc6\u98ce\u9669';
   const baseDetail=detail;
   detail=function(e){if(e.kind==='memory_risk_assessment')return '\u68c0\u67e5\u76f8\u5173\u6027\u3001\u6765\u6e90\u72ec\u7acb\u6027\u3001\u51b2\u7a81\u98ce\u9669\u4e0e\u65f6\u6548\u6027';return baseDetail(e);};
-  window.decorateResearch=async function(el,taskId){await originalDecorateResearch(el,taskId);try{const d=await jget('/api/task/'+taskId),task=d.task||{},trace=(d.trace||[]).filter(e=>labels[e.kind]);if(!trace.length)return;const events=trace.slice(0,14);const mode=(task.llm_mode||'unknown').toUpperCase();const items=events.map(e=>'<li><b>'+esc(labels[e.kind])+'</b><span>'+esc(detail(e))+'</span></li>').join('');const html='<details class="agent-trajectory"><summary><span>Agent Trajectory <em class="run-badge">'+esc(runLabel(task))+'</em></span><small>'+esc(mode)+' \u00b7 '+trace.length+' events</small></summary><p class="trajectory-note">\u8fc7\u7a0b\u65e5\u5fd7\u53ef\u56de\u6eaf\uff1b\u5de5\u5177\u8c03\u7528\u3001\u8bc1\u636e\u4e0e\u8bb0\u5fc6\u66f4\u65b0\u5747\u4e0e\u672c\u6b21\u7814\u7a76\u7ed1\u5b9a\u3002</p><ol class="trajectory-list">'+items+'</ol></details>';el.insertAdjacentHTML('afterbegin',html);}catch(e){}}
+  window.decorateResearch=async function(el,taskId){await originalDecorateResearch(el,taskId);try{const d=await jget('/api/task/'+taskId),task=d.task||{},trace=(d.trace||[]).filter(e=>labels[e.kind]);if(!trace.length)return;const events=trace.slice(0,14);const mode=(task.llm_mode||'unknown').toUpperCase();const items=events.map(e=>'<li><b>'+esc(labels[e.kind])+'</b><span>'+esc(detail(e))+'</span></li>').join('');const html='<details class="agent-trajectory"><summary><span>Agent \u8f68\u8ff9 <em class="run-badge">'+esc(runLabel(task))+'</em></span><small>'+esc(mode)+' \u00b7 '+trace.length+' \u4e2a\u6b65\u9aa4</small></summary><p class="trajectory-note">\u8fc7\u7a0b\u65e5\u5fd7\u53ef\u56de\u6eaf\uff1b\u5de5\u5177\u8c03\u7528\u3001\u8bc1\u636e\u4e0e\u8bb0\u5fc6\u66f4\u65b0\u5747\u4e0e\u672c\u6b21\u7814\u7a76\u7ed1\u5b9a\u3002</p><ol class="trajectory-list">'+items+'</ol></details>';el.insertAdjacentHTML('afterbegin',html);}catch(e){}}
 })();
 </script></body></html>"""
-    return PAGE_HTML.replace("</body></html>", extension)
+    localized = PAGE_HTML
+    for old, new in {
+        "Workspace": "\u5de5\u4f5c\u533a",
+        "AI RESEARCH COMPANION": "AI \u7814\u7a76\u642d\u6863",
+        "START FROM A QUESTION": "\u4ece\u4e00\u4e2a\u95ee\u9898\u5f00\u59cb",
+        "IN THIS SPACE": "\u5f53\u524d\u7a7a\u95f4",
+        "NEXT MOVE": "\u4e0b\u4e00\u6b65",
+        "Knowledge State": "\u77e5\u8bc6\u72b6\u6001",
+        "Research runs": "\u7814\u7a76\u4efb\u52a1",
+        "Active projects": "\u6d3b\u8dc3\u9879\u76ee",
+        "Sources · Trace · Memory": "\u6765\u6e90 · \u8f68\u8ff9 · \u8bb0\u5fc6",
+        "RESEARCH BRIEF": "\u7814\u7a76\u7b80\u62a5",
+        "Evidence trail · ": "\u8bc1\u636e\u94fe · ",
+        "PDF full text": "PDF \u5168\u6587",
+        "KNOWLEDGE STATE": "\u77e5\u8bc6\u72b6\u6001",
+        "RESEARCH LOG": "\u7814\u7a76\u8bb0\u5f55",
+        "EXPERIMENT LAB": "\u5b9e\u9a8c\u5de5\u4f5c\u53f0",
+        "PROJECTS": "\u9879\u76ee",
+        "EXPERIMENT #": "\u5b9e\u9a8c #",
+        "ARCHIVED RESEARCH": "\u5df2\u5f52\u6863\u7814\u7a76",
+    }.items():
+        localized = localized.replace(old, new)
+    streaming_extension = r"""
+<style>
+.streaming-card{width:min(100%,720px);border:1px solid color-mix(in srgb,var(--acc) 48%,var(--line));border-left:3px solid var(--acc);border-radius:0 13px 13px 0;background:linear-gradient(145deg,var(--panel2),var(--panel));padding:17px 18px}
+.streaming-head{display:flex;justify-content:space-between;gap:12px;color:var(--acc);font-size:11px;font-weight:800;margin-bottom:10px}
+.streaming-progress{color:var(--mut);font-size:12px;margin-bottom:10px}
+.streaming-progress:before{content:' ';display:inline-block;width:7px;height:7px;margin-right:7px;border-radius:50%;background:var(--acc);animation:blink 1.1s infinite}
+</style>
+<script>
+(function(){
+  const streamLabels={demo_replay_start:'启动演示回放',demo_replay_sources:'整理证据来源',project_context_search:'关联项目代码',memory_risk_assessment:'评估记忆风险',knowledge_updates_proposed:'准备记忆更新',start:'开始研究',knowledge_context:'读取已有知识',plan:'生成研究计划',tool_policy:'选择检索工具',queries:'扩展检索问题',tool_call:'调用工具',harness_tool_call:'通过 MCP 调用工具',rerank:'重排候选证据',read:'阅读关键证据',assess:'检查证据缺口',replan:'补充检索',synthesis:'跨来源综合',novelty:'识别相对新增',finish:'完成'};
+  function animateBrief(el,text){
+    return new Promise(resolve=>{let i=0;const step=Math.max(1,Math.ceil(text.length/140));const timer=setInterval(()=>{i=Math.min(text.length,i+step);el.innerHTML=md(text.slice(0,i));scrollChat();if(i>=text.length){clearInterval(timer);resolve();}},22);});
+  }
+  function streamTask(taskId,typingId){
+    return new Promise((resolve,reject)=>{
+      const node=document.getElementById(typingId);if(!node){reject(Error('找不到输出区域'));return;}
+      node.innerHTML='<article class="streaming-card"><div class="streaming-head"><span>研究输出</span><span>实时更新</span></div><div class="streaming-progress">正在准备研究路径…</div><div class="brief"></div></article>';
+      const progress=node.querySelector('.streaming-progress'),brief=node.querySelector('.brief');
+      const source=new EventSource('/api/task/'+encodeURIComponent(taskId)+'/stream');let done=false;
+      source.addEventListener('snapshot',event=>{
+        const data=JSON.parse(event.data),task=data.task||{},trace=data.trace||[],last=trace[trace.length-1];
+        if(data.error){source.close();reject(Error(data.error));return;}
+        const label=last?(streamLabels[last.kind]||'处理研究步骤'):'准备研究路径';
+        progress.textContent=task.status==='finished'?'研究完成，正在整理结果…':'正在'+label+' · 已记录 '+trace.length+' 个步骤';
+        if((task.status==='finished'||task.status==='error')&&!done){done=true;source.close();const text=data.brief_md||'暂时没有可展示的研究结果。';animateBrief(brief,text).then(async()=>{if(task.status==='finished'){await loadConversation();setStatus('研究完成');}else{setStatus('研究失败');}resolve();}).catch(reject);}
+      });
+      source.onerror=()=>{if(!done){source.close();reject(Error('研究流连接中断'));}};
+    });
+  }
+  window.pollTask=streamTask;
+})();
+</script>
+"""
+    base = localized.replace("</body></html>", "")
+    extension_body = extension.replace("</body></html>", "")
+    return base + extension_body + streaming_extension + "</body></html>"
 
 
 # ----------------------------------------------------------------------
@@ -438,6 +496,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, items)
             finally:
                 ws.close()
+        if path.startswith("/api/task/") and path.endswith("/stream"):
+            task_id = path.split("/")[-2]
+            return self._task_stream(task_id)
         if path.startswith("/api/task/"):
             task_id = path.split("/")[-1]
             return self._task_detail(task_id)
@@ -681,6 +742,51 @@ class Handler(BaseHTTPRequestHandler):
             })
         finally:
             ws.close()
+
+    def _task_stream(self, task_id: str):
+        """Stream task snapshots so the UI can render progress immediately.
+
+        The research loop remains unchanged: this endpoint only exposes its
+        already persisted trace and final brief through Server-Sent Events.
+        It therefore works for replay, mock, Codex and Luna-backed runs alike.
+        """
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache, no-transform")
+        self.send_header("Connection", "keep-alive")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+        last_signature = None
+        try:
+            for _ in range(300):
+                ws = _ws()
+                try:
+                    task = repo.get_task(ws.conn, task_id)
+                    if not task:
+                        payload = {"error": f"task {task_id} 不存在"}
+                        done = True
+                    else:
+                        payload = {
+                            "task": {k: task[k] for k in ("id", "goal", "status", "llm_mode", "metrics", "created_at", "finished_at")},
+                            "brief_md": task.get("brief_md") or "",
+                            "sources": repo.list_sources(ws.conn, task_id),
+                            "updates": repo.list_knowledge_updates(ws.conn, task_id=task_id),
+                            "trace": repo.list_trace_events(ws.conn, task_id),
+                        }
+                        done = task.get("status") in {"finished", "error"}
+                finally:
+                    ws.close()
+                signature = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+                if signature != last_signature:
+                    self.wfile.write(b"event: snapshot\n")
+                    self.wfile.write(("data: " + signature + "\n\n").encode("utf-8"))
+                    self.wfile.flush()
+                    last_signature = signature
+                if done:
+                    return
+                time.sleep(0.2)
+        except (BrokenPipeError, ConnectionResetError):
+            return
 
 
 def serve(port: int = 8123, open_browser: bool = True) -> None:

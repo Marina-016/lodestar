@@ -223,6 +223,7 @@ class SmokeTestCase(unittest.TestCase):
                      workspace_dir=Path(self.tmp) / "ws_ui", cases_dir=self.cfg.cases_dir)
         import lodestar.config as cfg_mod
         cfg_mod.load_config = lambda: cfg  # 让 ui 模块用测试 config（避免写主库）
+        ui_mod.load_config = lambda: cfg
         server = ThreadingHTTPServer(("127.0.0.1", 0), ui_mod.Handler)
         port = server.server_address[1]
         t = threading.Thread(target=server.serve_forever, daemon=True)
@@ -231,13 +232,35 @@ class SmokeTestCase(unittest.TestCase):
             h = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=10).read())
             self.assertEqual(h["ok"], True)
             html = urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=10).read().decode("utf-8")
-            self.assertIn("AI RESEARCH COMPANION", html)
+            self.assertIn("AI 研究搭档", html)
+            self.assertIn("工作区", html)
+            self.assertIn("new EventSource", html)
+            self.assertNotIn(">Workspace<", html)
             self.assertTrue(html.lstrip().startswith("<!doctype html"),
                             "HTML 必须原样输出，不能被 JSON 转义")
             self.assertIn(".view{display:none}", html)
             self.assertNotIn("\\n\\n", html[:200])  # 防 JSON 化残留
             tasks = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/api/tasks", timeout=10).read())
             self.assertIsInstance(tasks, list)
+            stream_task_id = "stream-smoke"
+            ws = Workspace(cfg)
+            try:
+                repo.create_task(ws.conn, stream_task_id, "流式接口测试", {}, llm_mode="mock")
+                repo.finish_task(ws.conn, stream_task_id, "# 测试结果", "finished", metrics={})
+            finally:
+                ws.close()
+            stream = urllib.request.urlopen(
+                f"http://127.0.0.1:{port}/api/task/{stream_task_id}/stream", timeout=10)
+            self.assertEqual(stream.headers.get_content_type(), "text/event-stream")
+            body_lines = []
+            for line in stream:
+                body_lines.append(line.decode("utf-8"))
+                if '"status": "finished"' in body_lines[-1]:
+                    break
+            body = "".join(body_lines)
+            stream.close()
+            self.assertIn("event: snapshot", body)
+            self.assertIn('"status": "finished"', body)
         finally:
             server.shutdown()
             server.server_close()

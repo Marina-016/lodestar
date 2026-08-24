@@ -18,6 +18,7 @@
 
 - Replaced the previous AMR/Eureka/SkillGate demonstration narrative with a single coherent flow from weekly research to Memory Trust Gate.
 - Updated offline Agent Memory and Frontier sample responses to match the trusted-memory research question.
+- Added SSE streaming task snapshots and incremental brief rendering in the local UI; localized non-essential interface labels to Chinese.
 
 All notable changes to Lodestar are documented here.
 

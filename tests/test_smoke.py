@@ -309,7 +309,9 @@ class SmokeTestCase(unittest.TestCase):
         self.assertEqual(brief.count("### "), 3)
         self.assertEqual(brief.count("**概念**"), 3)
         self.assertEqual(brief.count("**与当前项目的关系**"), 3)
+        self.assertIn("MemTrapBench: Benchmarking Cognitive Traps in LLM Memory Use", brief)
         self.assertEqual(brief.count("查看 PDF 原文"), 3)
+        self.assertNotIn("## 关键来源", brief)
 
 
 if __name__ == "__main__":

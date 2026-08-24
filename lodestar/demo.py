@@ -227,20 +227,34 @@ def _demo_relevance_text(task: dict, link: dict) -> str:
     ])
 
 
+def _signal_source_title(task: dict, pdf_url: str) -> str:
+    target = (pdf_url or "").replace("/pdf/", "/abs/")
+    for title, url, _ in task.get("sources") or []:
+        if url == target and not title.lower().endswith(" pdf"):
+            return title
+    for title, url, _ in task.get("sources") or []:
+        if url == target:
+            return title.removesuffix(" PDF")
+    return "原始论文"
+
+
 def _brief(task: dict, project: dict | None = None, code_matches: list[dict] | None = None) -> str:
-    signal_details = DEMO_SIGNAL_DETAILS.get(task["id"], [])
+    signal_details = [
+        {**item, "source_title": _signal_source_title(task, item["pdf_url"])}
+        for item in DEMO_SIGNAL_DETAILS.get(task["id"], [])
+    ]
     if signal_details:
         signals = "\n\n".join(
             f"### {index:02d} · {item['concept']}\n"
             f"**概念**：{item['explanation']}\n\n"
             f"**与当前项目的关系**：{item['project_relation']}\n\n"
+            f"**关键来源**：{item['source_title']}\n"
             f"[查看 PDF 原文 ↗]({item['pdf_url']})"
             for index, item in enumerate(signal_details, 1)
         )
     else:
         signals = "\n".join(f"- {item}" for item in task["signals"])
     opportunities = "\n".join(f"- **\u53ef\u9a8c\u8bc1\u65b9\u5411**\uff1a{item}" for item in task["opportunities"])
-    sources = "\n".join(f"- [{title}]({url})\uff1a{reason}" for title, url, reason in task["sources"])
     link = DEMO_PROJECT_LINKS.get(task["id"], {})
     project = project or DEMO_PROJECTS[0]
     paths = [match.get("path") for match in (code_matches or []) if match.get("path")]
@@ -269,8 +283,6 @@ def _brief(task: dict, project: dict | None = None, code_matches: list[dict] | N
         f"{code_evidence}\n\n"
         "## 项目机会\n\n"
         f"{opportunities}\n\n"
-        "## 关键来源\n\n"
-        f"{sources}\n\n"
         "## 下一步\n\n"
         f"- {task['next']}\n"
     )

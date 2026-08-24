@@ -302,6 +302,15 @@ class SmokeTestCase(unittest.TestCase):
             {"technology_stack", "project_context", "code_evidence", "active_status"},
         )
 
+    def test_12_demo_signals_explain_concept_relation_and_pdf(self):
+        from lodestar.demo import DEMO_PROJECTS, DEMO_TASKS, _brief
+
+        brief = _brief(DEMO_TASKS[1], DEMO_PROJECTS[0], [{"path": "lodestar/memory/repo.py"}])
+        self.assertEqual(brief.count("### "), 3)
+        self.assertEqual(brief.count("**概念**"), 3)
+        self.assertEqual(brief.count("**与当前项目的关系**"), 3)
+        self.assertEqual(brief.count("查看 PDF 原文"), 3)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

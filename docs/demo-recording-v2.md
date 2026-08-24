@@ -81,8 +81,9 @@ flowchart LR
 画面：
 
 1. 停留在“项目关联”。
-2. 展示 Lodestar 项目名称、观察到的缺口，以及命中的 frontier.py、relevance.py、project_index.py。
-3. 展开 Agent Trajectory。
+2. 展示三条“关键信号”卡片：每条先解释概念，再说明与 Lodestar 的关系。
+3. 点击其中一条的“查看 PDF 原文 ↗”，打开对应论文 PDF；回到页面后再展示项目关联度和命中的代码文件。
+4. 展开 Agent Trajectory。
 
 旁白：
 

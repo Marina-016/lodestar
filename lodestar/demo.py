@@ -189,6 +189,35 @@ DEMO_PROJECT_LINKS = {
 }
 
 
+DEMO_SIGNAL_DETAILS = {
+    "demo-frontier-weekly": [
+        {"concept": "可信记忆门控", "explanation": "记忆不是越多越好，Agent 需要在写入上下文前判断相关性、来源和风险。", "project_relation": "对应 Lodestar 的 Knowledge State、记忆复核和 Memory Trust Gate，是当前最直接的产品能力缺口。", "pdf_url": "https://arxiv.org/pdf/2608.20202"},
+        {"concept": "Skill 的跨任务迁移", "explanation": "可复用经验应拆成粒度合适的 Skill，而不是把一次成功轨迹原样复制。", "project_relation": "可以把 Lodestar 的 Research Trace 和 Eval Gate 连接起来，筛选真正能迁移的 Skill candidate。", "pdf_url": "https://arxiv.org/pdf/2608.20274"},
+        {"concept": "预算感知的上下文选择", "explanation": "工具和 Skill 的选择要同时考虑任务收益、冗余和 Token 成本，而不只是逐条做相似度 Top-K。", "project_relation": "对应 Lodestar 的 Tool Registry、Harness 和 Context Budget，可直接转成一个可评估的选择器实验。", "pdf_url": "https://arxiv.org/pdf/2608.19993"},
+    ],
+    "demo-ls-001": [
+        {"concept": "中期工具使用训练", "explanation": "Tool Calling 的训练数据可以来自真实 API、MCP Skill 和文档工作流，而不只依赖最终问答。", "project_relation": "Lodestar 已经记录工具调用、结果和失败轨迹，下一步可以沉淀成 tool-use eval 数据集。", "pdf_url": "https://arxiv.org/pdf/2608.20314"},
+        {"concept": "工具 affordance 与参数 grounding", "explanation": "Agent 不仅要选对工具，还要理解工具能做什么、参数如何补齐，以及失败后如何恢复。", "project_relation": "可以扩展 Lodestar 的 MCP Registry，为每个工具增加 affordance、参数完整性和 failure recovery 测试。", "pdf_url": "https://arxiv.org/pdf/2608.20314"},
+        {"concept": "失败轨迹也是训练信号", "explanation": "只保存成功调用会让模型学到理想路径，保留失败样本才能评估真实的工具使用能力。", "project_relation": "Research Trace 可以成为带有错误类型、恢复动作和最终结果的可审计训练样本。", "pdf_url": "https://arxiv.org/pdf/2608.20314"},
+    ],
+    "demo-ls-002": [
+        {"concept": "相关记忆导致推理固化", "explanation": "即使记忆与问题相关，也可能把当前推理锁定在错误路径上。", "project_relation": "Lodestar 需要在 memory/repo.py 到 agent/loop.py 之间加入 Trust Gate，而不是直接注入召回结果。", "pdf_url": "https://arxiv.org/pdf/2608.20202"},
+        {"concept": "同源记忆不能重复计票", "explanation": "多条记忆如果都来自同一个上游证据，不能被当作多个独立支持。", "project_relation": "项目的记忆审计轨迹需要记录 provenance，避免 Knowledge State 把重复来源误判成共识。", "pdf_url": "https://arxiv.org/pdf/2608.19701"},
+        {"concept": "记忆决策的四个风险维度", "explanation": "召回前要同时判断相关性、来源独立性、冲突风险和时效性。", "project_relation": "这四项可以成为 Lodestar 的 Memory Trust Gate 字段，并进入 Eval 的 memory trap、false-majority 和任务正确率指标。", "pdf_url": "https://arxiv.org/pdf/2608.20202"},
+    ],
+    "demo-ls-003": [
+        {"concept": "完整任务级 Skill 可能过拟合", "explanation": "完整任务轨迹携带太多任务特定细节，跨任务迁移时容易产生负迁移。", "project_relation": "Lodestar 可以先从 Research Trace 中拆出可复用的子任务能力，再决定是否进入 Skill Library。", "pdf_url": "https://arxiv.org/pdf/2608.20274"},
+        {"concept": "子任务级 Skill 的粒度平衡", "explanation": "好的 Skill 要在可执行的具体性和跨任务抽象性之间取得平衡。", "project_relation": "Eval Gate 可以同时记录 specificity、abstractness 和跨任务收益，避免一次成功就自动晋升。", "pdf_url": "https://arxiv.org/pdf/2608.20274"},
+        {"concept": "执行前的 Skill utility 诊断", "explanation": "Skill 是否值得加载，应结合 Skill 描述和当前任务做执行前诊断。", "project_relation": "这可以接入 Lodestar 的 Skill Registry，在真正调用前记录选择理由和预期收益。", "pdf_url": "https://arxiv.org/pdf/2608.20274"},
+    ],
+    "demo-ls-004": [
+        {"concept": "逐条 Top-K 不等于最优组合", "explanation": "单条相似度最高的 Skill 放在一起，组合后可能有冗余，整体收益反而下降。", "project_relation": "Lodestar 的 Skill 检索可以从逐条排序升级为带预算约束的集合选择实验。", "pdf_url": "https://arxiv.org/pdf/2608.19993"},
+        {"concept": "上下文冗余需要显式惩罚", "explanation": "重复 Skill 会占用上下文并干扰执行，选择器需要把冗余作为成本。", "project_relation": "可以在 Tool Registry 和 Research Trace 中记录重复率、Token 成本与被排除候选的原因。", "pdf_url": "https://arxiv.org/pdf/2608.19993"},
+        {"concept": "选择器要解释收益与成本", "explanation": "每次选择都应说明任务收益、Token 成本和未入选候选的理由。", "project_relation": "这会让 Lodestar 的 Harness 具备可审计的上下文决策轨迹，方便后续做 Eval。", "pdf_url": "https://arxiv.org/pdf/2608.19993"},
+    ],
+}
+
+
 def _demo_relevance_text(task: dict, link: dict) -> str:
     return " ".join([
         task.get("goal", ""),
@@ -199,7 +228,17 @@ def _demo_relevance_text(task: dict, link: dict) -> str:
 
 
 def _brief(task: dict, project: dict | None = None, code_matches: list[dict] | None = None) -> str:
-    signals = "\n".join(f"- {item}" for item in task["signals"])
+    signal_details = DEMO_SIGNAL_DETAILS.get(task["id"], [])
+    if signal_details:
+        signals = "\n\n".join(
+            f"### {index:02d} · {item['concept']}\n"
+            f"**概念**：{item['explanation']}\n\n"
+            f"**与当前项目的关系**：{item['project_relation']}\n\n"
+            f"[查看 PDF 原文 ↗]({item['pdf_url']})"
+            for index, item in enumerate(signal_details, 1)
+        )
+    else:
+        signals = "\n".join(f"- {item}" for item in task["signals"])
     opportunities = "\n".join(f"- **\u53ef\u9a8c\u8bc1\u65b9\u5411**\uff1a{item}" for item in task["opportunities"])
     sources = "\n".join(f"- [{title}]({url})\uff1a{reason}" for title, url, reason in task["sources"])
     link = DEMO_PROJECT_LINKS.get(task["id"], {})

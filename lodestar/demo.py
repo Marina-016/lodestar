@@ -218,6 +218,30 @@ DEMO_SIGNAL_DETAILS = {
 }
 
 
+DEMO_PAPER_NOTES = {
+    "https://arxiv.org/pdf/2608.20202": {
+        "summary": "这篇论文构建了一个专门测试 LLM 记忆使用陷阱的基准，把记忆是否相关、是否会造成推理固化和信念偏移放在同一套任务里比较。",
+        "finding": "真实且相关的记忆并不总是有益；在其测试设置中，受测记忆策略整体低于 no-memory 基线，最强方案也出现明显下降。",
+    },
+    "https://arxiv.org/pdf/2608.19701": {
+        "summary": "这篇论文研究多 Agent 如何仲裁记忆，重点不是简单统计记忆条数，而是追踪每条记忆背后的上游来源和来源之间的相关性。",
+        "finding": "多个记忆如果共享同一上游证据，就会形成 Memory Correlation Bias；系统需要估计独立证据数量，避免把同源信息误判成多数共识。",
+    },
+    "https://arxiv.org/pdf/2608.20274": {
+        "summary": "这篇论文比较 task-level、subtask-level 以及 text/code 等不同 Skill 形态，研究什么粒度和格式更容易迁移到未见任务。",
+        "finding": "子任务级、文本化的 Skill 在可执行性和跨任务抽象之间更容易取得平衡，完整任务轨迹反而更容易携带任务特定细节。",
+    },
+    "https://arxiv.org/pdf/2608.19993": {
+        "summary": "这篇论文把 Skill 选择建模为带 Token 和上下文惩罚的集合优化问题，同时考虑组合收益、冗余和预算约束。",
+        "finding": "逐条相似度 Top-K 并不等于最优组合；预算感知的选择器可以用更少上下文换取更高任务收益，并解释为什么排除候选。",
+    },
+    "https://arxiv.org/pdf/2608.20314": {
+        "summary": "这篇论文探索在模型中期训练阶段合成 Agent 工具使用数据，把网页、PDF、代码、真实 API、MCP Skill 和文档工作流统一成训练样本。",
+        "finding": "工具能力的提升不只来自最终答案监督，工具 affordance、参数 grounding 和失败恢复轨迹本身也应该进入训练与评测。",
+    },
+}
+
+
 def _demo_relevance_text(task: dict, link: dict) -> str:
     return " ".join([
         task.get("goal", ""),
@@ -246,6 +270,8 @@ def _brief(task: dict, project: dict | None = None, code_matches: list[dict] | N
     if signal_details:
         signals = "\n\n".join(
             f"### {index:02d} · {item['concept']}\n"
+            f"**论文讲了什么**：{DEMO_PAPER_NOTES.get(item['pdf_url'], {}).get('summary', '这篇论文围绕该 Agent 能力提出了新的评测和实现方法。')}\n\n"
+            f"**关键发现**：{DEMO_PAPER_NOTES.get(item['pdf_url'], {}).get('finding', '论文结果提示需要在真实任务和可审计轨迹上进一步验证。')}\n\n"
             f"**概念**：{item['explanation']}\n\n"
             f"**与当前项目的关系**：{item['project_relation']}\n\n"
             f"**关键来源**：{item['source_title']}\n"

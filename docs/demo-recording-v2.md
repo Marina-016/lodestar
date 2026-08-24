@@ -50,18 +50,24 @@ Agent、Memory、Eval、MCP、Trace、Python
 ## 关键信号
 
 ### 01 · 可信记忆门控
+论文讲了什么：MemTrapBench 构建了一个测试 LLM 记忆使用陷阱的基准，把记忆是否相关、是否造成推理固化和信念偏移放在同一套任务里比较。
+关键发现：真实且相关的记忆并不总是有益；在其测试设置中，受测记忆策略整体低于 no-memory 基线，最强方案也出现明显下降。
 概念：记忆不是越多越好，Agent 需要在写入上下文前判断相关性、来源和风险。
 与当前项目的关系：对应 Lodestar 的 Knowledge State、记忆复核和 Memory Trust Gate，是当前最直接的产品能力缺口。
 关键来源：MemTrapBench: Benchmarking Cognitive Traps in LLM Memory Use
 查看 PDF 原文 ↗
 
 ### 02 · Skill 的跨任务迁移
+论文讲了什么：Break It Down, Pass It On 比较 task-level、subtask-level 以及 text/code 等不同 Skill 形态，研究什么粒度和格式更容易迁移到未见任务。
+关键发现：子任务级、文本化的 Skill 更容易在可执行性和跨任务抽象之间取得平衡，完整任务轨迹更容易携带任务特定细节。
 概念：可复用经验应拆成粒度合适的 Skill，而不是把一次成功轨迹原样复制。
 与当前项目的关系：可以把 Lodestar 的 Research Trace 和 Eval Gate 连接起来，筛选真正能迁移的 Skill candidate。
 关键来源：Break It Down, Pass It On: Cross-Task Skill Transfer in LLM Agents
 查看 PDF 原文 ↗
 
 ### 03 · 预算感知的上下文选择
+论文讲了什么：Optimal Skill Selection 把 Skill 选择建模为带 Token 和上下文惩罚的集合优化问题，同时考虑组合收益、冗余和预算约束。
+关键发现：逐条相似度 Top-K 并不等于最优组合；预算感知的选择器可以用更少上下文换取更高任务收益，并解释为什么排除候选。
 概念：工具和 Skill 的选择要同时考虑任务收益、冗余和 Token 成本，而不只是逐条做相似度 Top-K。
 与当前项目的关系：对应 Lodestar 的 Tool Registry、Harness 和 Context Budget，可直接转成一个可评估的选择器实验。
 关键来源：Optimal Skill Selection for LLM Agents with Provable Bicriteria Guarantees
@@ -136,14 +142,20 @@ AI 输出应出现：
 
 关键信号：
 01 · 相关记忆导致推理固化
+论文讲了什么：MemTrapBench 把真实记忆注入后的推理错误拆成 Reasoning Fixation 与 Belief Distortion 两类风险。
+关键发现：记忆的“相关”标签不能替代使用前的信任判断。
 概念：即使记忆与问题相关，也可能把当前推理锁定在错误路径上。
 与当前项目的关系：Lodestar 需要在 memory/repo.py 到 agent/loop.py 之间加入 Trust Gate，而不是直接注入召回结果。
 
 02 · 同源记忆不能重复计票
+论文讲了什么：Beyond Memory Majority 研究多 Agent 记忆仲裁，追踪每条记忆背后的上游来源和来源相关性。
+关键发现：多个记忆共享同一上游证据时，会制造 Memory Correlation Bias 和虚假多数。
 概念：多条记忆如果都来自同一个上游证据，不能被当作多个独立支持。
 与当前项目的关系：项目的记忆审计轨迹需要记录 provenance，避免 Knowledge State 把重复来源误判成共识。
 
 03 · 记忆决策的四个风险维度
+论文讲了什么：两篇论文共同把记忆使用从“召回多少”推进到“哪些证据真正独立、什么时候应该拒绝”。
+关键发现：相关性、来源独立性、冲突风险和时效性需要联合判断。
 概念：召回前要同时判断相关性、来源独立性、冲突风险和时效性。
 与当前项目的关系：这四项可以成为 Lodestar 的 Memory Trust Gate 字段，并进入 Eval 的 memory trap、false-majority 和任务正确率指标。
 

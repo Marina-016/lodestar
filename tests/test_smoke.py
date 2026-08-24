@@ -307,6 +307,8 @@ class SmokeTestCase(unittest.TestCase):
 
         brief = _brief(DEMO_TASKS[1], DEMO_PROJECTS[0], [{"path": "lodestar/memory/repo.py"}])
         self.assertEqual(brief.count("### "), 3)
+        self.assertEqual(brief.count("**论文讲了什么**"), 3)
+        self.assertEqual(brief.count("**关键发现**"), 3)
         self.assertEqual(brief.count("**概念**"), 3)
         self.assertEqual(brief.count("**与当前项目的关系**"), 3)
         self.assertIn("MemTrapBench: Benchmarking Cognitive Traps in LLM Memory Use", brief)

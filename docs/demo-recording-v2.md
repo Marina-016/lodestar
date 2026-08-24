@@ -1,175 +1,230 @@
-# Lodestar 可信记忆 Demo 录制脚本
+# Lodestar Demo 录制脚本（逐镜头版）
 
-## 一句话故事
+## 这段 Demo 要证明什么
 
-Lodestar 不只扫描本周论文。它会结合用户已有的 Knowledge State 和当前项目代码，识别真正相关的技术缺口，经用户确认后更新长期记忆，并把洞察转成可验证实验。
+Lodestar 不只是回答“本周有什么热点”，而是把热点变成一条可审计的产品工作流：
 
-本次主线不是“让 Agent 记得更多”，而是：
+本周热点扫描 → Agent 解释概念 → 关联 Lodestar 项目 → 打开原始论文 PDF → 展示 Agent 轨迹 → 用户确认记忆 → Knowledge State 更新 → 生成实验骨架。
 
-> 可信记忆：Agent 如何判断一条记忆该不该被使用？
+录制时请把“用户动作”和“AI 实际输出”都录进去。下面的 AI 输出是当前演示数据对应的页面原文，可直接作为字幕或旁白依据。
 
-## 录制前的数据状态
+## 录制前准备
 
-执行 demo reset 后，工作区应只包含：
+- 打开：[http://127.0.0.1:8123/](http://127.0.0.1:8123/)
+- 当前模式：演示回放，页面会显示“演示模式 · 预置研究回放”。不要说成实时联网生成。
+- 工作区包含：1 个项目、8 个 Knowledge State 概念、4 条研究记录、13 条来源、4 个实验。
+- 项目：`Lodestar / Agent Research Lab`
+- 录制前执行：`python -m lodestar demo reset`
 
-- 1 个项目：Lodestar / Agent Research Lab
-- 8 个基线 Knowledge State 概念
-- 4 条经过整理的研究记录
-- 13 条论文或项目证据
-- 4 个实验，其中 2 个是 scaffolded、2 个是 draft
-- 0 条对话、0 条待确认记忆
+## 0–8 秒：先展示项目上下文
 
-基线中故意不包含 Memory Trust Gate。用户确认后，它才会成为第 9 个概念。
+用户动作：打开“我的项目”，停留在项目卡片，然后返回“研究对话”。
 
-## 本周论文依据
+画面中要出现：
 
-- [MemTrapBench](https://arxiv.org/abs/2608.20202)：真实且语义相关的记忆也可能造成 Reasoning Fixation 和 Belief Distortion。
-- [Beyond Memory Majority](https://arxiv.org/abs/2608.19701)：多条记忆可能继承同一上游来源，形成虚假多数。
-- [Break It Down, Pass It On](https://arxiv.org/abs/2608.20274)：子任务级文本 Skill 比完整任务级或代码 Skill 更容易跨任务迁移。
-- [Optimal Skill Selection](https://arxiv.org/abs/2608.19993)：Skill 应在 Token 预算下按组合收益选择，而不是逐条 Top-K。
-- [MidTool](https://arxiv.org/abs/2608.20314)：通用 Tool Calling 开始进入专门的中期训练数据流程。
-
-以上论文均在 2026 年 8 月 20 日提交，并进入 arXiv 8 月 21 日公开批次。视频中应说“本周最新批次中的重点方向之一”，不要声称它是客观热度第一。
-
-## 完整工作流
-
-~~~mermaid
-flowchart LR
-    A[本周论文扫描] --> B[结合 Knowledge State 去重]
-    B --> C[读取 Lodestar 项目索引]
-    C --> D[选择可信记忆方向]
-    D --> E[展开论文证据]
-    E --> F[定位现有代码缺口]
-    F --> G[展示可审计 Agent Trace]
-    G --> H[用户确认 Memory Trust Gate]
-    H --> I[Knowledge State 更新]
-    I --> J[生成可信记忆对照实验骨架]
-~~~
-
-## 90–105 秒录制脚本
-
-### 0–8 秒：建立项目语境
-
-画面：
-
-1. 打开“我的项目”。
-2. 停留在 Lodestar / Agent Research Lab 项目卡片。
-3. 快速展示技术栈和项目说明，然后回到“研究对话”。
+```text
+Lodestar / Agent Research Lab
+进行中
+Agent、Memory、Eval、MCP、Trace、Python
+```
 
 旁白：
 
-> 这是我做的 AI 研究 Agent。它不仅保存用户知识，也会索引当前项目，让新论文最终回答：这项技术对我正在做的产品有什么用。
+> 这是我的 Agent Research Lab。Lodestar 会先理解我正在做的项目，再判断一篇新论文是否值得进入产品路线，而不是只给我一份热点列表。
 
-### 8–22 秒：扫描本周最新方向
+## 8–25 秒：扫描本周 Agent 热点
 
-在输入框发送：
+用户输入（逐字）：
 
-> 本周 Agent 研究有哪些值得 Lodestar 优先验证的新进展？
+```text
+本周 Agent 研究有哪些值得 Lodestar 优先验证的新进展？
+```
 
-预期结果：
+等待研究卡片完成后，画面中应出现以下 AI 输出：
 
-1. 可信记忆
-2. Skill 迁移
-3. 上下文预算
+```markdown
+# 本周 Agent 研究有哪些值得 Lodestar 优先验证的新进展？
 
-旁白：
+> 一句话结论：最新批次呈现出一条共同主线：长期状态和可复用能力不是越多越好，Agent 需要判断什么值得进入上下文、哪些来源真正独立、以及一次成功经验能否迁移。结合 Lodestar 当前代码，优先级最高的是可信记忆。
 
-> Lodestar 先读取最新论文，再结合我的 Knowledge State 和项目代码排序。这里它没有把一篇论文直接当成一个热点，而是把多篇论文聚合成产品问题。
+## 关键信号
 
-### 22–34 秒：解释为什么选择可信记忆
+### 01 · 可信记忆门控
+概念：记忆不是越多越好，Agent 需要在写入上下文前判断相关性、来源和风险。
+与当前项目的关系：对应 Lodestar 的 Knowledge State、记忆复核和 Memory Trust Gate，是当前最直接的产品能力缺口。
+关键来源：MemTrapBench: Benchmarking Cognitive Traps in LLM Memory Use
+查看 PDF 原文 ↗
 
-画面：
+### 02 · Skill 的跨任务迁移
+概念：可复用经验应拆成粒度合适的 Skill，而不是把一次成功轨迹原样复制。
+与当前项目的关系：可以把 Lodestar 的 Research Trace 和 Eval Gate 连接起来，筛选真正能迁移的 Skill candidate。
+关键来源：Break It Down, Pass It On: Cross-Task Skill Transfer in LLM Agents
+查看 PDF 原文 ↗
 
-1. 停留在“项目关联”。
-2. 展示三条“关键信号”卡片：每条先解释概念，再说明与 Lodestar 的关系。
-3. 点击其中一条的“查看 PDF 原文 ↗”，打开对应论文 PDF；回到页面后再展示项目关联度和命中的代码文件。
-4. 展开 Agent Trajectory。
-
-旁白：
-
-> 它把可信记忆排在第一，不是因为这个词最热门，而是因为 Lodestar 已经有记忆确认和重审，却缺少“召回之后、注入上下文之前”的可信判断。
-
-### 34–56 秒：展开论文证据与代码关联
-
-继续发送：
-
-> 展开第 1 条：可信记忆。结合最新论文和 Lodestar 现有代码，告诉我为什么相关记忆也可能伤害推理，以及应该怎么验证。
-
-画面依次展示：
-
-1. 一句话结论。
-2. MemTrapBench 和 Beyond Memory Majority 两组来源。
-3. “项目关联”中命中的 memory/repo.py、agent/loop.py、trace/recorder.py。
-4. Project Opportunities 中的 Memory Trust Gate。
+### 03 · 预算感知的上下文选择
+概念：工具和 Skill 的选择要同时考虑任务收益、冗余和 Token 成本，而不只是逐条做相似度 Top-K。
+与当前项目的关系：对应 Lodestar 的 Tool Registry、Harness 和 Context Budget，可直接转成一个可评估的选择器实验。
+关键来源：Optimal Skill Selection for LLM Agents with Provable Bicriteria Guarantees
+查看 PDF 原文 ↗
+```
 
 旁白：
 
-> MemTrapBench 发现，记忆即使真实、相关，也可能让模型形成推理固化。另一篇论文指出，多条 Agent 记忆可能来自同一个上游来源，却被错误地当成多数意见。
+> 这里不是简单列出三篇论文，而是先把每个热点解释成一个 Agent 概念，再说明它和 Lodestar 当前能力的连接点。每个热点都保留原始论文名，并可以直接打开 PDF。
 
-> Lodestar 因此定位到自己的具体缺口：当前记忆可以写入、确认和重审，但召回结果还没有经过相关性、来源独立性、冲突风险和时效性的联合判断。
+## 25–38 秒：展示项目关联度和代码证据
 
-### 56–68 秒：展示可审计轨迹
+用户动作：向下滚动到“项目关联”。
 
-展开 Agent Trajectory，停留在以下步骤：
+AI 输出应出现：
 
-- 加载整理来源
-- 关联项目代码
-- 评估记忆风险
-- 提出记忆更新
-- 等待用户确认
+```text
+项目关联度：94/100（高）
+评分构成：技术栈命中 35/35 · 项目语境命中 20/25 · 代码证据 24/25 · 进行中状态 15/15
+观察到的缺口：Lodestar 可以扫描论文并建立项目代码索引，但每周热点还需要按照具体的实现缺口排序。
+关联原因：当前项目画像和代码索引，让可信记忆比只关注模型训练的方向更容易落到产品实现。
+接入位置：热点筛选 → 项目证据 → 研究简报
+```
 
-旁白：
+继续展示：
 
-> 这些判断不是藏在一段回答里。工具调用、论文证据、代码命中和记忆风险评估都进入同一条 Trace，可以回看 Agent 为什么得出这个结论。
-
-### 68–80 秒：用户确认长期记忆
-
-画面：
-
-1. 点击“记住选中的结论”。
-2. 打开“你的认知地图”。
-3. 搜索或定位 Memory Trust Gate。
-
-旁白：
-
-> Agent 不会静默改写长期记忆。只有我确认后，Memory Trust Gate 才从研究结论进入 Knowledge State，并保留证据和确认轨迹。
-
-### 80–96 秒：把洞察转成实验骨架
-
-画面：
-
-1. 打开“从洞察到实验”。
-2. 找到“Memory Trust Gate 能否在不降低正常任务正确率的前提下，减少 memory trap 与 false majority？”
-3. 点击“生成骨架”。
-4. 停留在 scaffolded 状态。
+```text
+命中的项目代码：
+- lodestar/frontier.py
+- lodestar/relevance.py
+- lodestar/project_index.py
+```
 
 旁白：
 
-> 最后，Lodestar 不直接宣布这个方案有效，而是生成对照实验。Baseline 是直接注入语义 Top-K，Candidate 是先经过 Trust Gate；两组固定模型、工具权限和上下文预算。
+> 这个 94 分不是模型主观打分，而是由技术栈命中、项目语境、代码证据和项目状态组成。它把“这篇论文有意思”变成“这篇论文对我的项目有多值得做”。
 
-> 实验覆盖误导性相关记忆、同源虚假多数、过期冲突和正常有用记忆，同时观察任务正确率、memory safety 与 Token 成本。
+## 38–48 秒：打开热点里的原始 PDF
 
-### 96–105 秒：收束
+用户动作：点击“01 · 可信记忆门控”下面的“查看 PDF 原文 ↗”。
 
-画面回到研究结果或项目卡片。
+浏览器打开：
+
+```text
+https://arxiv.org/pdf/2608.20202
+```
+
+画面要求：
+
+1. PDF 在新标签页打开。
+2. 快速展示论文标题页。
+3. 返回 Lodestar，保留研究卡片和证据链。
 
 旁白：
 
-> 这就是 Lodestar 的完整闭环：发现新技术，理解证据，关联当前项目，经用户确认更新记忆，再把洞察变成可验证的产品实验。
+> 论文不是装饰性引用。用户可以从热点卡片直接跳到原始 PDF，再回到项目关联和 Agent 轨迹继续审计。
 
-## 录制时必须保持的真实性
+## 48–62 秒：展开第二阶段研究输出
 
-- 页面会显示“演示模式 · 预置研究回放”，不要将其描述成实时联网生成。
-- 论文、日期和摘要结论来自真实 arXiv 页面。
-- 项目关联来自本地代码索引，不是预先画好的静态截图。
-- Memory Trust Gate 是研究提出的候选能力；实验未通过前，不说已经提升效果。
-- 点击“生成骨架”只代表形成可执行研究协议，不代表实验已经完成。
+用户输入（逐字）：
 
-## 失败时的快速恢复
+```text
+展开第 1 条可信记忆，告诉我它具体和 Lodestar 哪些代码有关，以及应该怎么验证。
+```
 
-1. 关闭当前服务。
-2. 重新执行 python -m lodestar demo reset。
-3. 重新启动 8123 端口。
-4. 刷新页面后确认对话为空、Knowledge State 为 8 条。
+AI 输出应出现：
 
-每次 reset 都会先将当前数据库备份到 workspace/demo_backups；该目录不会上传 GitHub。
+```text
+# 可信记忆：Agent 如何判断一条记忆该不该被使用？
+
+一句话结论：真实且相关的记忆也可能造成推理固化；多个 Agent 还可能重复引用同一上游来源，制造虚假多数。对 Lodestar 来说，召回之后、注入上下文之前需要一层可审计的 Memory Trust Gate。
+
+关键信号：
+01 · 相关记忆导致推理固化
+概念：即使记忆与问题相关，也可能把当前推理锁定在错误路径上。
+与当前项目的关系：Lodestar 需要在 memory/repo.py 到 agent/loop.py 之间加入 Trust Gate，而不是直接注入召回结果。
+
+02 · 同源记忆不能重复计票
+概念：多条记忆如果都来自同一个上游证据，不能被当作多个独立支持。
+与当前项目的关系：项目的记忆审计轨迹需要记录 provenance，避免 Knowledge State 把重复来源误判成共识。
+
+03 · 记忆决策的四个风险维度
+概念：召回前要同时判断相关性、来源独立性、冲突风险和时效性。
+与当前项目的关系：这四项可以成为 Lodestar 的 Memory Trust Gate 字段，并进入 Eval 的 memory trap、false-majority 和任务正确率指标。
+
+项目关联度：95/100（高）
+命中的项目代码：memory/repo.py、agent/loop.py、trace/recorder.py、tools/knowledge.py
+
+可验证方向：在 memory/repo.py 的召回结果进入 agent/loop.py 前增加 Memory Trust Gate。
+下一步：比较 Top-K 直接注入与 Trust Gate 两组，测 memory trap rate、false-majority rate、任务正确率和 Token 成本。
+```
+
+## 62–72 秒：展示可审计 Agent 轨迹
+
+用户动作：展开“Agent 轨迹”。
+
+画面中应出现这些步骤：
+
+```text
+启动演示回放
+加载整理来源
+关联项目代码 · 关联度 95/100
+评估记忆风险
+提出记忆更新
+等待用户确认记忆
+```
+
+旁白：
+
+> 关键不是最后一段回答，而是 Agent 为什么得到这个结论。来源、项目代码、记忆风险和更新提议都绑定在同一条 Trace 上。
+
+## 72–82 秒：用户确认记忆
+
+用户动作：勾选 `Memory Trust Gate`，点击“记住选中的结论”。
+
+AI 系统消息应出现：
+
+```text
+已记住：Memory Trust Gate
+```
+
+然后打开“知识库”，展示新增概念：
+
+```text
+Memory Trust Gate
+状态：known
+置信度：medium
+```
+
+旁白：
+
+> Lodestar 不会默默改写长期记忆。只有用户明确确认，研究结论才会进入 Knowledge State，并保留来源和确认轨迹。
+
+## 82–94 秒：从洞察生成实验骨架
+
+用户动作：打开“实验项目”，找到 `Memory Trust Gate`，点击“生成骨架”。
+
+实验卡片应出现：
+
+```text
+Memory Trust Gate 能否在不降低正常任务正确率的前提下，减少 memory trap 与 false majority？
+
+用相同问题和上下文预算比较 Top-K 直接注入与 Trust Gate 两组，重点测 memory trap rate、false-majority rate、任务正确率和 Token 成本。
+
+状态：scaffolded
+```
+
+旁白：
+
+> 最后不是宣称方案已经有效，而是把研究洞察转成可执行的对照实验：明确 baseline、candidate、指标和上下文预算。
+
+## 94–100 秒：收束
+
+回到研究简报或项目卡片。
+
+旁白：
+
+> 这就是 Lodestar 的闭环：发现新进展，解释概念，关联项目，打开原始论文，留下可审计轨迹，经用户确认更新记忆，再把洞察变成实验。
+
+## 录制时不要说错
+
+- 不要说“这是实时联网生成”；页面当前是预置研究回放。
+- 不要把论文提出的 Memory Trust Gate 说成已经验证有效。
+- 不要只展示用户输入；每次都停留到 AI 输出完整出现。
+- 不要跳过 PDF 点击、项目关联度、Agent 轨迹和用户确认记忆这四个证据点。
+- 论文标题、PDF 链接、代码文件名和指标名称保留原文，解释部分使用中文。

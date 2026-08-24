@@ -80,8 +80,8 @@ flowchart LR
 
 画面：
 
-1. 停留在 Project Relevance。
-2. 展示 Lodestar 项目名称、Observed gap 和命中的 frontier.py、relevance.py、project_index.py。
+1. 停留在“项目关联”。
+2. 展示 Lodestar 项目名称、观察到的缺口，以及命中的 frontier.py、relevance.py、project_index.py。
 3. 展开 Agent Trajectory。
 
 旁白：
@@ -98,7 +98,7 @@ flowchart LR
 
 1. 一句话结论。
 2. MemTrapBench 和 Beyond Memory Majority 两组来源。
-3. Project Relevance 中命中的 memory/repo.py、agent/loop.py、trace/recorder.py。
+3. “项目关联”中命中的 memory/repo.py、agent/loop.py、trace/recorder.py。
 4. Project Opportunities 中的 Memory Trust Gate。
 
 旁白：

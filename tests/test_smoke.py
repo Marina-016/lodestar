@@ -46,7 +46,7 @@ class SmokeTestCase(unittest.TestCase):
 
             task = repo.get_task(ws.conn, res["task_id"])
             self.assertEqual(task["status"], "finished")
-            self.assertIn("Research Brief", res["brief_md"])
+            self.assertIn("研究简报", res["brief_md"])
             self.assertGreaterEqual(len(res["sources"]), 3, "应至少收集 3 个去重后来源")
             self.assertLessEqual(len(res["sources"]), res["metrics"]["candidates_collected"], "去重应生效")
             self.assertGreaterEqual(res["metrics"]["sources_read"], 3, "应深度阅读至少 3 个来源")
@@ -266,7 +266,7 @@ class SmokeTestCase(unittest.TestCase):
             server.server_close()
 
     def test_10_projects_relevance_offline(self):
-        """Projects：登记 active 项目后，mock 研究的 Brief 应含 Project Relevance 映射。"""
+        """Projects：登记 active 项目后，mock 研究的 Brief 应含项目关联映射。"""
         from lodestar.build import get_executor  # noqa: F401 (确认 import 链)
         ws = Workspace(self.cfg)
         try:
@@ -275,7 +275,7 @@ class SmokeTestCase(unittest.TestCase):
                                 status="active")
             agent = ResearchAgent(ws, interactive=False)
             res = agent.run(GOLDEN_GOAL, apply_updates=True)
-            self.assertIn("## Project Relevance", res["brief_md"])
+            self.assertIn("## 项目关联", res["brief_md"])
             self.assertIn("test-agent-proj", res["brief_md"], "机会应映射到 active 项目")
             rows = repo.list_projects(ws.conn)
             self.assertEqual(len(rows), 1)

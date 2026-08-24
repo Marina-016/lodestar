@@ -148,40 +148,40 @@ DEMO_FRONTIER = {
 DEMO_PROJECT_LINKS = {
     "demo-frontier-weekly": {
         "query": "memory skill tool project",
-        "gap": "Lodestar can scan papers and index project code, but weekly signals still need to be ranked by a concrete implementation gap.",
-        "fit": "The active project profile and code index make trusted memory more actionable than model-training-only directions.",
-        "integration": "Frontier selection -> project evidence -> research brief",
+        "gap": "Lodestar 可以扫描论文并建立项目代码索引，但每周热点还需要按照具体的实现缺口排序。",
+        "fit": "当前项目画像和代码索引，让可信记忆比只关注模型训练的方向更容易落到产品实现。",
+        "integration": "热点筛选 → 项目证据 → 研究简报",
         "files": ["lodestar/frontier.py", "lodestar/relevance.py", "lodestar/project_index.py"],
     },
     "demo-ls-001": {
         "query": "tool MCP trace",
-        "gap": "Lodestar logs tool calls, but does not yet export them as a curated tool-use dataset with recovery labels.",
-        "fit": "MidTool supplies a data contract for turning real API, MCP and document workflows into reusable evaluation material.",
-        "integration": "MCP server, tool registry and trace recorder",
+        "gap": "Lodestar 会记录工具调用，但还没有把它们整理成带有恢复标签的工具使用数据集。",
+        "fit": "MidTool 提供了数据契约，可以把真实 API、MCP 和文档工作流转成可复用的评测材料。",
+        "integration": "MCP 服务、工具注册表与轨迹记录器",
         "files": ["lodestar/mcp_server.py", "lodestar/tools/registry.py", "lodestar/trace/recorder.py"],
         "memory_concept": "Tool-Use Training Data",
     },
     "demo-ls-002": {
         "query": "memory knowledge review provenance trace",
-        "gap": "Knowledge State supports explicit confirmation and review, but recalled memories still enter reasoning without a trust decision.",
-        "fit": "MemTrapBench and CAMA identify the missing product layer: reject misleading, stale or source-correlated memories before context injection.",
-        "integration": "Memory repository -> Trust Gate -> Research loop -> Trace",
+        "gap": "知识状态支持显式确认和复核，但召回的记忆仍会在没有信任判断的情况下进入推理。",
+        "fit": "MemTrapBench 和 CAMA 指出了缺失的产品层：在记忆注入上下文前，拒绝误导、过期或来源相关的记忆。",
+        "integration": "记忆仓库 → 信任门 → 研究循环 → 轨迹",
         "files": ["lodestar/memory/repo.py", "lodestar/agent/loop.py", "lodestar/trace/recorder.py", "lodestar/tools/knowledge.py"],
         "memory_concept": "Memory Trust Gate",
     },
     "demo-ls-003": {
         "query": "harness tool skill trace eval",
-        "gap": "Lodestar can preserve successful traces, but has no promotion rule for converting only transferable subtask knowledge into Skills.",
-        "fit": "Cross-task transfer results provide a measurable gate for granularity, format and negative transfer.",
-        "integration": "Research Trace -> Skill candidate -> Eval gate",
+        "gap": "Lodestar 可以保留成功轨迹，但还没有晋升规则，无法只把可迁移的子任务知识转成 Skill。",
+        "fit": "跨任务迁移结果可以为粒度、格式和负迁移提供可量化的准入门槛。",
+        "integration": "研究轨迹 → Skill 候选 → 评测门",
         "files": ["lodestar/harness/codex.py", "lodestar/trace/recorder.py", "lodestar/eval/harness.py"],
         "memory_concept": "Skill Transfer",
     },
     "demo-ls-004": {
         "query": "tool registry harness budget selection",
-        "gap": "Tool and Skill candidates are retrieved independently; redundancy and total context cost are not optimized as a set.",
-        "fit": "Budget-aware set selection turns context assembly into an explicit product decision with cost and quality metrics.",
-        "integration": "Tool registry -> selector -> Harness -> Eval",
+        "gap": "工具和 Skill 候选目前独立召回，冗余度和整体上下文成本还没有作为一个集合统一优化。",
+        "fit": "预算感知的集合选择，可以把上下文组装变成带有成本和质量指标的明确产品决策。",
+        "integration": "工具注册表 → 选择器 → Harness → 评测",
         "files": ["lodestar/tools/registry.py", "lodestar/harness/codex.py", "lodestar/eval/harness.py"],
         "memory_concept": "Budget-Aware Skill Selection",
     },
@@ -197,24 +197,24 @@ def _brief(task: dict, project: dict | None = None, code_matches: list[dict] | N
     paths = [match.get("path") for match in (code_matches or []) if match.get("path")]
     if not paths:
         paths = link.get("files") or []
-    code_evidence = "\n".join(f"  - `{item}`" for item in paths[:4]) or "  - No indexed implementation match"
+    code_evidence = "\n".join(f"  - `{item}`" for item in paths[:4]) or "  - 暂未命中项目代码"
     return (
         f"# {task['goal']}\n\n"
         f"> **\u4e00\u53e5\u8bdd\u7ed3\u8bba**\uff1a{task['takeaway']}\n\n"
-        "## Key Signals\n\n"
+        "## 关键信号\n\n"
         f"{signals}\n\n"
-        "## Project Relevance\n\n"
-        f"- **Current project**: `{project['name']}`\n"
-        f"- **Observed gap**: {link.get('gap', 'No project gap recorded.')}\n"
-        f"- **Why this matches**: {link.get('fit', 'The research direction matches the active project profile.')}\n"
-        f"- **Integration surface**: {link.get('integration', 'Research -> Knowledge -> Experiment')}\n"
-        "- **Indexed code evidence**:\n"
+        "## 项目关联\n\n"
+        f"- **当前项目**：`{project['name']}`\n"
+        f"- **观察到的缺口**：{link.get('gap', '暂未记录项目缺口。')}\n"
+        f"- **关联原因**：{link.get('fit', '该研究方向与当前项目画像匹配。')}\n"
+        f"- **接入位置**：{link.get('integration', '研究 → 知识 → 实验')}\n"
+        "- **命中的项目代码**：\n"
         f"{code_evidence}\n\n"
-        "## Project Opportunities\n\n"
+        "## 项目机会\n\n"
         f"{opportunities}\n\n"
-        "## Key Sources\n\n"
+        "## 关键来源\n\n"
         f"{sources}\n\n"
-        "## Next Moves\n\n"
+        "## 下一步\n\n"
         f"- {task['next']}\n"
     )
 

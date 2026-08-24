@@ -140,6 +140,15 @@ def render_brief(cfg, task_id: str, goal: str, plan: dict, queries: list[dict], 
             idx = m.get("opportunity_index")
             opp = f"方向 #{idx + 1}" if isinstance(idx, int) else "方向"
             lines.append(f"- **{opp}** → 适用于：`{('`、`'.join(m.get('applicable') or []))}`")
+            if m.get("relevance_score") is not None:
+                breakdown = m.get("score_breakdown") or {}
+                lines.append(
+                    f"  - **项目关联度**：**{m['relevance_score']}/100（{m.get('relevance_level', '中')}）**；"
+                    f"评分构成：技术栈命中 {breakdown.get('technology_stack', 0)}/35 · "
+                    f"项目语境命中 {breakdown.get('project_context', 0)}/25 · "
+                    f"代码证据 {breakdown.get('code_evidence', 0)}/25 · "
+                    f"进行中状态 {breakdown.get('active_status', 0)}/15"
+                )
             if m.get("reason"):
                 lines.append(f"  - {m['reason']}")
     else:

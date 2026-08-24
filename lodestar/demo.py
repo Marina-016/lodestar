@@ -17,6 +17,7 @@ from lodestar.context import Workspace
 from lodestar.experiment import scaffold_experiment
 from lodestar.memory import repo
 from lodestar.project_index import index_local_project
+from lodestar.relevance import score_project_relevance
 
 
 DEMO_RELEASE = "2026-week34-trusted-memory"
@@ -188,6 +189,15 @@ DEMO_PROJECT_LINKS = {
 }
 
 
+def _demo_relevance_text(task: dict, link: dict) -> str:
+    return " ".join([
+        task.get("goal", ""),
+        task.get("takeaway", ""),
+        " ".join(task.get("opportunities") or []),
+        link.get("query", ""),
+    ])
+
+
 def _brief(task: dict, project: dict | None = None, code_matches: list[dict] | None = None) -> str:
     signals = "\n".join(f"- {item}" for item in task["signals"])
     opportunities = "\n".join(f"- **\u53ef\u9a8c\u8bc1\u65b9\u5411**\uff1a{item}" for item in task["opportunities"])
@@ -198,6 +208,12 @@ def _brief(task: dict, project: dict | None = None, code_matches: list[dict] | N
     if not paths:
         paths = link.get("files") or []
     code_evidence = "\n".join(f"  - `{item}`" for item in paths[:4]) or "  - 暂未命中项目代码"
+    relevance = score_project_relevance(
+        _demo_relevance_text(task, link),
+        project,
+        evidence_count=len(paths),
+    )
+    score_breakdown = relevance["breakdown"]
     return (
         f"# {task['goal']}\n\n"
         f"> **\u4e00\u53e5\u8bdd\u7ed3\u8bba**\uff1a{task['takeaway']}\n\n"
@@ -205,6 +221,8 @@ def _brief(task: dict, project: dict | None = None, code_matches: list[dict] | N
         f"{signals}\n\n"
         "## 项目关联\n\n"
         f"- **当前项目**：`{project['name']}`\n"
+        f"- **项目关联度**：**{relevance['score']}/100（{relevance['level']}）**\n"
+        f"- **评分构成**：技术栈命中 {score_breakdown['technology_stack']}/35 · 项目语境命中 {score_breakdown['project_context']}/25 · 代码证据 {score_breakdown['code_evidence']}/25 · 进行中状态 {score_breakdown['active_status']}/15\n"
         f"- **观察到的缺口**：{link.get('gap', '暂未记录项目缺口。')}\n"
         f"- **关联原因**：{link.get('fit', '该研究方向与当前项目画像匹配。')}\n"
         f"- **接入位置**：{link.get('integration', '研究 → 知识 → 实验')}\n"
@@ -285,6 +303,9 @@ def seed_demo(cfg, clean: bool = False) -> dict:
             exists = conn.execute("SELECT 1 FROM research_tasks WHERE id=?", (item["id"],)).fetchone()
             link = DEMO_PROJECT_LINKS[item["id"]]
             code_matches = [{"path": path} for path in link["files"] if path in indexed_paths]
+            relevance = score_project_relevance(
+                _demo_relevance_text(item, link), canonical_project, evidence_count=len(code_matches)
+            )
             repo.create_task(
                 conn, item["id"], item["goal"],
                 {"demo": True, "demo_release": DEMO_RELEASE, "source_window": "2026-08-15/2026-08-21",
@@ -293,8 +314,10 @@ def seed_demo(cfg, clean: bool = False) -> dict:
             )
             repo.finish_task(conn, item["id"], _brief(item, canonical_project, code_matches), "finished", metrics={
                 "demo": True, "demo_release": DEMO_RELEASE, "source_count": len(item["sources"]),
-                "project": canonical_project["name"], "project_matches": len(code_matches),
-                "evidence_coverage": round(0.86 + index * 0.03, 2), "novelty": "high",
+                 "project": canonical_project["name"], "project_matches": len(code_matches),
+                 "project_relevance_score": relevance["score"],
+                 "project_relevance_breakdown": relevance["breakdown"],
+                 "evidence_coverage": round(0.86 + index * 0.03, 2), "novelty": "high",
             })
             created_at = (now - timedelta(days=item["days"])).isoformat(timespec="seconds")
             conn.execute("UPDATE research_tasks SET created_at=?, finished_at=? WHERE id=?",
@@ -310,6 +333,7 @@ def seed_demo(cfg, clean: bool = False) -> dict:
             repo.add_trace_event(conn, item["id"], 2, "project_context_search", {
                 "project": canonical_project["name"], "query": link["query"],
                 "matches": [match["path"] for match in code_matches], "mapping": link["fit"],
+                "relevance_score": relevance["score"], "score_breakdown": relevance["breakdown"],
             })
             finish_seq = 3
             if item["id"] == "demo-ls-002":

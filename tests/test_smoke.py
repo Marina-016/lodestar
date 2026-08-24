@@ -282,6 +282,26 @@ class SmokeTestCase(unittest.TestCase):
         finally:
             ws.close()
 
+    def test_11_project_relevance_score_is_explainable(self):
+        from lodestar.relevance import score_project_relevance
+
+        project = {
+            "name": "Lodestar / Agent Research Lab",
+            "description": "Research agent with trusted memory and auditable trace",
+            "tech_stack": ["Python", "Agent", "Memory", "Eval"],
+            "status": "active",
+        }
+        result = score_project_relevance(
+            "Agent memory trace eval implementation gap", project, evidence_count=3
+        )
+        self.assertGreaterEqual(result["score"], 75)
+        self.assertEqual(result["score"], sum(result["breakdown"].values()))
+        self.assertEqual(result["level"], "高")
+        self.assertEqual(
+            set(result["breakdown"]),
+            {"technology_stack", "project_context", "code_evidence", "active_status"},
+        )
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

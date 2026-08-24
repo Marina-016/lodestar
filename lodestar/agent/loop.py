@@ -180,6 +180,12 @@ class ResearchAgent:
                    "sources_read": len(read_sources), "replans": replans,
                    "conversation_harness": "loop", "agent_mode": "deterministic_research_loop",
                    "full_text_enabled": cfg.full_text_enabled}
+        scored_mappings = [m for m in relevance.get("mappings", []) if m.get("relevance_score") is not None]
+        if scored_mappings:
+            best_mapping = max(scored_mappings, key=lambda item: item["relevance_score"])
+            metrics["project_relevance_score"] = best_mapping["relevance_score"]
+            metrics["project_relevance_level"] = best_mapping.get("relevance_level")
+            metrics["project_relevance_breakdown"] = best_mapping.get("score_breakdown") or {}
         # 把读取深度回填到 key_sources，保证 Brief 的「读取」列正确显示（全文/摘要/未读）
         depth_by_url = {rs["url"]: rs.get("read_depth", "none") for rs in read_sources}
         for ks in key_sources:

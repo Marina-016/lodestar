@@ -129,7 +129,8 @@ def _run_codex_conversation(task_id: str, goal: str, cfg) -> tuple[str | None, s
 
 def _run_demo_replay(task_id: str, goal: str, cfg) -> None:
     """Write a fast, project-grounded replay without implying a live model call."""
-    from lodestar.demo import DEMO_FRONTIER, DEMO_PROJECT_LINKS, DEMO_TASKS, _brief
+    from lodestar.demo import DEMO_FRONTIER, DEMO_PROJECT_LINKS, DEMO_PROJECTS, DEMO_TASKS, _brief, _demo_relevance_text
+    from lodestar.relevance import score_project_relevance
 
     latest_query = goal.split("\n\n##", 1)[0]
     query = goal.lower()
@@ -167,6 +168,11 @@ def _run_demo_replay(task_id: str, goal: str, cfg) -> None:
                     selected_paths.add(match["path"])
                 if len(code_matches) >= 3:
                     break
+        relevance = score_project_relevance(
+            _demo_relevance_text(item, link),
+            project or DEMO_PROJECTS[0],
+            evidence_count=len(code_matches),
+        )
 
         repo.add_trace_event(ws.conn, task_id, 1, "demo_replay_start", {
             "dataset": "curated_project_grounded_replay", "topic": item["id"],
@@ -183,6 +189,7 @@ def _run_demo_replay(task_id: str, goal: str, cfg) -> None:
         repo.add_trace_event(ws.conn, task_id, 3, "project_context_search", {
             "project": project["name"] if project else None, "query": link["query"],
             "matches": [match["path"] for match in code_matches], "mapping": link["fit"],
+            "relevance_score": relevance["score"], "score_breakdown": relevance["breakdown"],
         })
 
         next_seq = 4
@@ -222,6 +229,8 @@ def _run_demo_replay(task_id: str, goal: str, cfg) -> None:
             "conversation_harness": "demo_replay", "demo_replay": True,
             "dataset": "curated_project_grounded_replay", "source_count": len(item["sources"]),
             "project": project["name"] if project else None, "project_matches": len(code_matches),
+            "project_relevance_score": relevance["score"],
+            "project_relevance_breakdown": relevance["breakdown"],
         })
     finally:
         ws.close()
@@ -341,7 +350,7 @@ def _render_page_html() -> str:
   const originalDecorateResearch=window.decorateResearch;
   if(!originalDecorateResearch)return;
   const labels={demo_replay_start:'\u542f\u52a8\u6f14\u793a\u56de\u653e',demo_replay_sources:'\u52a0\u8f7d\u6574\u7406\u6765\u6e90',project_context_search:'\u5173\u8054\u9879\u76ee\u4ee3\u7801',demo_replay_finish:'\u7b49\u5f85\u8bb0\u5fc6\u786e\u8ba4',start:'\u5f00\u59cb\u7814\u7a76',knowledge_context:'\u8bfb\u53d6\u5df2\u6709\u77e5\u8bc6',plan:'\u751f\u6210\u7814\u7a76\u8ba1\u5212',tool_policy:'\u9009\u62e9\u68c0\u7d22\u5de5\u5177',queries:'\u6269\u5c55\u68c0\u7d22\u95ee\u9898',tool_call:'\u8c03\u7528\u5de5\u5177',harness_tool_call:'\u901a\u8fc7 MCP \u8c03\u7528\u5de5\u5177',rerank:'\u91cd\u6392\u5019\u9009\u8bc1\u636e',read:'\u9605\u8bfb\u5173\u952e\u8bc1\u636e',assess:'\u68c0\u67e5\u8bc1\u636e\u7f3a\u53e3',replan:'\u8865\u5145\u68c0\u7d22',synthesis:'\u8de8\u6765\u6e90\u7efc\u5408',novelty:'\u8bc6\u522b\u76f8\u5bf9\u65b0\u589e',knowledge_updates_proposed:'\u63d0\u51fa\u8bb0\u5fc6\u66f4\u65b0',knowledge_updates_applied:'\u5904\u7406\u8bb0\u5fc6\u66f4\u65b0',knowledge_updates_confirmed:'\u7528\u6237\u786e\u8ba4\u8bb0\u5fc6\u66f4\u65b0',finish:'\u5b8c\u6210'};
-  function detail(e){const d=e.data||{};if(e.kind==='demo_replay_start')return '\u5df2\u9009\u62e9\u5bf9\u5e94\u4e3b\u9898\u7684\u7814\u7a76\u56de\u653e';if(e.kind==='demo_replay_sources')return '\u52a0\u8f7d '+(d.count||0)+' \u6761\u53ef\u8ffd\u6eaf\u6765\u6e90';if(e.kind==='project_context_search')return d.project?'\u547d\u4e2d '+d.project+' \u00b7 '+((d.matches||[]).length)+' \u4e2a\u4ee3\u7801\u4f4d\u7f6e':'';if(e.kind==='demo_replay_finish')return d.state==='selection_required'?'\u7b49\u5f85\u7528\u6237\u9009\u62e9\u7814\u7a76\u65b9\u5411':'\u7814\u7a76\u5b8c\u6210\uff0c\u8bb0\u5fc6\u5f85\u786e\u8ba4';if(e.kind==='tool_call'||e.kind==='harness_tool_call')return d.tool?'\u8c03\u7528 '+d.tool:'';if(e.kind==='knowledge_context')return (d.matched||[]).length?'\u547d\u4e2d\uff1a'+d.matched.join('\u3001'):'\u672a\u547d\u4e2d\u957f\u671f\u8bb0\u5fc6';if(e.kind==='queries')return (d||[]).length?'\u751f\u6210 '+d.length+' \u4e2a\u68c0\u7d22\u95ee\u9898':'';if(e.kind==='sources_collected')return d.unique?'\u5019\u9009 '+d.candidates+' \u2192 \u53bb\u91cd '+d.unique:'';if(e.kind==='replan')return d.reason||'\u8bc1\u636e\u4e0d\u8db3\uff0c\u8865\u5145\u68c0\u7d22';if(e.kind==='finish')return '\u7814\u7a76\u7ed3\u679c\u5df2\u4fdd\u5b58\u5e76\u53ef\u56de\u6eaf';return '';}
+  function detail(e){const d=e.data||{};if(e.kind==='demo_replay_start')return '\u5df2\u9009\u62e9\u5bf9\u5e94\u4e3b\u9898\u7684\u7814\u7a76\u56de\u653e';if(e.kind==='demo_replay_sources')return '\u52a0\u8f7d '+(d.count||0)+' \u6761\u53ef\u8ffd\u6eaf\u6765\u6e90';if(e.kind==='project_context_search')return d.project?'\u547d\u4e2d '+d.project+' \u00b7 '+((d.matches||[]).length)+' \u4e2a\u4ee3\u7801\u4f4d\u7f6e'+(d.relevance_score!=null?' \u00b7 \u5173\u8054\u5ea6 '+d.relevance_score+'/100':''):'';if(e.kind==='demo_replay_finish')return d.state==='selection_required'?'\u7b49\u5f85\u7528\u6237\u9009\u62e9\u7814\u7a76\u65b9\u5411':'\u7814\u7a76\u5b8c\u6210\uff0c\u8bb0\u5fc6\u5f85\u786e\u8ba4';if(e.kind==='tool_call'||e.kind==='harness_tool_call')return d.tool?'\u8c03\u7528 '+d.tool:'';if(e.kind==='knowledge_context')return (d.matched||[]).length?'\u547d\u4e2d\uff1a'+d.matched.join('\u3001'):'\u672a\u547d\u4e2d\u957f\u671f\u8bb0\u5fc6';if(e.kind==='queries')return (d||[]).length?'\u751f\u6210 '+d.length+' \u4e2a\u68c0\u7d22\u95ee\u9898':'';if(e.kind==='sources_collected')return d.unique?'\u5019\u9009 '+d.candidates+' \u2192 \u53bb\u91cd '+d.unique:'';if(e.kind==='replan')return d.reason||'\u8bc1\u636e\u4e0d\u8db3\uff0c\u8865\u5145\u68c0\u7d22';if(e.kind==='finish')return '\u7814\u7a76\u7ed3\u679c\u5df2\u4fdd\u5b58\u5e76\u53ef\u56de\u6eaf';return '';}
   function runLabel(task){const m=task.metrics||{};if(m.demo_replay)return '\u6f14\u793a\u6a21\u5f0f \u00b7 \u9884\u7f6e\u7814\u7a76\u56de\u653e';if(m.degraded)return '\u672c\u5730\u56de\u9000\u8fd0\u884c';if(m.conversation_harness==='codex')return 'Codex Harness \u00b7 MCP';if(m.conversation_harness==='loop')return '\u7814\u7a76\u5faa\u73af \u00b7 \u53d7\u63a7\u7f16\u6392';return '\u7814\u7a76\u4efb\u52a1';}
   labels.memory_risk_assessment='\u8bc4\u4f30\u8bb0\u5fc6\u98ce\u9669';
   const baseDetail=detail;

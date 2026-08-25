@@ -1,0 +1,15 @@
+.env
+.git
+.venv
+venv
+__pycache__
+*.pyc
+*.db
+*.sqlite
+*.sqlite3
+workspace
+experiments
+lodestar/data
+.pytest_cache
+.mypy_cache
+.ruff_cache

@@ -20,3 +20,13 @@ experiments/
 # 测试缓存
 .pytest_cache/
 lodestar.bat
+# Deployment and local tooling
+.vercel/
+.mypy_cache/
+.ruff_cache/
+.pyright/
+*.db
+*.sqlite
+*.sqlite3
+.DS_Store
+Thumbs.db

@@ -161,6 +161,24 @@ class LifecycleTestCase(unittest.TestCase):
                          ["demo_replay_start", "demo_replay_sources", "project_context_search",
                           "demo_replay_finish"])
 
+    def test_demo_code_followup_keeps_topic_without_memory_update(self):
+        task_id = "demo-code-followup-task"
+        goal = "\u67e5\u770b\u8fd9\u6b21\u7814\u7a76\u547d\u4e2d\u7684 Lodestar \u4ee3\u7801"
+        repo.create_task(self.ws.conn, task_id, goal, {}, llm_mode="live")
+        self.ws.close()
+        cfg = Config(db_path=self.root / "lifecycle.db", workspace_dir=self.root / "workspace", demo_replay=True)
+        _run_research(task_id, goal, cfg, replay_topic="demo-ls-002", replay_action="code_context")
+        self.ws = Workspace(cfg)
+        task = repo.get_task(self.ws.conn, task_id)
+        self.assertEqual(task["status"], "finished")
+        self.assertEqual(task["metrics"]["demo_topic"], "demo-ls-002")
+        self.assertEqual(task["metrics"]["demo_action"], "code_context")
+        self.assertIn("\u4ee3\u7801\u8bc1\u636e\u89e3\u8bfb", task["brief_md"])
+        self.assertEqual(repo.list_knowledge_updates(self.ws.conn, task_id, status="pending"), [])
+        kinds = [event["kind"] for event in repo.list_trace_events(self.ws.conn, task_id)]
+        self.assertIn("demo_replay_code_context", kinds)
+        self.assertNotIn("knowledge_updates_proposed", kinds)
+
     def test_memory_replay_is_grounded_in_core_project_files(self):
         self.ws.close()
         cfg = Config(db_path=self.root / "lifecycle.db", workspace_dir=self.root / "workspace", demo_replay=True)

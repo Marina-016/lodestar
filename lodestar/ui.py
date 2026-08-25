@@ -142,14 +142,20 @@ def _run_codex_conversation(task_id: str, goal: str, cfg) -> tuple[str | None, s
         return None, str(exc)
 
 
-def _run_demo_replay(task_id: str, goal: str, cfg) -> None:
+def _run_demo_replay(task_id: str, goal: str, cfg,
+                     replay_topic: str | None = None,
+                     replay_action: str | None = None) -> None:
     """Write a fast, project-grounded replay without implying a live model call."""
     from lodestar.demo import DEMO_FRONTIER, DEMO_PROJECT_LINKS, DEMO_PROJECTS, DEMO_TASKS, _brief, _demo_relevance_text
     from lodestar.relevance import score_project_relevance
 
     latest_query = goal.split("\n\n##", 1)[0]
     query = goal.lower()
-    if "\u672c\u5468" in latest_query and ("\u70ed\u70b9" in latest_query or "agent" in latest_query.lower()):
+    replay_items = {item["id"]: item for item in DEMO_TASKS}
+    replay_items[DEMO_FRONTIER["id"]] = DEMO_FRONTIER
+    if replay_topic in replay_items:
+        item = replay_items[replay_topic]
+    elif "\u672c\u5468" in latest_query and ("\u70ed\u70b9" in latest_query or "agent" in latest_query.lower()):
         item = DEMO_FRONTIER
     elif "memory" in query or "\u8bb0\u5fc6" in goal:
         item = DEMO_TASKS[1]
@@ -208,7 +214,12 @@ def _run_demo_replay(task_id: str, goal: str, cfg) -> None:
         })
 
         next_seq = 4
-        if item["id"] == "demo-ls-002":
+        if replay_action == "code_context":
+            repo.add_trace_event(ws.conn, task_id, next_seq, "demo_replay_code_context", {
+                "topic": item["id"], "files": [match["path"] for match in code_matches],
+            })
+            next_seq += 1
+        if item["id"] == "demo-ls-002" and replay_action != "code_context":
             repo.add_trace_event(ws.conn, task_id, next_seq, "memory_risk_assessment", {
                 "factors": ["relevance", "source_independence", "conflict_risk", "recency"],
                 "finding": "Relevant memories may still be misleading or source-correlated.",
@@ -217,7 +228,7 @@ def _run_demo_replay(task_id: str, goal: str, cfg) -> None:
             next_seq += 1
 
         memory_update = "not_proposed"
-        if item is not DEMO_FRONTIER:
+        if item is not DEMO_FRONTIER and replay_action != "code_context":
             concept_name = link.get("memory_concept") or "Project-Grounded Retrieval"
             current = repo.get_concept(ws.conn, concept_name) or {}
             first_title, first_url, _ = item["sources"][0]
@@ -239,10 +250,19 @@ def _run_demo_replay(task_id: str, goal: str, cfg) -> None:
         repo.add_trace_event(ws.conn, task_id, next_seq, "demo_replay_finish", {
             "state": "selection_required" if item is DEMO_FRONTIER else "research_complete",
             "memory_update": memory_update,
+            "action": replay_action or "research",
         })
-        repo.finish_task(ws.conn, task_id, _brief(item, project, code_matches), "finished", metrics={
+        brief = _brief(item, project, code_matches)
+        if replay_action == "code_context":
+            brief += (
+                "\n## \u4ee3\u7801\u8bc1\u636e\u89e3\u8bfb\n\n"
+                "\u8fd9\u4e00\u6b65\u53ea\u89e3\u91ca\u672c\u6b21\u7814\u7a76\u547d\u4e2d\u7684\u9879\u76ee\u4ee3\u7801\uff0c\u4e0d\u65b0\u589e\u6216\u4fee\u6539 Knowledge State\u3002"
+                "\u4ee3\u7801\u8bc1\u636e\u5df2\u7ecf\u7ed1\u5b9a\u5230\u672c\u6b21\u7814\u7a76\u8f68\u8ff9\uff0c\u4fbf\u4e8e\u7ee7\u7eed\u751f\u6210\u5b9e\u9a8c\u9aa8\u67b6\u3002\n"
+            )
+        repo.finish_task(ws.conn, task_id, brief, "finished", metrics={
             "conversation_harness": "demo_replay", "demo_replay": True,
             "dataset": "curated_project_grounded_replay", "source_count": len(item["sources"]),
+            "demo_topic": item["id"], "demo_action": replay_action or "research",
             "project": project["name"] if project else None, "project_matches": len(code_matches),
             "project_relevance_score": relevance["score"],
             "project_relevance_breakdown": relevance["breakdown"],
@@ -251,10 +271,11 @@ def _run_demo_replay(task_id: str, goal: str, cfg) -> None:
         ws.close()
 
 
-def _run_research(task_id: str, goal: str, cfg, conversation_id: str | None = None) -> None:
+def _run_research(task_id: str, goal: str, cfg, conversation_id: str | None = None,
+                  replay_topic: str | None = None, replay_action: str | None = None) -> None:
     if getattr(cfg, "demo_replay", False):
         try:
-            _run_demo_replay(task_id, goal, cfg)
+            _run_demo_replay(task_id, goal, cfg, replay_topic, replay_action)
             _append_conversation_result(conversation_id, task_id, cfg)
         finally:
             _runners.pop(task_id, None)
@@ -320,19 +341,26 @@ def _conversation_goal(ws: Workspace, conversation_id: str, content: str) -> str
     return content + "\n\n## 对话上下文（仅用于理解当前问题）\n" + "\n\n".join(context)
 
 
-def _start_research(goal: str, conversation_id: str | None = None) -> str:
+def _start_research(goal: str, conversation_id: str | None = None,
+                    replay_topic: str | None = None, replay_action: str | None = None) -> str:
     cfg = load_config()
     ws = Workspace(cfg)
     try:
         task_id = uuid.uuid4().hex[:12]
-        repo.create_task(ws.conn, task_id, goal, {}, llm_mode=cfg.llm_mode, conversation_id=conversation_id)
+        plan = {}
+        if replay_topic:
+            plan["demo_topic"] = replay_topic
+        if replay_action:
+            plan["demo_action"] = replay_action
+        repo.create_task(ws.conn, task_id, goal, plan, llm_mode=cfg.llm_mode, conversation_id=conversation_id)
         if os.getenv("LODESTAR_SERVERLESS", "").lower() in {"1", "true", "yes", "on"}:
             # Vercel may freeze a function as soon as the response returns. The
             # curated replay is intentionally small, so complete it before the
             # response in serverless mode instead of relying on a daemon thread.
-            _run_research(task_id, goal, cfg, conversation_id)
+            _run_research(task_id, goal, cfg, conversation_id, replay_topic, replay_action)
             return task_id
-        t = threading.Thread(target=_run_research, args=(task_id, goal, cfg, conversation_id), daemon=True)
+        t = threading.Thread(target=_run_research,
+                             args=(task_id, goal, cfg, conversation_id, replay_topic, replay_action), daemon=True)
         _runners[task_id] = t
         t.start()
         return task_id
@@ -447,9 +475,10 @@ html,body{height:100%}body.chat-mode{overflow:hidden}body.chat-mode .app-shell{h
 (function(){
   const body=document.body,baseSwitch=window.switchView;
   window.switchView=function(name){body.classList.toggle('chat-mode',name==='chat');return baseSwitch(name);};body.classList.add('chat-mode');
-  window.sendFollowup=function(prompt){if(window.__lodestarDemo&&window.__lodestarDemo.mode)window.__lodestarDemo.allowed.add(String(prompt).replace(/\s+/g,' ').trim());$("#chatInput").value=prompt;document.querySelector('#composer').requestSubmit();};
+  window.sendFollowup=function(prompt,action){if(window.__lodestarDemo&&window.__lodestarDemo.mode){window.__lodestarDemo.allowed.add(String(prompt).replace(/\s+/g,' ').trim());window.__lodestarDemo.pendingAction=action||null;}$("#chatInput").value=prompt;document.querySelector('#composer').requestSubmit();};
+  const nativeFetch=window.fetch.bind(window);window.fetch=async function(input,init){const demoState=window.__lodestarDemo,url=String(input||'');if(demoState?.mode&&demoState.pendingAction&&url.includes('/api/conversation/')&&url.endsWith('/message')&&init?.method==='POST'){const body=JSON.parse(init.body||'{}');body.demo_topic=demoState.topic||null;body.demo_action=demoState.pendingAction;demoState.pendingAction=null;init={...init,body:JSON.stringify(body)};}return nativeFetch(input,init);};
   window.focusMemory=function(btn){const card=(btn.closest('.research-card')||document).querySelector('.memory-card');if(card){card.scrollIntoView({behavior:"smooth",block:'center'});const confirm=card.querySelector('.primary');if(confirm)confirm.focus();}};const baseRemember=window.rememberUpdates;if(baseRemember)window.rememberUpdates=async function(){if(window.__lodestarDemo&&window.__lodestarDemo.mode)window.__lodestarDemo.memoryConfirmed=true;return baseRemember.apply(this,arguments);};
-  const demo={mode:false,ready:false,prompt:'',started:false,memoryConfirmed:false,codeViewed:false,allowed:new Set()};window.__lodestarDemo=demo;
+  const demo={mode:false,ready:false,prompt:'',started:false,memoryConfirmed:false,codeViewed:false,topic:null,pendingAction:null,allowed:new Set()};window.__lodestarDemo=demo;
   const normalize=value=>String(value||'').replace(/\s+/g,' ').trim();
   function showDemoHint(){setStatus('\u5f53\u524d\u6f14\u793a\u95ee\u9898\u4e0d\u5339\u914d');const input=$("#chatInput");if(demo.prompt)input.value=demo.prompt;input.focus();}
   async function prepareDemo(){if(demo.ready)return;try{const readiness=await jget('/api/demo/readiness');demo.mode=readiness.mode==='demo_replay';if(demo.mode){const data=await jget('/api/demo/tasks');demo.prompt=(data.tasks||[])[0]?.prompt||'\u672c\u5468 Agent \u7814\u7a76\u6709\u54ea\u4e9b\u503c\u5f97 Lodestar \u4f18\u5148\u9a8c\u8bc1\u7684\u65b0\u8fdb\u5c55\uff1f';const input=$("#chatInput");if(!input.value.trim())input.value=demo.prompt;} }catch(e){}demo.ready=true;}
@@ -457,7 +486,7 @@ html,body{height:100%}body.chat-mode{overflow:hidden}body.chat-mode .app-shell{h
   if(form&&baseSubmit)form.onsubmit=function(e){if(!demo.ready){e.preventDefault();prepareDemo();return false;}if(demo.mode){const content=normalize($("#chatInput").value),allowed=!demo.started&&content===normalize(demo.prompt)||demo.allowed.has(content);if(!allowed){e.preventDefault();showDemoHint();return false;}demo.started=true;demo.allowed.delete(content);}return baseSubmit.call(this,e);};
   prepareDemo();
   const baseDecorate=window.decorateResearch;if(!baseDecorate)return;
-  window.decorateResearch=async function(el,id){await baseDecorate(el,id);try{const d=await jget('/api/task/'+id),pending=(d.updates||[]).filter(u=>u.status==='pending'),demoState=window.__lodestarDemo;document.querySelectorAll('.next-actions').forEach(node=>node.remove());if(pending.length&&!demoState?.memoryConfirmed)return;if(pending.length&&demoState?.memoryConfirmed)el.querySelector('.memory-card')?.remove();const box=document.createElement('div');box.className='next-actions';const btn=document.createElement('button');btn.type='button';btn.className='next-primary';if(demoState?.memoryConfirmed&&!demoState.codeViewed){btn.textContent='\u4e0b\u4e00\u6b65\u5efa\u8bae\uff1a\u67e5\u770b\u5173\u8054\u4ee3\u7801';btn.onclick=()=>{demoState.codeViewed=true;sendFollowup('\u67e5\u770b\u8fd9\u6b21\u7814\u7a76\u547d\u4e2d\u7684 Lodestar \u4ee3\u7801\uff0c\u5e76\u89e3\u91ca\u5b83\u4eec\u5206\u522b\u8d1f\u8d23\u4ec0\u4e48\u3002');};}else if(demoState?.memoryConfirmed){btn.textContent='\u4e0b\u4e00\u6b65\u5efa\u8bae\uff1a\u751f\u6210\u5b9e\u9a8c\u9aa8\u67b6';btn.onclick=()=>{switchView('experiment');loadExperiments();};}else{btn.textContent='\u4e0b\u4e00\u6b65\u5efa\u8bae\uff1a\u67e5\u770b\u5173\u8054\u4ee3\u7801';btn.onclick=()=>{demoState.codeViewed=true;sendFollowup('\u67e5\u770b\u8fd9\u6b21\u7814\u7a76\u547d\u4e2d\u7684 Lodestar \u4ee3\u7801\uff0c\u5e76\u89e3\u91ca\u5b83\u4eec\u5206\u522b\u8d1f\u8d23\u4ec0\u4e48\u3002');};}box.appendChild(btn);el.appendChild(box);}catch(e){}};
+  window.decorateResearch=async function(el,id){await baseDecorate(el,id);try{const d=await jget('/api/task/'+id),pending=(d.updates||[]).filter(u=>u.status==='pending'),demoState=window.__lodestarDemo;if(demoState?.mode&&d.task?.metrics?.demo_topic)demoState.topic=d.task.metrics.demo_topic;document.querySelectorAll('.next-actions').forEach(node=>node.remove());if(pending.length&&!demoState?.memoryConfirmed)return;if(pending.length&&demoState?.memoryConfirmed)el.querySelector('.memory-card')?.remove();const box=document.createElement('div');box.className='next-actions';const btn=document.createElement('button');btn.type='button';btn.className='next-primary';if(demoState?.memoryConfirmed&&!demoState.codeViewed){btn.textContent='\u4e0b\u4e00\u6b65\u5efa\u8bae\uff1a\u67e5\u770b\u5173\u8054\u4ee3\u7801';btn.onclick=()=>{demoState.codeViewed=true;sendFollowup('\u67e5\u770b\u8fd9\u6b21\u7814\u7a76\u547d\u4e2d\u7684 Lodestar \u4ee3\u7801\uff0c\u5e76\u89e3\u91ca\u5b83\u4eec\u5206\u522b\u8d1f\u8d23\u4ec0\u4e48\u3002','code_context');};}else if(demoState?.memoryConfirmed){btn.textContent='\u4e0b\u4e00\u6b65\u5efa\u8bae\uff1a\u751f\u6210\u5b9e\u9a8c\u9aa8\u67b6';btn.onclick=()=>{switchView('experiment');loadExperiments();};}else{btn.textContent='\u4e0b\u4e00\u6b65\u5efa\u8bae\uff1a\u67e5\u770b\u5173\u8054\u4ee3\u7801';btn.onclick=()=>{demoState.codeViewed=true;sendFollowup('\u67e5\u770b\u8fd9\u6b21\u7814\u7a76\u547d\u4e2d\u7684 Lodestar \u4ee3\u7801\uff0c\u5e76\u89e3\u91ca\u5b83\u4eec\u5206\u522b\u8d1f\u8d23\u4ec0\u4e48\u3002','code_context');};}box.appendChild(btn);el.appendChild(box);}catch(e){}};
 })();
 </script>
 """
@@ -617,7 +646,12 @@ class Handler(BaseHTTPRequestHandler):
                 goal = _conversation_goal(ws, conversation_id, content)
             finally:
                 ws.close()
-            task_id = _start_research(goal, conversation_id=conversation_id)
+            replay_topic = (data.get("demo_topic") or "").strip() or None
+            replay_action = (data.get("demo_action") or "").strip() or None
+            if replay_action not in {None, "code_context"}:
+                replay_action = None
+            task_id = _start_research(goal, conversation_id=conversation_id,
+                                      replay_topic=replay_topic, replay_action=replay_action)
             return self._send(200, {"conversation_id": conversation_id, "task_id": task_id})
         if path.startswith("/api/conversation/") and path.endswith("/remember"):
             conversation_id = path.split("/")[3]

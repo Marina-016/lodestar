@@ -5,11 +5,16 @@
 </p>
 
 <p align="center">
-  <a href="#quickstart">Quickstart</a> ?
-  <a href="#how-it-works">How it works</a> ?
-  <a href="#architecture">Architecture</a> ?
-  <a href="#deployment">Deployment</a> ?
+  <a href="#quickstart">Quickstart</a> |
+  <a href="#how-it-works">How it works</a> |
+  <a href="#architecture">Architecture</a> |
+  <a href="#deployment">Deployment</a> |
   <a href="#roadmap">Roadmap</a>
+</p>
+
+<p align="center">
+  <a href="https://lodestar-beige.vercel.app">Live demo</a> |
+  <a href="https://github.com/Marina-016/lodestar">GitHub repository</a>
 </p>
 
 <p align="center">

@@ -1,7 +1,3 @@
-> 项目订阅与主动论文发现 CLI 见 [使用说明](docs/proactive-paper-discovery.md)。
-
-> Agent 后端的统一逻辑见 [PRD](docs/agent-prd.md)，启动与隔离演示见 [Runbook](docs/agent-mvp-runbook.md)，实际证据与限制见 [验收台账](docs/agent-goal-audit-20261008.md)。免费额度未验证时保持模型调用总开关关闭。
-
 # Lodestar · Agent Research Lab
 
 <p align="center">
@@ -19,11 +15,36 @@
 <p align="center">
   <img alt="Python 3.10+" src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white">
   <img alt="Demo replay" src="https://img.shields.io/badge/Demo-Curated%20Replay-F28C28">
-  <img alt="Tests" src="https://img.shields.io/badge/Tests-12%20offline%20checks-2EA44F">
+  <img alt="Tests" src="https://img.shields.io/badge/Tests-147%20backend%20checks-2EA44F">
   <img alt="License" src="https://img.shields.io/badge/License-Apache--2.0-4A5568">
 </p>
 
 > Lodestar 面向 AI 从业者，用于探索和落地最新 Agent 技术。它探索的不是“如何让模型回答更长”，而是：**Agent 如何形成有证据的判断，理解它和当前项目的关系，在用户确认后沉淀为记忆，并把洞察推进成可验证实验。**
+
+
+## 当前后端 MVP · 2026-10-08
+
+当前交付是本地 CLI 与 Agent 服务层。前端尚未重做，在线 Demo 展示的是历史 UI 回放，不代表本分支的实时后端能力。
+
+```text
+项目登记/索引 → 论文订阅 → 近期 arXiv / HF 平台热门 → 去重候选
+                                                    ↓
+用户研究/追问 ← 持久化证据/会话 ← 有界正文或摘要 ← 选定候选
+       ↓                                            ↓
+技术/方法接触记录                         项目适用性评估 → 结构化草案
+                                                   ├─ propose_change → 显式 A/B
+                                                   ├─ investigate → 诊断与结果登记
+                                                   └─ no_change → 保存有据理由
+```
+
+- 来源带阅读范围、字符跨度与版本，无法读取时保留失败或明确降级为摘要。HF 热度仅是平台信号。
+- 研究知识与用户学习事件分开。接触按技术/方法及论文关系维护；概念定义不作为个人学习事实，讲解或“懂了”不提升掌握。
+- 追问区分有原文引用的论文陈述、推测、证据缺口和一般知识；字面引用匹配仍不能代替语义审核。
+- 方案保留阅读/评估和项目证据快照，过期要求重评；实验显式执行，记录协议、实现、原始输出、评分、环境版本及关联。
+
+验收：147 项回归测试通过，12 个 CLI 命令包含实际实验执行与结果查回；公开检索、正文、模型评估/方案和受限上下文诊断有真实运行记录。两个已知合成案例及字段传递实验不证明项目收益，采用状态和掌握状态独立。
+
+文档：[统一 PRD](docs/agent-prd.md) · [系统架构](docs/agent-architecture.md) · [启动手册](docs/agent-mvp-runbook.md) · [订阅与候选](docs/proactive-paper-discovery.md) · [实验协议](docs/paired-experiments.md) · [验收证据及限制](docs/agent-goal-audit-20261008.md) · [Changelog](CHANGELOG.md)
 
 ## 产品定位
 
@@ -202,15 +223,28 @@ Lodestar 将评估拆成多个产品指标，而不是只做最终文本打分�
 
 ## 快速运行
 
-环境要求：Python 3.10+；Windows、macOS 或 Linux；体验演示回放时不需要 Token。
+Python 3.10+。在仓库根目录建立并激活虚拟环境，再安装本地包：
 
-    python -m venv .venv
-    python -m pip install -r requirements.txt
-    $env:LODESTAR_DEMO_REPLAY="true"
-    python -m lodestar demo reset
-    python -m lodestar ui --port 8123 --no-browser
+```shell
+python -m venv .venv
+# Windows PowerShell：.\.venv\Scripts\Activate.ps1
+# macOS / Linux：source .venv/bin/activate
+python -m pip install -e .
+python -m lodestar agent-demo --out workspace/my-agent-demo
+python -m lodestar agent-pipeline-demo --out workspace/my-pipeline-demo
+python -m lodestar ab-check workspace/my-pipeline-demo/ab
+```
 
-打开 http://127.0.0.1:8123。
+输出目录必须不存在。两种演示使用独立数据库、离线夹具，零模型调用；第二种实际运行六个固定样本的本地成对代码实验。它们不提供实时论文或模型质量证明。
+
+```shell
+python -m unittest discover -s tests -q
+python -m lodestar --help
+```
+
+真实研究和项目订阅使用 [运行手册](docs/agent-mvp-runbook.md)。密钥仅放本地被忽略的 `.env`；模型调用默认保持关闭。免费额度及服务端用完即停必须在运行前核对，不做付费回退。项目代码外发需精确仓库/文件授权，登记项目不等于授权发送整个仓库。公开仓库不包含本机数据库、PDF、真实录制和实验输出，运行证据的范围和结果已写入验收文档。
+
+历史 UI 回放可选使用 `python -m lodestar ui --port 8123 --no-browser`；其配置见原演示文档，不是本次前端开发成果。
 
 ## Vercel 部署
 
@@ -223,9 +257,9 @@ Lodestar 将评估拆成多个产品指标，而不是只做最终文本打分�
 
 ## 评估与路线图
 
-当前离线检查覆盖来源唯一性、证据覆盖、论文元信息、研究结论忠实性、Project Relevance、Knowledge State 确认流程和 Experiment Scaffold 生成。
+当前验证覆盖来源及模式隔离、版本与去重、失败恢复、用户/项目边界、引文与方案契约、实验独立评分/篡改检查、环境记录及 CLI。详细证明范围见 [验收台账](docs/agent-goal-audit-20261008.md)。精确引文和绿色测试不保证模型的每个结论正确；诊断原型不是完整论文复现，也没有自动接入生产策略。
 
-下一步计划：Claim-level citation diff、Memory Trap Rate、False-majority Rate、Token Cost、多项目记忆域和可视化评估面板。
+后续优先准备独立真实项目任务和来源语义标注，做重复实验后再决定生产策略；永久后台/通知、学习表现判卷、技术别名/语义召回与 UI 单独规划。详见 [后续计划](docs/agent-long-term-plan.md)。
 
 ## 安全与公开仓库策略
 

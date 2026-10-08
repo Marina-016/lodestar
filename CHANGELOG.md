@@ -1,6 +1,44 @@
 # Changelog
 
-## [Unreleased] - 2026-08-24
+## [Unreleased] - 2026-10-08
+
+### Added
+
+- Added a headless research/conversation service with persistent user/project sessions, recent arXiv and HF trending discovery, bounded paper evidence and failure recovery.
+- Added project paper subscriptions, due polling leases, per-project/version-aware candidate deduplication, reading history and evidence handoff.
+- Added scoped applicability assessment and evidence-bound draft actions: `propose_change`, `investigate`, and `no_change`.
+- Added reviewed Python paired execution, independent exact-output grading, frozen artifacts, integrity checks, environment receipts and result lineage.
+- Added an isolated context-policy diagnostic with source-bound working notes, saved model turns and candidate investigation registration.
+- Added independent zero-API `agent-demo` and `agent-pipeline-demo` CLI demonstrations.
+
+### Changed
+
+- Separated research knowledge from user technology/method learning evidence. Explanations and self-reports do not upgrade mastery; revocation recomputes valid history.
+- Grounded followups in quoted paper claims, with separate hypotheses, missing evidence and general background. Only supported delivered paper methods are eligible for exposure recording.
+- Restricted remote project context to explicitly authorized repository/file excerpts, with model-disable gates and no project metadata export through this path.
+- Required reassessment when candidate reading or bound project evidence changes; mock assessments cannot become live proposal evidence.
+- Improved Chinese project queries by splitting technical identifiers only when the original lexical query has no matches. User-facing assessment/proposal prose is requested in Chinese while source quotes remain verbatim.
+
+### Fixed
+
+- Prevented older paper versions and failed newer reads from masquerading as current evidence.
+- Preserved delivered answers when exposure extraction fails, keeping audit metadata out of future conversation messages.
+- Attached bounded source provenance and rejected unmatched/stitched followup quotes, allowing whitespace-only PDF restoration.
+- Stopped experiments with mutated artifacts or invalid outputs from receiving conclusive success labels.
+
+### Validation and limits
+
+- 147 regression tests passed; 12 CLI acceptance commands included actual paired execution and result retrieval.
+- Real public discovery, bounded body reads, model assessment/proposal and context diagnostics were exercised. Negative results and rejected drafts are retained.
+- Diagnostics use known synthetic cases; they do not establish project gains, full paper replication or user mastery. Adoption remains separate.
+- Frontend redesign, permanent background notifications and automatic mastery grading remain future work. Secrets and local runtime artifacts are excluded from Git.
+
+### Documentation
+
+- Consolidated the PRD, architecture, runbook, experiment/reproduction boundaries and requirement-by-requirement acceptance audit.
+- Updated README with current backend capabilities, safe isolated demos and explicit separation from the historical hosted UI replay.
+
+## 历史开发记录 - 2026-08-24
 
 ### Added
 

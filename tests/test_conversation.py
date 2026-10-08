@@ -68,3 +68,43 @@ class ConversationTests(unittest.TestCase):
         self.agent = ConversationAgent(self.ws, LLMClient(self.cfg))
         followup = self.agent.turn(session, 'Compare these methods', user_id='alice', intent='followup')
         self.assertGreater(followup['evidence_reused'], 0)
+
+    def test_followup_exposure_failure_preserves_answer_and_audit(self):
+        import json
+        from unittest.mock import patch
+        from lodestar.llm import LLMError
+        session = self.agent.start('alice')
+        with patch.object(self.agent.llm, 'complete', return_value='A delivered explanation'), patch(
+                'lodestar.agent.exposure.record_exposure', side_effect=LLMError('timeout')):
+            result = self.agent.turn(session, 'Explain', user_id='alice', intent='followup')
+        self.assertEqual(result['answer'], 'A delivered explanation')
+        self.assertEqual(result['status'], 'answered')
+        self.assertEqual(result['learning_exposure_status'], 'error')
+        messages = self.agent.history(session, 'alice')
+        self.assertEqual(len(messages), 2)
+        self.assertEqual(json.loads(messages[-1]['metadata'])['learning_exposure_status'], 'error')
+        self.assertEqual(learning.profile(self.ws.conn, 'alice'), [])
+
+    def test_followup_records_only_source_and_answer_supported_methods(self):
+        import json
+        from unittest.mock import patch
+        session = self.agent.start('alice')
+        sources = [{'source_type': 'paper', 'url': 'https://arxiv.org/abs/2609.37725',
+                    'content': 'The method edits temporary context.'}]
+        with self.ws.conn:
+            self.ws.conn.execute('UPDATE agent_sessions SET evidence=? WHERE conversation_id=?',
+                (json.dumps(sources), session))
+        items = [{'technology': 'Context', 'method': 'temporary context editing',
+                  'paper_url': sources[0]['url'], 'paper_quote': 'edits temporary context',
+                  'explanation_quote': 'temporary context editing'},
+                 {'technology': 'Context', 'method': 'unsupported',
+                  'paper_url': sources[0]['url'], 'paper_quote': 'missing quote',
+                  'explanation_quote': 'temporary context editing'}]
+        with patch.object(self.agent.llm, 'complete', return_value='Explain temporary context editing.'), patch.object(
+                self.agent.llm, 'complete_json', return_value={'items': items}):
+            result = self.agent.turn(session, 'Explain', user_id='alice', intent='followup', technology='Agent context')
+        self.assertEqual(len(result['learning_exposure']), 1)
+        self.assertEqual(result['learning_exposure_status'], 'recorded')
+        self.assertEqual(learning.profile(self.ws.conn, 'alice')[0]['mastery'], 'unknown')
+        self.assertEqual(learning.profile(self.ws.conn, 'bob'), [])
+        self.assertEqual(len(self.agent.history(session, 'alice')), 2)

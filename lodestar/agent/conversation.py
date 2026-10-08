@@ -167,7 +167,23 @@ class ConversationAgent:
                 from lodestar.agent.scope import annotate_scope
                 answer = annotate_scope(answer)
                 result = {'status': 'answered', 'evidence_reused': len(sources), 'supplement_reads': supplements}
-        repo.add_message(self.ws.conn, conversation_id, 'assistant', answer,
+        assistant_message = repo.add_message(self.ws.conn, conversation_id, 'assistant', answer,
                          task_id=result.get('task_id') or session['task_id'], metadata={'intent': intent})
+        if intent == 'followup':
+            from lodestar.agent.exposure import record_exposure
+            from lodestar.llm import LLMError
+            try:
+                result['learning_exposure'] = record_exposure(self.ws, self.llm, session['task_id'],
+                    user_id, answer, sources, technology=technology, goal=message)
+                result['learning_exposure_status'] = 'recorded' if result['learning_exposure'] else 'no_supported_methods'
+            except (LLMError, ValueError, TypeError, AttributeError) as error:
+                result['learning_exposure_status'] = 'error'
+                result['learning_exposure_error'] = type(error).__name__
+                result['warning'] = '讲解已保留，方法接触记录更新未完成；未提升掌握程度。'
+            metadata = {'intent': intent, **{k: v for k, v in result.items()
+                if k.startswith('learning_exposure')}}
+            with self.ws.conn:
+                self.ws.conn.execute('UPDATE messages SET metadata=? WHERE id=?',
+                    (json.dumps(metadata, ensure_ascii=False), assistant_message['id']))
         return {'status': 'ok', **result, 'conversation_id': conversation_id, 'answer': answer, 'intent': intent,
                 'route_reason': decision.reason if automatic else 'explicit intent'}

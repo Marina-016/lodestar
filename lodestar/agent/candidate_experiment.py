@@ -49,3 +49,43 @@ def history(ws,project_id,recommendation_id):
     rows=ws.conn.execute('SELECT * FROM paper_candidate_experiments WHERE recommendation_id=? ORDER BY id DESC LIMIT 20',
                          (recommendation_id,)).fetchall()
     return [{**dict(row),'result':json.loads(row['result'])} for row in rows]
+
+
+def record_investigation(ws, project_id, recommendation_id, plan_id, directory):
+    """Register an existing audited diagnostic; does not execute or approve it."""
+    _recommendation(ws, project_id, recommendation_id)
+    row = ws.conn.execute('SELECT * FROM paper_candidate_plans WHERE id=? AND recommendation_id=?',
+                         (plan_id, recommendation_id)).fetchone()
+    if row is None:
+        raise ValueError('Plan does not belong to this candidate')
+    plan = json.loads(row['result'])
+    if row['status'] != 'draft' or not plan.get('contract_valid') or plan.get('action') != 'investigate':
+        raise ValueError('An investigation draft is required, not an implementation/no-change draft')
+    from lodestar.eval.context_audit import verify
+    directory = Path(directory).resolve()
+    protocol = json.loads((directory / 'protocol.json').read_text(encoding='utf-8'))
+    if protocol.get('paper') not in plan.get('paper_urls', []):
+        raise ValueError('Diagnostic paper must match the investigation draft evidence')
+    check = verify(directory)
+    if check['status'] != 'consistent':
+        raise ValueError('Investigation record failed consistency audit: ' + '; '.join(check['errors']))
+    raw = (directory / 'result.json').read_bytes()
+    result = {'report': json.loads(raw), 'audit': check,
+        'report_sha256': hashlib.sha256(raw).hexdigest(),
+        'lineage': {'project_id': project_id, 'recommendation_id': recommendation_id,
+            'plan_id': plan_id, 'assessment_id': row['assessment_id'], 'read_id': row['read_id'],
+            'plan_sha256': hashlib.sha256(row['result'].encode('utf-8')).hexdigest()},
+        'registration': 'after_execution', 'execution_provenance': 'imported_local_record',
+        'adoption_status': 'not_decided', 'mastery_effect': 'none', 'model_calls': 0}
+    with ws.conn:
+        cursor = ws.conn.execute('INSERT INTO paper_candidate_investigations(recommendation_id,plan_id,result_path,result,created_at) VALUES(?,?,?,?,?)',
+            (recommendation_id, plan_id, str(directory/'result.json'), json.dumps(result, ensure_ascii=False),
+             datetime.now(timezone.utc).isoformat(timespec='seconds')))
+    return {**result, 'investigation_id': cursor.lastrowid}
+
+
+def investigations(ws, project_id, recommendation_id):
+    _recommendation(ws, project_id, recommendation_id)
+    rows = ws.conn.execute('SELECT * FROM paper_candidate_investigations WHERE recommendation_id=? ORDER BY id DESC LIMIT 20',
+                           (recommendation_id,)).fetchall()
+    return [{**dict(row), 'result': json.loads(row['result'])} for row in rows]

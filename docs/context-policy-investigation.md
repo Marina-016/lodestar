@@ -48,3 +48,18 @@ workspace/context-policy-live-20261008：qwen3.8-flash，temperature=0，400 字
 首次真实分支运行 workspace/context-policy-bound-live-20261008 在第 8 次调用后 inconclusive（4341 Token）：第二轮遗漏顶层 bindings，上一版有效状态保留。统一提示中的 JSON 格式后，在新目录 workspace/context-policy-bound-schema-live-20261008 完成同一协议：追加式 1/2、来源绑定 2/2，均按原有答案/出处联合标签评分。上一轮失败和期望答案未改写。用量保存在 usage.json，逐轮资料与人工说明分别在 record.json、review.json。
 
 这两个案例专门对早期事实被末尾截断和后续纠正施压，并已用于诊断格式问题；不是独立保留的测试集，也不代表真实项目任务。不能据此选择生产策略、宣称论文成绩或总体收益。原型仍独立于正常 Agent，未更新用户学习事件。后续若评估生产使用，必须补独立案例、完整环境记录、来源语义审核和项目级质量验收。
+
+
+## 记录复核与项目候选登记
+
+`context-policy-check RESULT_DIRECTORY` 不调用模型或执行代码：核对协议/实现哈希、材料记录、逐轮固定输入、修订、最终输出与评分。consistent 仅表示本地记录一致，不认证执行身份或语义支持。早期缺少哈希的原型记录不能通过此入口，需要保留为历史材料，不能补写字段伪装成原始验收。
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -m lodestar context-policy-check workspace/context-policy-bound-schema-live-20261008
+.\.venv\Scripts\python.exe -X utf8 -m lodestar watch investigation --project-id PROJECT_ID --recommendation-id RECOMMENDATION_ID --plan-id PLAN_ID --result-directory RESULT_DIRECTORY
+.\.venv\Scripts\python.exe -X utf8 -m lodestar watch investigations --project-id PROJECT_ID --recommendation-id RECOMMENDATION_ID
+```
+
+登记要求契约有效且 action=investigate 的草案，协议声明的 paper 必须属于该草案的论文证据，不能借用其他候选/论文。随后复核本地记录，保存 result 快照及哈希、project/recommendation/read/assessment/plan ID 和方案哈希。它是执行后的结果登记，不是预注册，也不替代实施型实验。不会把 imported_local_record 标成经过认证的执行，不更新采用或掌握；原文件后续变化也不会重写已保存快照。
+
+已在 Context Language Models 候选的独立真实验收数据库完成 CLI 登记与历史读取，记录为 investigation #1。注册过程模型调用为零、mastery_effect=none；原始结果仍标注两案例的局限。成功与 inconclusive 原始记录均可复核；篡改评分、材料输入、实现或绑定其他论文会被拒绝。

@@ -49,7 +49,7 @@ This validates literal source links, not semantic support. Return no executable 
 """
 
 
-def _bound_context(response, sources):
+def bound_context(response, sources):
     notes, bindings = response.get('context'), response.get('bindings')
     if not isinstance(notes, str) or not isinstance(bindings, list) or len(bindings) > 4:
         raise ValueError('Bound context requires text and at most four source bindings')
@@ -142,7 +142,7 @@ def run_case(llm, case, mode, budget, directory):
             if not isinstance(citations, list) or any(not isinstance(x, str) or x not in known for x in citations):
                 raise ValueError('Unknown citation IDs')
             if mode == 'source_bound':
-                state.replace(_bound_context(response, seen_sources))
+                state.replace(bound_context(response, seen_sources))
             elif mode == 'model_edit':
                 state.replace(response.get('context'))
             else:

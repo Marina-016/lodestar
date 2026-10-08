@@ -48,3 +48,6 @@ flowchart TD
 
 
 2026-10-08：候选方案绑定 assessment/read 与项目证据快照，变更后要求重评。实验显式执行并保存两组实现和实际输出，草案与实验结果分开。当前完整范围与验收缺口见 [Agent PRD](agent-prd.md)，实验协议见 [成对实验](paired-experiments.md)。
+
+
+方案后的动作现在明确分支：propose_change 产生待审阅的实现草案与显式成对实验入口；investigate 产生调查问题，可登记已复核的诊断记录；no_change 保留有据理由，停止改动路径。调查记录位于 paper_candidate_investigations，带同项目/论文/评估/阅读/方案关联，研究结果不触发个人掌握或自动采用。

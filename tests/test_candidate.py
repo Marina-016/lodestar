@@ -209,3 +209,36 @@ class CandidateTests(unittest.TestCase):
             candidate_experiment.execute(self.ws,self.project,self.id,plan['plan_id'],'missing.json','missing.py','missing.py',out)
         self.assertFalse(out.exists())
         self.assertEqual(candidate_experiment.history(self.ws,self.project,self.id),[])
+
+    def test_investigation_registration_binds_history_without_execution_or_mastery(self):
+        from lodestar.agent import candidate_experiment
+        from lodestar.eval.context_policy import run
+        self._assessed_candidate()
+        client=self._plan_client()
+        client.complete_json.return_value.update(action='investigate',action_reason='Method transfer requires an isolated diagnostic.',changes=[])
+        plan=candidate.plan(self.ws,client,self.project,self.id,'memory')
+        root=Path(self.temp.name)/'diagnostic'
+        llm=Mock();llm.mode='test'
+        llm.complete_json.return_value={'context':'The code is BLUE.','answer':'BLUE','citations':['p1']}
+        run(llm,{'version':1,'dataset_kind':'functional_fixture','context_budget':200,'paper':'https://arxiv.org/abs/2601.00001',
+            'cases':[{'id':'one','question':'What code?','packets':[{'id':'p1','text':'The code is BLUE.'}],
+                'expected':{'answer':'BLUE','citations':['p1']}}]},root)
+        result=candidate_experiment.record_investigation(self.ws,self.project,self.id,plan['plan_id'],root)
+        self.assertEqual(result['lineage']['assessment_id'],plan['assessment_id'])
+        self.assertEqual(result['model_calls'],0)
+        self.assertEqual(result['mastery_effect'],'none')
+        self.assertEqual(candidate_experiment.investigations(self.ws,self.project,self.id)[0]['id'],result['investigation_id'])
+        self.assertEqual(self.ws.conn.execute('SELECT count(*) FROM learning_events').fetchone()[0],0)
+        with self.assertRaises(ValueError):
+            candidate_experiment.record_investigation(self.ws,self.project,self.id,999,root)
+        original=(root/'protocol.json').read_bytes()
+        bad=json.loads(original);bad['paper']='https://arxiv.org/abs/foreign'
+        (root/'protocol.json').write_text(json.dumps(bad),encoding='utf-8')
+        with self.assertRaisesRegex(ValueError,'paper must match'):
+            candidate_experiment.record_investigation(self.ws,self.project,self.id,plan['plan_id'],root)
+        (root/'protocol.json').write_bytes(original)
+        report=json.loads((root/'result.json').read_text());report['rates']['model_edit']=0
+        (root/'result.json').write_text(json.dumps(report),encoding='utf-8')
+        with self.assertRaisesRegex(ValueError,'consistency audit'):
+            candidate_experiment.record_investigation(self.ws,self.project,self.id,plan['plan_id'],root)
+        self.assertEqual(len(candidate_experiment.investigations(self.ws,self.project,self.id)),1)

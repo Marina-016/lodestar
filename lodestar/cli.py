@@ -49,6 +49,14 @@ def cmd_ab(args, cfg):
         raise SystemExit(1)
 
 
+def cmd_context_policy_check(args, cfg):
+    from lodestar.eval.context_audit import verify
+    result = verify(args.directory)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    if result['status'] != 'consistent':
+        raise SystemExit(1)
+
+
 def cmd_context_policy(args, cfg):
     from lodestar.eval.context_policy import run, validate_protocol
     protocol = json.loads(Path(args.protocol).read_text(encoding='utf-8'))
@@ -89,9 +97,13 @@ def cmd_watch(args, cfg):
     try:
         if args.action == 'add':
             result = watch.subscribe(ws, args.project_id, args.query, args.term, args.interval_hours)
-        elif args.action in {'experiment', 'experiments'}:
+        elif args.action in {'experiment', 'experiments', 'investigation', 'investigations'}:
             from lodestar.agent import candidate_experiment
-            if args.action == 'experiment':
+            if args.action == 'investigation':
+                result = candidate_experiment.record_investigation(ws, args.project_id, args.recommendation_id, args.plan_id, args.result_directory)
+            elif args.action == 'investigations':
+                result = candidate_experiment.investigations(ws, args.project_id, args.recommendation_id)
+            elif args.action == 'experiment':
                 result = candidate_experiment.execute(ws, args.project_id, args.recommendation_id,
                     args.plan_id, args.protocol, args.baseline, args.candidate, args.out, args.timeout)
             else:
@@ -693,6 +705,10 @@ def main(argv=None):
     pab.add_argument('--timeout', type=int, default=30)
     pab.set_defaults(fn=cmd_ab)
 
+    pcc = sub.add_parser('context-policy-check', help='Audit saved context-policy records without model calls')
+    pcc.add_argument('directory')
+    pcc.set_defaults(fn=cmd_context_policy_check)
+
     pcp = sub.add_parser('context-policy-experiment', help='Validate or explicitly run a bounded synthetic context-policy investigation')
     pcp.add_argument('--protocol', required=True)
     pcp.add_argument('--out', required=True)
@@ -721,10 +737,13 @@ def main(argv=None):
     ww.add_argument('--offline', action='store_true')
     wi = wsub.add_parser('inbox')
     wi.add_argument('--project-id', type=int, required=True)
-    for action in ('read', 'evidence', 'handoff', 'assess', 'plan', 'plans', 'experiment', 'experiments'):
+    for action in ('read', 'evidence', 'handoff', 'assess', 'plan', 'plans', 'experiment', 'experiments', 'investigation', 'investigations'):
         action_parser = wsub.add_parser(action)
         action_parser.add_argument('--project-id', type=int, required=True)
         action_parser.add_argument('--recommendation-id', type=int, required=True)
+        if action == 'investigation':
+            action_parser.add_argument('--plan-id', type=int, required=True)
+            action_parser.add_argument('--result-directory', required=True)
         if action == 'experiment':
             action_parser.add_argument('--plan-id', type=int, required=True)
             for field in ('protocol', 'baseline', 'candidate', 'out'):

@@ -339,7 +339,7 @@ def _archive_current_state(conn, cfg) -> dict:
 
 def _clear_application_state(conn) -> None:
     tables = [
-        "paper_candidate_experiments", "paper_candidate_plans", "paper_candidate_assessments", "paper_candidate_reads",
+        "paper_candidate_investigations", "paper_candidate_experiments", "paper_candidate_plans", "paper_candidate_assessments", "paper_candidate_reads",
         "paper_recommendations", "paper_watch_runs", "paper_watches", "agent_sessions", "learning_events",
         "messages", "knowledge_updates", "memory_reviews", "feedback", "trace_events",
         "sources", "eval_runs", "experiments", "research_tasks", "project_documents",

@@ -74,4 +74,7 @@ live 项目上下文须同时匹配 LODESTAR_PROJECT_MODEL_ALLOWED_REPOSITORY �
 
 新增 watch plan/plans/experiment/experiments。方案复用选定适用性评估的论文与项目证据快照，不因新 goal 静默换一组证据。正文重读或已绑定项目片段改变后返回 needs_reassessment。默认选择最近成功评估，失败尝试不覆盖成功记录；not_applicable 不继续生成方案，mock/test 评估不能直接进入 live 方案。所有草案保留 semantic_review required。
 
-成对实验保存方案血缘及实际输出，详见 [paired-experiments.md](paired-experiments.md)。112 项全量 unittest 通过，隔离 agent-pipeline-demo CLI 完成，模型调用与掌握事件均为零。真实发现/阅读已验证；新增评估与方案仍只有本地夹具验收，当前百炼控制台未登录，免费额度未重新确认，因此未调用模型。历史测试数量是当时阶段记录。
+成对实验保存方案血缘及实际输出，详见 [paired-experiments.md](paired-experiments.md)。112 项全量 unittest 通过，隔离 agent-pipeline-demo CLI 完成，模型调用与掌握事件均为零。真实发现/阅读已验证；新增评估与方案仍只有本地夹具验收，百炼当前已登录，免费额度和用完即停已重新确认；本地凭据已获准配置，真实 model-check 成功；语义评估尚未验收。历史测试数量是当时阶段记录。
+
+
+2026-10-08 证据版本修正：当前 URL 与阅读记录 URL 必须匹配，避免候选更新版本后静默复用旧版正文。旧尝试保留供审计，新版失败不能以旧版充当当前证据。无版本 URL 指向内容变化时仍需显式刷新；本次不宣称已检测这种变化。

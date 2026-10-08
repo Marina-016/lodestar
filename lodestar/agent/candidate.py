@@ -15,9 +15,11 @@ def _recommendation(ws, project_id, recommendation_id):
 
 
 def evidence(ws, project_id, recommendation_id):
-    _recommendation(ws, project_id, recommendation_id)
+    recommendation = _recommendation(ws, project_id, recommendation_id)
     row = ws.conn.execute("""SELECT * FROM paper_candidate_reads WHERE recommendation_id=?
-        AND status='read' ORDER BY CASE WHEN json_extract(evidence,'$.read_depth')='full' THEN 0 ELSE 1 END,id DESC LIMIT 1""", (recommendation_id,)).fetchone()
+        AND status='read' AND json_extract(evidence,'$.url')=?
+        ORDER BY CASE WHEN json_extract(evidence,'$.read_depth')='full' THEN 0 ELSE 1 END,id DESC LIMIT 1""",
+        (recommendation_id, recommendation['source']['url'])).fetchone()
     if row is None:
         return None
     return {**dict(row), 'evidence':json.loads(row['evidence'])}

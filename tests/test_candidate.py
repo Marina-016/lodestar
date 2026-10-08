@@ -178,3 +178,20 @@ class CandidateTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             candidate_experiment.execute(self.ws,self.project,self.id,999,protocol,baseline,other,root/'invalid')
         self.assertFalse((root/'invalid').exists())
+
+    def test_changed_paper_version_does_not_reuse_old_read(self):
+        old=candidate.read(self.ws,self.project,self.id,reader=self.reader)
+        row=self.ws.conn.execute('SELECT source FROM paper_recommendations WHERE id=?',(self.id,)).fetchone()
+        source=json.loads(row['source'])
+        source['url']='https://arxiv.org/abs/2601.00001v2'
+        self.ws.conn.execute('UPDATE paper_recommendations SET source=? WHERE id=?',(json.dumps(source),self.id))
+        self.ws.conn.commit()
+        self.assertIsNone(candidate.evidence(self.ws,self.project,self.id))
+        failed=candidate.read(self.ws,self.project,self.id,reader=Mock(return_value={'error':'timeout'}))
+        self.assertEqual(failed['status'],'error')
+        self.assertIsNone(candidate.evidence(self.ws,self.project,self.id))
+        new=candidate.read(self.ws,self.project,self.id,reader=self.reader)
+        self.assertFalse(new['cached'])
+        self.assertNotEqual(new['read_id'],old['read_id'])
+        self.assertEqual(self.reader.call_args.args[1],source['url'])
+        self.assertEqual(self.ws.conn.execute('SELECT count(*) FROM paper_candidate_reads').fetchone()[0],3)

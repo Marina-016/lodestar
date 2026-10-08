@@ -1,6 +1,6 @@
 > 项目订阅与主动论文发现 CLI 见 [使用说明](docs/proactive-paper-discovery.md)。
 
-> Agent 后端当前启动、隔离演示与验收状态见 [Agent MVP Runbook](docs/agent-mvp-runbook.md)。免费额度未验证时保持模型调用总开关关闭。
+> Agent 后端的统一逻辑见 [PRD](docs/agent-prd.md)，启动与隔离演示见 [Runbook](docs/agent-mvp-runbook.md)，实际证据与限制见 [验收台账](docs/agent-goal-audit-20261008.md)。免费额度未验证时保持模型调用总开关关闭。
 
 # Lodestar · Agent Research Lab
 

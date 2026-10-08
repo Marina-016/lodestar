@@ -504,10 +504,16 @@ def get_project_document(conn: sqlite3.Connection, document_id: int) -> Optional
 
 def search_project_documents(conn: sqlite3.Connection, query: str, project_id: int | None = None, limit: int = 8) -> list[dict]:
     import re
-    terms = re.findall(r"[\w.-]+", query or "", flags=re.UNICODE)
+    raw_terms = re.findall(r"[\w.-]+", query or "", flags=re.UNICODE)
+    # Code identifiers embedded in Chinese prose should match their lexical components.
+    # This is not translation, synonym expansion or semantic relevance.
+    identifiers = [term for term in raw_terms if re.fullmatch(r"[A-Za-z][A-Za-z0-9_.-]*", term)]
+    components = [part for term in identifiers for part in re.split(r"[_.-]+", term) if len(part) >= 3]
+    terms = list(dict.fromkeys(term.casefold() for term in raw_terms))[:8]
+    component_terms = list(dict.fromkeys(term.casefold() for term in components))[:8]
     if not terms:
         return []
-    match = " OR ".join('"' + term.replace('"', '""') + '"' for term in terms[:8])
+    match = " OR ".join('"' + term.replace('"', '""') + '"' for term in terms)
     sql = ("SELECT d.id,d.project_id,d.path,d.title,d.url,d.source,d.content FROM project_documents_fts f "
            "JOIN project_documents d ON d.id=f.rowid WHERE project_documents_fts MATCH ?")
     args: list = [match]
@@ -518,6 +524,9 @@ def search_project_documents(conn: sqlite3.Connection, query: str, project_id: i
     args.append(max(1, min(int(limit), 20)))
     try:
         rows = [dict(row) for row in conn.execute(sql, args).fetchall()]
+        if not rows and component_terms and component_terms != terms:
+            expanded = " OR ".join('"' + term.replace('"', '""') + '"' for term in component_terms)
+            rows = [dict(row) for row in conn.execute(sql, [expanded, *args[1:]]).fetchall()]
     except Exception:
         like_sql = "SELECT id,project_id,path,title,url,source,content FROM project_documents WHERE lower(content) LIKE ?"
         like_args: list = [f"%{terms[0].lower()}%"]

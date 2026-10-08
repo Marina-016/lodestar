@@ -86,3 +86,21 @@ class ApplicabilityTests(unittest.TestCase):
         self.assertEqual(result['status'],'needs_metadata_export_scope')
         self.assertEqual(result['mappings'],[])
         llm.complete_json.assert_not_called()
+
+    def test_technical_identifier_in_chinese_goal_matches_approved_context_only(self):
+        from lodestar.agent.project_evidence import collect
+        self.allow()
+        repo.replace_project_documents(self.ws.conn,self.project,[
+            {'path':'approved.py','content':'temporary context state with original source evidence'},
+            {'path':'private.py','content':'context PRIVATE_UNAPPROVED_CODE'}])
+        other = repo.upsert_project(self.ws.conn,'other project')
+        repo.replace_project_documents(self.ws.conn,other,[{'path':'approved.py','content':'context OTHER_PROJECT_SECRET'}])
+        result = collect(self.ws,'请评估 context-as-a-file 方法的临时上下文',self.sources,self.project,live=True)
+        self.assertEqual(result['status'],'ready')
+        self.assertEqual([doc['path'] for doc in result['documents']],['approved.py'])
+        self.assertNotIn('PRIVATE_UNAPPROVED_CODE',json.dumps(result))
+        self.assertNotIn('OTHER_PROJECT_SECRET',json.dumps(result))
+
+    def test_identifier_token_expansion_does_not_select_unmatched_project_documents(self):
+        matches = repo.search_project_documents(self.ws.conn,'请评估 novel-mechanism',project_id=self.project)
+        self.assertEqual(matches,[])

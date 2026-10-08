@@ -39,6 +39,37 @@ Citations must reference packet IDs whose facts support the answer. This is not 
 """
 
 
+BOUND_SYSTEM = """
+Additional rules for source_bound mode:
+Return context as a string of working notes, and bindings as [{"id":"original packet id","quote":"exact original substring >=12 characters"}].
+Preserve original IDs/quotes with facts across context edits; do not relabel an earlier fact with the latest packet ID.
+Citations for the answer must be among bindings. Keep canonical JSON of {notes:context,bindings:bindings} within context_budget.
+Remove obsolete facts after explicit corrections. Unknown answers may have empty bindings/citations.
+This validates literal source links, not semantic support. Return no executable code.
+"""
+
+
+def _bound_context(response, sources):
+    notes, bindings = response.get('context'), response.get('bindings')
+    if not isinstance(notes, str) or not isinstance(bindings, list) or len(bindings) > 4:
+        raise ValueError('Bound context requires text and at most four source bindings')
+    ids = set()
+    clean = []
+    for binding in bindings:
+        if not isinstance(binding, dict):
+            raise ValueError('Binding must be an object')
+        identity, quote = binding.get('id'), binding.get('quote')
+        if not isinstance(identity, str) or identity not in sources or identity in ids:
+            raise ValueError('Unknown or duplicate bound source')
+        if not isinstance(quote, str) or len(quote) < 12 or quote not in sources[identity]:
+            raise ValueError('Binding quote must be exact text from its original source')
+        ids.add(identity)
+        clean.append({'id': identity, 'quote': quote})
+    if any(citation not in ids for citation in response['citations']):
+        raise ValueError('Answer citations must name retained bindings')
+    return canonical({'notes': notes, 'bindings': clean})
+
+
 def validate_protocol(protocol):
     if not isinstance(protocol, dict) or protocol.get('version') != 1:
         raise ValueError('Protocol version must be 1')
@@ -46,6 +77,9 @@ def validate_protocol(protocol):
         raise ValueError('This prototype only accepts explicit synthetic fixtures')
     if type(protocol.get('context_budget')) != int or not 100 <= protocol['context_budget'] <= 2000:
         raise ValueError('Context budget must be 100-2000 characters')
+    modes = protocol.get('modes', ['append_only', 'model_edit'])
+    if not isinstance(modes, list) or len(modes) != 2 or any(mode not in {'append_only', 'model_edit', 'source_bound'} for mode in modes) or modes[0] == modes[1]:
+        raise ValueError('Choose two distinct supported context policies')
     cases = protocol.get('cases')
     if not isinstance(cases, list) or not 1 <= len(cases) <= 4:
         raise ValueError('Use 1-4 fixed cases')
@@ -75,7 +109,7 @@ def validate_protocol(protocol):
 
 
 def run_case(llm, case, mode, budget, directory):
-    if mode not in {'append_only', 'model_edit'}:
+    if mode not in {'append_only', 'model_edit', 'source_bound'}:
         raise ValueError('Unknown context policy')
     directory.mkdir(parents=True, exist_ok=False)
     ledger = canonical(case['packets'])
@@ -84,23 +118,32 @@ def run_case(llm, case, mode, budget, directory):
     events = []
     answer = None
     known = set()
+    seen_sources = {}
     (directory / 'context.txt').write_text('', encoding='utf-8')
     status = 'complete'
     for packet in case['packets']:
         known.add(packet['id'])
+        seen_sources[packet['id']] = packet['text']
         request = {'mode': mode, 'context_budget': budget, 'question': case['question'],
                    'context': state.text, 'packet': packet}
         event = {'input': request}
         events.append(event)
         try:
-            response = llm.complete_json('context_policy_experiment', SYSTEM, canonical(request), max_tokens=600)
+            system = SYSTEM
+            if mode == 'source_bound':
+                system = system.replace(
+                    '{"context":"replacement working notes", "answer":"exact answer or UNKNOWN", "citations":["packet id"]}',
+                    '{"context":"plain working notes, not serialized prior state", "answer":"exact answer or UNKNOWN", "citations":["packet id"], "bindings":[{"id":"packet id","quote":"exact original text"}]}') + BOUND_SYSTEM
+            response = llm.complete_json('context_policy_experiment', system, canonical(request), max_tokens=600)
             event['response'] = response
             if not isinstance(response, dict) or not isinstance(response.get('answer'), str):
                 raise ValueError('Answer must be a string')
             citations = response.get('citations')
             if not isinstance(citations, list) or any(not isinstance(x, str) or x not in known for x in citations):
                 raise ValueError('Unknown citation IDs')
-            if mode == 'model_edit':
+            if mode == 'source_bound':
+                state.replace(_bound_context(response, seen_sources))
+            elif mode == 'model_edit':
                 state.replace(response.get('context'))
             else:
                 state.replace((state.text + '\n' + packet['id'] + ': ' + packet['text'])[-budget:])
@@ -127,7 +170,7 @@ def run(llm, protocol, output):
     (output / 'protocol.json').write_text(frozen, encoding='utf-8')
     (output / 'implementation.py').write_bytes(Path(__file__).read_bytes())
     results = {}
-    for mode in ('append_only', 'model_edit'):
+    for mode in protocol.get('modes', ['append_only', 'model_edit']):
         rows = []
         for index, case in enumerate(protocol['cases']):
             record = run_case(llm, case, mode, protocol['context_budget'], output / mode / str(index))

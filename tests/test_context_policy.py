@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock
 
-from lodestar.eval.context_policy import TemporaryResearchContext, run, validate_protocol
+from lodestar.eval.context_policy import TemporaryResearchContext, run, run_case, validate_protocol
 
 
 class ContextPolicyTests(unittest.TestCase):
@@ -66,3 +66,27 @@ class ContextPolicyTests(unittest.TestCase):
         with self.assertRaises(ValueError): state.replace('x' * 101)
         self.assertEqual(state.text, 'valid state')
         self.assertEqual(len(state.revisions), 1)
+
+    def test_bound_policy_preserves_source_quote_and_rejects_relabelled_quote(self):
+        case = self.protocol['cases'][0]
+        llm = Mock(); llm.mode = 'test'
+        response = {'context': 'Code BLUE, from p1.', 'answer': 'BLUE', 'citations': ['p1'],
+                    'bindings': [{'id': 'p1', 'quote': case['packets'][0]['text']}]}
+        llm.complete_json.return_value = response
+        record = run_case(llm, case, 'source_bound', 200, self.root/'bound')
+        self.assertEqual(record['status'], 'complete')
+        self.assertEqual(json.loads(record['revisions'][-1]['text'])['bindings'], response['bindings'])
+        wrong = {**response, 'bindings': [{'id': 'p2', 'quote': case['packets'][0]['text']}], 'citations': ['p2']}
+        llm.complete_json.side_effect = [response, wrong]
+        record = run_case(llm, case, 'source_bound', 200, self.root/'wrong')
+        self.assertEqual(record['status'], 'error')
+        self.assertEqual(len(record['revisions']), 1)
+        self.assertEqual(record['events'][1]['error'], 'ValueError')
+
+    def test_bound_policy_rejects_citations_without_retained_sources(self):
+        llm = Mock(); llm.mode = 'test'
+        llm.complete_json.return_value = {'context': 'BLUE', 'answer': 'BLUE', 'citations': ['p1'], 'bindings': []}
+        record = run_case(llm, self.protocol['cases'][0], 'source_bound', 200, self.root/'unbound')
+        self.assertEqual(record['status'], 'error')
+        self.protocol['modes'] = ['append_only','append_only']
+        with self.assertRaises(ValueError): validate_protocol(self.protocol)

@@ -102,3 +102,16 @@ class PairedTests(unittest.TestCase):
         output=self.root/'failed'
         run(self.path,self.base,self.candidate,output)
         self.assertEqual(verify(output)['status'],'consistent')
+
+    def test_environment_tampering_is_rejected_by_saved_record_audit(self):
+        directory = self.root / 'receipt'
+        run(self.path, self.base, self.candidate, directory)
+        self.assertEqual(verify(directory)['status'], 'consistent')
+        (directory / 'environment.json').write_text('{}')
+        self.assertNotEqual(verify(directory)['status'], 'consistent')
+
+    def test_mutating_environment_receipt_during_execution_is_inconclusive(self):
+        self.candidate.write_text("import json,sys\nfrom pathlib import Path\nPath('../environment.json').write_text('{}')\ndata=json.load(sys.stdin)\nprint(json.dumps({'status':'complete','results':[{'case_id':c['id'],'output':c['input']*2} for c in data['cases']]}))", encoding='utf-8')
+        report = run(self.path, self.base, self.candidate, self.root / 'mutated-receipt')
+        self.assertEqual(report['verdict'], 'inconclusive')
+        self.assertEqual(report['artifact_integrity'], 'changed_during_run')

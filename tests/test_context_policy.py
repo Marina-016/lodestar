@@ -90,3 +90,13 @@ class ContextPolicyTests(unittest.TestCase):
         self.assertEqual(record['status'], 'error')
         self.protocol['modes'] = ['append_only','append_only']
         with self.assertRaises(ValueError): validate_protocol(self.protocol)
+
+    def test_environment_tampering_is_rejected_by_context_audit(self):
+        from lodestar.eval.context_audit import verify
+        llm = Mock(); llm.mode = 'test'
+        llm.complete_json.return_value = {'context': '', 'answer': 'UNKNOWN', 'citations': []}
+        directory = self.root / 'receipt'
+        run(llm, self.protocol, directory)
+        self.assertEqual(verify(directory)['status'], 'consistent')
+        (directory / 'requirements-frozen.txt').write_text('changed')
+        self.assertNotEqual(verify(directory)['status'], 'consistent')

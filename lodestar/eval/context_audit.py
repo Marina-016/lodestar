@@ -14,6 +14,9 @@ def verify(directory):
         protocol = json.loads(protocol_bytes)
         validate_protocol(protocol)
         report = json.loads((root / 'result.json').read_text(encoding='utf-8'))
+        if 'environment_hashes' in report:
+            from lodestar.eval.environment import verify as verify_environment
+            errors.extend(verify_environment(root, report['environment_hashes']))
         if report.get('protocol_sha256') != hashlib.sha256(protocol_bytes).hexdigest():
             errors.append('Protocol hash mismatch or legacy record lacks a hash')
         if report.get('implementation_sha256') != hashlib.sha256((root / 'implementation.py').read_bytes()).hexdigest():

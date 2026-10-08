@@ -38,3 +38,10 @@
 `python -m lodestar ab-check RESULT_DIRECTORY` 不执行脚本、不调用模型。它核对协议/输入/代码/评分器哈希，读取原始 stdout 重新评分，并核对差值、判定、lineage 和采用状态；失败返回非零退出码。consistent 只表示本地记录一致，不认证作者身份或标签来源。current_grader_differs 单独提示当前评分器版本与快照不同；复核使用当前 exact_output 规则，不执行归档评分器。
 
 重跑仍使用显式 `ab`：将保存目录内 protocol.json、baseline/arm.py、candidate/arm.py 作为输入，选择新的 --out 目录。执行前仍需检查脚本；不自动执行下载的实验。2026-10-08 在 workspace/agent-pipeline-rerun-20261008 重跑已有六样本实验，逐项输出和差值相同，记录复核 consistent；当前评分器源码因增加复核功能而与原记录不同。此复现只覆盖上述自包含脚本和本机 Python，不代表复杂外部依赖实验复现。
+
+
+## 运行环境与复现
+
+2026-10-08 起的新运行同时保存 environment.json、requirements-frozen.txt 和 environment_hashes，包含 Python/平台及已安装 Python 包的精确版本，排除环境变量、凭据、安装源 URL 和路径。版本清单不包含本地 Lodestar 的安装地址；复跑还需相同源码版本。ab-check / context-policy-check 对声明的环境记录校验哈希；缺失或篡改会使记录不一致。旧结果不补写当时未记录的环境，也不能当作完整环境冻结。
+
+requirements-frozen.txt 用于在相同 Python/平台的隔离环境重建包版本，并非带 wheel 哈希的供应链锁定；它不锁定 OS 依赖、包索引内容或远端模型权重。代码实验可以重新执行固定输入；模型调查的记录可以重新评分，但再次 API 调用是重新采样，不能保证相同输出。不要为了复现旧模型结果而自动耗用新额度。

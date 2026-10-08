@@ -94,6 +94,8 @@ def run(protocol_path,baseline_path,candidate_path,output,timeout=30):
             raise ValueError('Arm source exceeds budget')
     output=Path(output).resolve()
     output.mkdir(parents=True,exist_ok=False)
+    from lodestar.eval.environment import capture
+    environment_hashes = capture(output)
     (output/'protocol.json').write_bytes(protocol_bytes)
     (output/'grader.py').write_bytes(grader_bytes)
     payload={'seed':protocol.get('seed',0),'cases':[{'id':case['id'],'input':case['input']} for case in protocol['cases']]}
@@ -137,7 +139,7 @@ def run(protocol_path,baseline_path,candidate_path,output,timeout=30):
         if failure:
             measured['error']=failure
         results[name]=measured
-    report={'version':1,'started_at':started,'python':platform.python_version(),
+    report={'version':1,'started_at':started,'environment_hashes':environment_hashes,'python':platform.python_version(),
         'hashes':{'protocol':_hash(protocol_bytes),**{name:_hash(source) for name,source in arms.items()},
                   'grader':_hash(grader_bytes),'input':_hash(input_text.encode('utf-8'))},
         'hypothesis':protocol['hypothesis'],'dataset_kind':protocol['dataset_kind'],'grader':'exact_output',
@@ -159,7 +161,8 @@ def run(protocol_path,baseline_path,candidate_path,output,timeout=30):
                                and (output/'grader.py').read_bytes() == grader_bytes)
     except OSError:
         artifacts_unchanged = False
-    if not artifacts_unchanged:
+    from lodestar.eval.environment import verify as verify_environment
+    if not artifacts_unchanged or verify_environment(output, environment_hashes):
         report.update(verdict='inconclusive',artifact_integrity='changed_during_run')
     _write(output/'result.json',report)
     return report
@@ -171,6 +174,9 @@ def verify(directory):
     errors = []
     try:
         report = _load((directory / 'result.json').read_text(encoding='utf-8'))
+        if 'environment_hashes' in report:
+            from lodestar.eval.environment import verify as verify_environment
+            errors.extend(verify_environment(directory, report['environment_hashes']))
         protocol_bytes = (directory / 'protocol.json').read_bytes()
         protocol = _load(protocol_bytes.decode('utf-8'))
         validate_protocol(protocol)

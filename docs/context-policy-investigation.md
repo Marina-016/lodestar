@@ -24,7 +24,7 @@ try {
 }
 ```
 
-输出保存协议、实现快照、每组原始材料、逐轮模型请求/解析响应、上下文修订、最终结果及 usage.json。这是可检查的运行记录，不是带签名的来源证明；没有冻结所有包版本，也没有确定性模型复现保证。`ab-check` 对应普通 Python 成对运行器，不能用于本原型记录。原型暂未接入正常研究 Agent，不能把 model_edit 误当成生产模式。
+输出保存协议、实现快照、每组原始材料、逐轮模型请求/解析响应、上下文修订、最终结果及 usage.json。这是可检查的运行记录，不是带签名的来源证明；历史运行没有完整包版本记录，也没有确定性模型复现保证。`ab-check` 对应普通 Python 成对运行器，不能用于本原型记录。原型暂未接入正常研究 Agent，不能把 model_edit 误当成生产模式。
 
 ## 本次真实结果
 
@@ -63,3 +63,10 @@ workspace/context-policy-live-20261008：qwen3.8-flash，temperature=0，400 字
 登记要求契约有效且 action=investigate 的草案，协议声明的 paper 必须属于该草案的论文证据，不能借用其他候选/论文。随后复核本地记录，保存 result 快照及哈希、project/recommendation/read/assessment/plan ID 和方案哈希。它是执行后的结果登记，不是预注册，也不替代实施型实验。不会把 imported_local_record 标成经过认证的执行，不更新采用或掌握；原文件后续变化也不会重写已保存快照。
 
 已在 Context Language Models 候选的独立真实验收数据库完成 CLI 登记与历史读取，记录为 investigation #1。注册过程模型调用为零、mastery_effect=none；原始结果仍标注两案例的局限。成功与 inconclusive 原始记录均可复核；篡改评分、材料输入、实现或绑定其他论文会被拒绝。
+
+
+## 运行环境与复现
+
+2026-10-08 起的新运行同时保存 environment.json、requirements-frozen.txt 和 environment_hashes，包含 Python/平台及已安装 Python 包的精确版本，排除环境变量、凭据、安装源 URL 和路径。版本清单不包含本地 Lodestar 的安装地址；复跑还需相同源码版本。ab-check / context-policy-check 对声明的环境记录校验哈希；缺失或篡改会使记录不一致。旧结果不补写当时未记录的环境，也不能当作完整环境冻结。
+
+requirements-frozen.txt 用于在相同 Python/平台的隔离环境重建包版本，并非带 wheel 哈希的供应链锁定；它不锁定 OS 依赖、包索引内容或远端模型权重。代码实验可以重新执行固定输入；模型调查的记录可以重新评分，但再次 API 调用是重新采样，不能保证相同输出。不要为了复现旧模型结果而自动耗用新额度。

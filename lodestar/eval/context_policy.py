@@ -166,6 +166,8 @@ def run(llm, protocol, output):
     validate_protocol(protocol)
     output = Path(output).resolve()
     output.mkdir(parents=True, exist_ok=False)
+    from lodestar.eval.environment import capture
+    environment_hashes = capture(output)
     frozen = canonical(protocol)
     (output / 'protocol.json').write_text(frozen, encoding='utf-8')
     (output / 'implementation.py').write_bytes(Path(__file__).read_bytes())
@@ -187,7 +189,7 @@ def run(llm, protocol, output):
     else:
         report = {'verdict': 'measured', 'arms': results,
                   'rates': {name: sum(row['correct'] for row in rows) / len(rows) for name, rows in results.items()}}
-    report.update(dataset_kind='functional_fixture', context_budget=protocol['context_budget'],
+    report.update(environment_hashes=environment_hashes, dataset_kind='functional_fixture', context_budget=protocol['context_budget'],
                   protocol_sha256=hashlib.sha256(frozen.encode('utf-8')).hexdigest(),
                   implementation_sha256=hashlib.sha256((output / 'implementation.py').read_bytes()).hexdigest(),
                   output_token_budget=600,

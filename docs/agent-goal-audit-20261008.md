@@ -1,0 +1,20 @@
+# 后端长期目标验收台账
+
+2026-10-08，进行中。本表以实际命令/产物和当前代码为依据，不以测试数或模型输出单独证明整条产品链路。历史验收见 agent-mvp-acceptance.md，当前逻辑见 agent-prd.md。
+
+| 目标要求 | 本次核对的证据 | 结论 |
+|---|---|---|
+| 项目订阅、发现、去重 | watch-validation-20261008/run.json、inbox.json；真实两渠道 13 候选；版本与租约回归 | 功能已验证；本地词法相关性，不是语义推荐结论 |
+| 正文深读、来源范围、会话交接 | candidate-read/handoff；12000 字符、8 跨度；当前 URL/阅读版本绑定 | 已验证有界阅读，不是完整论文阅读 |
+| 项目证据适用性与结构方案 | candidate-live-review-20261008.md；真实 no_change / investigate；早期失败保留 | 有局部人工验收，不证明模型泛化可靠或方法适用 |
+| 实际实现 A/B 与输出评分 | final-pipeline-environment-20261008/ab；六个字段样本，零模型调用 | 实际代码执行和记录复核；不是论文方法的项目收益 |
+| 真实论文方法诊断 | context-policy-bound-schema-live-20261008；原始协议/材料/修订/输出/usage | 两个已知合成案例，真实模型比较；未证明独立任务收益 |
+| 诊断与候选/计划关联 | candidate-context-validation-20261008/registered-investigation.json | investigation #1，完整 ID 和结果快照；执行后登记、非预注册 |
+| 本地结果可复核 | context-policy-check 对上述真实诊断返回 consistent；ab-check 对新演示返回 consistent | 记录一致；非执行身份认证或语义支持证明 |
+| 环境版本与复现边界 | 新实验 environment.json、requirements-frozen.txt、hashes；篡改测试 | 精确安装包版本，非带 wheel 哈希的锁定；旧运行无当时环境，不补造 |
+| 分离研究和学习记忆 | 追问引用/提取失败/用户隔离回归；独立演示 mastery=unknown | 规则通过；新增追问真实方法接触仍待验收 |
+| CLI、隔离演示 | final-agent-audit-20261008、final-pipeline-environment-20261008 的实际 manifest | 两入口重新执行、独立库、零模型调用，明确 offline_fixture |
+| 费用与外发范围 | 默认调用关闭，精确三个文件门禁；.env 忽略且未跟踪 | 当前本地防护成立；云额度需按实际运行重新确认，不是本地计费保证 |
+| PRD 与架构一致 | agent-prd.md 重整阶段、动作、两种记忆和边界；架构加入追问接触 | 已清理过时追加结论；运行手册和最终综合台账继续核对 |
+
+未达到完成条件：新增追问接触尚无真实模型产物，综合交付仍需最后核对。没有用“方法收益已证明”作为虚假的完成证据；负面结果与无需改动是合法结果。长期目标保持 active。前端、自动采用、永久服务、自动掌握判卷仍为单独后续工作。

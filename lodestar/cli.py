@@ -49,6 +49,29 @@ def cmd_ab(args, cfg):
         raise SystemExit(1)
 
 
+def cmd_context_policy(args, cfg):
+    from lodestar.eval.context_policy import run, validate_protocol
+    protocol = json.loads(Path(args.protocol).read_text(encoding='utf-8'))
+    validate_protocol(protocol)
+    if not args.run_live:
+        print(json.dumps({'status': 'validated_only', 'model_calls': 0,
+            'planned_max_calls': 2 * sum(len(case['packets']) for case in protocol['cases']),
+            'warning': 'No experiment executed; synthetic fixtures only.'}, indent=2))
+        return
+    if not args.free_quota_confirmed or cfg.model_calls_disabled or cfg.llm_provider != 'dashscope' or cfg.llm_mode != 'live':
+        raise ValueError('Live experiment requires enabled DashScope and explicit current free-quota/stop-on-exhaustion confirmation')
+    output = Path(args.out)
+    if output.exists():
+        raise FileExistsError('A new output directory is required')
+    cfg.temperature = 0
+    client = LLMClient(cfg)
+    result = run(client, protocol, output)
+    (output / 'usage.json').write_text(json.dumps(client._dashscope.usage, indent=2), encoding='utf-8')
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    if result['verdict'] == 'inconclusive':
+        raise SystemExit(1)
+
+
 def cmd_ab_check(args, cfg):
     from lodestar.eval.paired import verify
     result = verify(args.directory)
@@ -669,6 +692,13 @@ def main(argv=None):
     pab.add_argument('--out', required=True, help='New immutable result directory')
     pab.add_argument('--timeout', type=int, default=30)
     pab.set_defaults(fn=cmd_ab)
+
+    pcp = sub.add_parser('context-policy-experiment', help='Validate or explicitly run a bounded synthetic context-policy investigation')
+    pcp.add_argument('--protocol', required=True)
+    pcp.add_argument('--out', required=True)
+    pcp.add_argument('--run-live', action='store_true')
+    pcp.add_argument('--free-quota-confirmed', action='store_true', help='Attest current selected model quota and server free-only protection are verified')
+    pcp.set_defaults(fn=cmd_context_policy)
 
     pac = sub.add_parser('ab-check', help='Recompute saved A/B scores without executing code')
     pac.add_argument('directory')

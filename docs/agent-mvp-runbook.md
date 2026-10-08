@@ -1,6 +1,6 @@
 # Agent 后端 MVP 启动与验收
 
-2026-10-04：后端研究、连续追问、方法接触记忆和可追踪项目方案的核心路径已有真实模型记录，隔离演示可运行。前端未改。逐项证据、验证局限见 [验收报告](agent-mvp-acceptance.md)，实际阶段和工具见 [系统架构](agent-architecture.md)。
+2026-10-08：后端研究、追问、技术/方法接触、项目订阅、候选评估与三类草案已有实现和运行记录。前端暂缓。当前逻辑见 [PRD](agent-prd.md)，逐项验收见 [目标台账](agent-goal-audit-20261008.md)，10-04 历史结果见 [验收报告](agent-mvp-acceptance.md)。
 
 ## 安装与不产生模型费用的演示
 
@@ -75,9 +75,24 @@ try {
 
 本机远端验收只发送用户授权的 learning.py、retrieval.py、agent/project_plan.py 三个有界片段，不能据此自动发送整个仓库。登记、索引、方案命令见 [对话使用说明](chat-usage.md)。方案原文引用和结构校验不等于语义正确，必须审阅 draft 后再决定是否实施。
 
-本期未执行论文方法的真实 A/B，自动掌握判卷与新 UI 未实现。主动订阅轮询与方案关联的固定样本 A/B 已实现，边界见当前 PRD。这些属于后续阶段。当前自然语言路由为保守规则，技术别名归一和语义召回仍需完善。
+已实际运行字段传递的六样本成对代码实验及论文上下文方法的受限真实模型诊断；后者仅两个已知合成案例，不能代表项目收益。propose_change / investigate / no_change 分支、结果关联和新运行的环境版本记录已实现。自动掌握判卷、新 UI、技术别名归一和语义召回仍需后续完善。
 
-2026-10-08：主动论文发现已增加订阅、候选收件箱及可运行轮询进程，使用说明见 [主动论文发现](proactive-paper-discovery.md)。其语义评估、自动方案和永久后台运行尚未启用。
+2026-10-08：主动论文发现已增加订阅、候选收件箱及可运行轮询进程，使用说明见 [主动论文发现](proactive-paper-discovery.md)。候选语义评估和结构草案有显式命令；未自动逐篇生成方案，未安装永久后台服务。
 
 
 当前范围以 [Agent PRD](agent-prd.md) 为准。候选到方案及 A/B 的零 API 演示使用 `python -m lodestar agent-pipeline-demo --out workspace/new-pipeline-demo`；输出目录必须不存在。实验协议见 [成对实验](paired-experiments.md)。
+
+
+## 当前链路与复核入口
+
+无需 API 的两个演示（每次使用不存在的输出目录）：
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -m lodestar agent-demo --out workspace/new-agent-demo
+.\.venv\Scripts\python.exe -X utf8 -m lodestar agent-pipeline-demo --out workspace/new-pipeline-demo
+.\.venv\Scripts\python.exe -X utf8 -m lodestar ab-check workspace/new-pipeline-demo/ab
+```
+
+项目订阅和候选的实际命令顺序是 watch add → tick/worker → inbox → read → evidence/handoff → assess → plan。模型门禁和三文件授权仍适用。propose_change 审阅两组实现后显式 watch experiment；investigate 使用独立协议运行诊断，再 context-policy-check 和 watch investigation；no_change 保留理由。详细参数见 proactive-paper-discovery.md、paired-experiments.md、context-policy-investigation.md。
+
+追问现在也提取 supported explained 方法接触，提取失败保留回答及审计元数据，不提升掌握。程序附上实际提供的论文链接及有界范围，来源清单不代表逐句核验。真实验证已确认双重引用和 unknown 掌握；回答对来源保存机制仍有未支持推断，需继续改进，不能称通用讲解质量已验收。

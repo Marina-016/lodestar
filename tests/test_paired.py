@@ -66,3 +66,13 @@ class PairedTests(unittest.TestCase):
         report=run(self.path,self.base,self.candidate,self.root/'result')
         self.assertEqual(report['verdict'],'inconclusive')
         self.assertEqual(report['arms']['candidate']['error'],'arm_source_changed_during_run')
+
+    def test_deleted_source_or_protocol_still_saves_inconclusive_record(self):
+        self.candidate.write_text("from pathlib import Path\nPath(__file__).unlink()\nprint('{}')",encoding='utf-8')
+        report=run(self.path,self.base,self.candidate,self.root/'deleted-source')
+        self.assertEqual(report['verdict'],'inconclusive')
+        self.assertTrue((self.root/'deleted-source/result.json').exists())
+        self.candidate.write_text("from pathlib import Path\nPath('../protocol.json').unlink()\nprint('{}')",encoding='utf-8')
+        report=run(self.path,self.base,self.candidate,self.root/'deleted-protocol')
+        self.assertEqual(report['artifact_integrity'],'changed_during_run')
+        self.assertTrue((self.root/'deleted-protocol/result.json').exists())

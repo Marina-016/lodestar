@@ -75,6 +75,9 @@ try {
 
 本机远端验收只发送用户授权的 learning.py、retrieval.py、agent/project_plan.py 三个有界片段，不能据此自动发送整个仓库。登记、索引、方案命令见 [对话使用说明](chat-usage.md)。方案原文引用和结构校验不等于语义正确，必须审阅 draft 后再决定是否实施。
 
-本期未执行论文方法的真实 A/B、未实现主动定期检索、自动掌握判卷或新 UI。这些属于后续阶段。当前自然语言路由为保守规则，技术别名归一和语义召回仍需完善。
+本期未执行论文方法的真实 A/B，自动掌握判卷与新 UI 未实现。主动订阅轮询与方案关联的固定样本 A/B 已实现，边界见当前 PRD。这些属于后续阶段。当前自然语言路由为保守规则，技术别名归一和语义召回仍需完善。
 
 2026-10-08：主动论文发现已增加订阅、候选收件箱及可运行轮询进程，使用说明见 [主动论文发现](proactive-paper-discovery.md)。其语义评估、自动方案和永久后台运行尚未启用。
+
+
+当前范围以 [Agent PRD](agent-prd.md) 为准。候选到方案及 A/B 的零 API 演示使用 `python -m lodestar agent-pipeline-demo --out workspace/new-pipeline-demo`；输出目录必须不存在。实验协议见 [成对实验](paired-experiments.md)。

@@ -6,7 +6,7 @@
 
 协议为 JSON，包含 version=1、hypothesis、dataset_kind、grader="exact_output"、seed 和 cases。每个 case 有唯一 id、input、expected；最多 200 条。dataset_kind 说明样本来源，但运行器不认证标签来源。min_delta 可省略；省略时只报告 measured，不判赢家。
 
-两组实现均为经过检查的 Python 文件：从标准输入读取同一 JSON（seed、cases 的 id/input），向标准输出写入 JSON outputs，每项包含 id 和 output。标签不写入标准输入；协议仍保存在本地，因此这里不宣称盲测。独立评分器比较输出与协议标签，布尔值与数字分开比较；缺项、重复、异常、超时及执行中脚本修改均使结果 inconclusive。
+两组实现均为经过检查的 Python 文件：从标准输入读取同一 JSON（seed、cases 的 id/input），向标准输出写入 JSON 对象，status="complete"、results 为数组，每项包含 case_id 和 output。标签不写入标准输入；协议仍保存在本地，因此这里不宣称盲测。独立评分器比较输出与协议标签，布尔值与数字分开比较；缺项、重复、异常、超时及执行中脚本修改均使结果 inconclusive。
 
 输出目录必须新建，保存协议、输入、两组脚本、评分器、哈希、Python 版本、标准输出/错误和 result.json。结果包含逐项改善/退步与准确率差值。显式 min_delta 达标且没有退步才报告 pass；pass 也不等于项目适用性、整体收益或允许采用。
 

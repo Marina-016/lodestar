@@ -119,7 +119,11 @@ def run(protocol_path,baseline_path,candidate_path,output,timeout=30):
             except subprocess.TimeoutExpired:
                 returncode=None;failure='timeout'
         measured={'status':'error','returncode':returncode,'duration_s':round(monotonic()-begin,4)}
-        if script.read_bytes()!=source:
+        try:
+            source_unchanged = script.read_bytes() == source
+        except OSError:
+            source_unchanged = False
+        if not source_unchanged:
             failure='arm_source_changed_during_run'
         raw=directory/'stdout.txt'
         if raw.stat().st_size>2_000_000:
@@ -150,7 +154,12 @@ def run(protocol_path,baseline_path,candidate_path,output,timeout=30):
         report['regressed_cases']=[b['case_id'] for b,c in zip(base['rows'],cand['rows']) if b['correct'] and not c['correct']]
         threshold=protocol.get('min_delta')
         report['verdict']='measured' if threshold is None else ('pass' if report['delta']>=threshold and not report['regressed_cases'] else 'fail')
-    if (output/'protocol.json').read_bytes()!=protocol_bytes or (output/'grader.py').read_bytes()!=grader_bytes:
+    try:
+        artifacts_unchanged = ((output/'protocol.json').read_bytes() == protocol_bytes
+                               and (output/'grader.py').read_bytes() == grader_bytes)
+    except OSError:
+        artifacts_unchanged = False
+    if not artifacts_unchanged:
         report.update(verdict='inconclusive',artifact_integrity='changed_during_run')
     _write(output/'result.json',report)
     return report

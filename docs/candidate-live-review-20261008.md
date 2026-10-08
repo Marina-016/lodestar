@@ -9,3 +9,12 @@
 保留 workspace/candidate-live-validation-20261008 与 workspace/candidate-live-body-validation-20261008 的 read/assessment/plan/usage/manifest/review。正文读取和两阶段 live 调用链路成立；技术建议质量本轮未通过，不计为真实方案完成或方法收益。
 
 针对该失败，补充评估与方案提示约束：片段之外只能标未知；不能把 uncertain 变成已证实需求；来源不能从文本关键词或通用函数中的硬编码标签推断；不得否认已给出的现有隔离/门禁。提示修改不是语义正确性的自动证明，下一轮仍需人工审核。暂不执行任何被拒绝草案的 A/B。
+
+
+## 后续复核：允许调查与无需改动
+
+仅加提示约束的下一轮仍提出未经证明的元数据检查，记录在 workspace/candidate-live-revised-validation-20261008，人工审核拒绝。根因之一是原方案契约要求 1–3 项改动，即使找不到适用方法仍需填改动。
+
+方案现有三种 action：propose_change、investigate、no_change。后两者要求明确理由和 changes=[]，保持引用与缺口校验；不允许启动绑定方案的实现 A/B。旧草案缺少 action 时按 propose_change 兼容。诊断协议可以保留，但不代表执行或采用。
+
+workspace/candidate-live-action-validation-20261008 完成真实 12000 字符正文、uncertain 评估和 no_change 草案。人工审核认为本例无需改动的结论可接受：现有 learning.py 已限制 actor 与掌握事件，论文尚未提供具体可转移方法。不是把高层记忆概念强行改造成来源标签。保留真实输入/引用/用量/manifest/review；不声称一次运行证明整体语义可靠性，没有实验收益或掌握变化。

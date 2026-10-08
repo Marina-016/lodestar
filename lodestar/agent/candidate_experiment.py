@@ -18,6 +18,8 @@ def execute(ws, project_id, recommendation_id, plan_id, protocol, baseline, cand
     plan=json.loads(row['result'])
     if row['status']!='draft' or not plan.get('contract_valid'):
         raise ValueError('A contract-valid draft is required; this does not approve its semantics')
+    if plan.get('action', 'propose_change') != 'propose_change':
+        raise ValueError('Investigation/no-change drafts do not authorize a candidate implementation experiment')
     spec=json.loads(Path(protocol).read_text(encoding='utf-8'))
     if not isinstance(spec,dict):
         raise ValueError('Protocol must be an object')

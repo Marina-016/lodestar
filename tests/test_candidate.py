@@ -195,3 +195,17 @@ class CandidateTests(unittest.TestCase):
         self.assertNotEqual(new['read_id'],old['read_id'])
         self.assertEqual(self.reader.call_args.args[1],source['url'])
         self.assertEqual(self.ws.conn.execute('SELECT count(*) FROM paper_candidate_reads').fetchone()[0],3)
+
+    def test_no_change_plan_cannot_start_implementation_experiment(self):
+        from lodestar.agent import candidate_experiment
+        self._assessed_candidate()
+        plan=candidate.plan(self.ws,self._plan_client(),self.project,self.id,'memory')
+        row=self.ws.conn.execute('SELECT result FROM paper_candidate_plans WHERE id=?',(plan['plan_id'],)).fetchone()
+        data=json.loads(row['result']);data['action']='no_change'
+        self.ws.conn.execute('UPDATE paper_candidate_plans SET result=? WHERE id=?',(json.dumps(data),plan['plan_id']))
+        self.ws.conn.commit()
+        out=Path(self.temp.name)/'must-not-run'
+        with self.assertRaisesRegex(ValueError,'Investigation/no-change'):
+            candidate_experiment.execute(self.ws,self.project,self.id,plan['plan_id'],'missing.json','missing.py','missing.py',out)
+        self.assertFalse(out.exists())
+        self.assertEqual(candidate_experiment.history(self.ws,self.project,self.id),[])

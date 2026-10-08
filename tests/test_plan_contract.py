@@ -32,3 +32,16 @@ class PlanContractTests(unittest.TestCase):
         self.proposal['method']['paper_refs'][0]['quote'] = 'Exact method evidence from the invented body.'
         canonicalize_quotes(self.proposal, self.docs, [paper])
         self.assertTrue(validate(self.proposal, self.docs, [paper]))
+
+    def test_non_change_actions_need_reason_and_cannot_smuggle_changes(self):
+        for action in ('investigate','no_change'):
+            p=deepcopy(self.proposal);p.update(action=action,action_reason='No observed defect; method transfer remains unknown.',changes=[])
+            self.assertEqual(validate(p,self.docs,self.papers),[])
+            p['changes']=deepcopy(self.proposal['changes'])
+            self.assertTrue(validate(p,self.docs,self.papers))
+            p['changes']=[];p['action_reason']=''
+            self.assertTrue(validate(p,self.docs,self.papers))
+        p=deepcopy(self.proposal);p['changes']=[]
+        self.assertTrue(validate(p,self.docs,self.papers))
+        p['action']='unknown'
+        self.assertTrue(validate(p,self.docs,self.papers))

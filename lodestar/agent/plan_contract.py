@@ -66,8 +66,17 @@ def validate(proposal, documents, papers):
     refs(proposal['problem'], 'project_refs', doc_by_path, 'path')
     refs(proposal['method'], 'paper_refs', paper_by_url, 'url')
     changes = proposal['changes']
-    if not 1 <= len(changes) <= 3:
-        errors.append('changes must contain 1-3 bounded changes')
+    action = proposal.get('action', 'propose_change')
+    if action not in {'propose_change', 'investigate', 'no_change'}:
+        errors.append('Unknown proposal action')
+    elif action == 'propose_change':
+        if not 1 <= len(changes) <= 3:
+            errors.append('changes must contain 1-3 bounded changes')
+    else:
+        if changes:
+            errors.append('investigate/no_change must not include implementation changes')
+        if not isinstance(proposal.get('action_reason'), str) or not proposal['action_reason'].strip():
+            errors.append('investigate/no_change requires an explicit reason')
     for change in changes:
         if not isinstance(change, dict) or change.get('path') not in doc_by_path or not isinstance(change.get('description'), str) or not change.get('description', '').strip():
             errors.append('change must name a supplied path and describe an intervention')
@@ -93,6 +102,10 @@ def render(proposal):
     lines.extend(['\n### 论文方法与项目假设', proposal['method']['description']])
     for ref in proposal['method']['paper_refs']:
         lines.append('- 论文依据：' + ref['url'])
+    action = proposal.get('action', 'propose_change')
+    lines.append('\n### 建议动作：' + {'propose_change': '提出改动', 'investigate': '先调查', 'no_change': '无需改动'}[action])
+    if action != 'propose_change':
+        lines.append(proposal['action_reason'])
     lines.append('\n### 候选改动')
     lines.extend('- `' + c['path'] + '`：' + c['description'] for c in proposal['changes'])
     e=proposal['experiment']

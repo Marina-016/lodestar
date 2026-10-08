@@ -41,6 +41,42 @@ def cmd_research(args, cfg):
     ws.close()
 
 
+def cmd_watch(args, cfg):
+    from lodestar.agent import watch
+    from lodestar.memory import watch as store
+    if args.action == 'worker' and args.cycles < 0:
+        raise ValueError('cycles must be nonnegative')
+    ws = Workspace(cfg)
+    try:
+        if args.action == 'add':
+            result = watch.subscribe(ws, args.project_id, args.query, args.term, args.interval_hours)
+        elif args.action == 'worker':
+            import time
+            cycle = 0
+            try:
+                while args.cycles == 0 or cycle < args.cycles:
+                    print(json.dumps(watch.tick(ws, limit=args.limit), ensure_ascii=False), flush=True)
+                    cycle += 1
+                    if args.cycles == 0 or cycle < args.cycles:
+                        time.sleep(args.poll_seconds)
+            except KeyboardInterrupt:
+                pass
+            return
+        elif args.action == 'tick':
+            result = watch.tick(ws, limit=args.limit)
+        elif args.action == 'inbox':
+            if not repo.get_project(ws.conn, args.project_id):
+                raise ValueError('Unknown project')
+            result = store.inbox(ws.conn, args.project_id)
+        else:
+            changed = ws.conn.execute('UPDATE paper_watches SET enabled=0 WHERE id=?', (args.watch_id,)).rowcount
+            ws.conn.commit()
+            result = {'disabled': bool(changed)}
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    finally:
+        ws.close()
+
+
 def cmd_model_check(args, cfg):
     from lodestar.eval.quality import model_check
     result = model_check(cfg)
@@ -583,6 +619,27 @@ def main(argv=None):
     erun.add_argument("exp_id", type=int)
     erun.add_argument("--timeout", type=int, default=30)
     pe.set_defaults(fn=cmd_experiment)
+
+    pw = sub.add_parser('watch', help='Model-free scheduled public paper discovery')
+    wsub = pw.add_subparsers(dest='action', required=True)
+    wa = wsub.add_parser('add')
+    wa.add_argument('--project-id', type=int, required=True)
+    wa.add_argument('--query', required=True, help='Public query sent to paper providers')
+    wa.add_argument('--term', action='append', required=True, help='Local lexical matching term; repeatable')
+    wa.add_argument('--interval-hours', type=int, default=24)
+    wt = wsub.add_parser('tick')
+    wt.add_argument('--limit', type=int, default=10)
+    wt.add_argument('--offline', action='store_true')
+    ww = wsub.add_parser('worker', help='Poll due watches until stopped; foreground process')
+    ww.add_argument('--limit', type=int, default=10)
+    ww.add_argument('--poll-seconds', type=int, choices=range(10,3601), default=60, metavar='10..3600')
+    ww.add_argument('--cycles', type=int, default=0, help='0 means run until stopped')
+    ww.add_argument('--offline', action='store_true')
+    wi = wsub.add_parser('inbox')
+    wi.add_argument('--project-id', type=int, required=True)
+    wd = wsub.add_parser('disable')
+    wd.add_argument('--watch-id', type=int, required=True)
+    pw.set_defaults(fn=cmd_watch)
 
     pad = sub.add_parser("agent-demo", help="Isolated backend demo; no network or model calls")
     pad.add_argument("--out", required=True, help="New isolated output directory")

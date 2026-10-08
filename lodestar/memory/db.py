@@ -250,6 +250,8 @@ def open_db(db_path: Path) -> sqlite3.Connection:
     conn.executescript(LEARNING_SCHEMA)
     from lodestar.memory.sessions import SCHEMA as SESSION_SCHEMA
     conn.executescript(SESSION_SCHEMA)
+    from lodestar.memory.watch import SCHEMA as WATCH_SCHEMA
+    conn.executescript(WATCH_SCHEMA)
     _migrate(conn)
     conn.commit()
     return conn

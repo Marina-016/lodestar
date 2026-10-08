@@ -1,0 +1,43 @@
+# 项目关联的主动论文发现
+
+实现日期：2026-10-08。本阶段将主动检索、项目订阅、候选收件箱与后续论文讲解分开。只有显式配置的公开 query 发往 arXiv/HF，不从仓库代码或项目描述自动提取外发内容。匹配 term 在本地使用；整个 watch 链路不创建 LLM 客户端。
+
+## 阶段与边界
+
+1. 对已登记项目添加订阅，指定公开查询、匹配词和间隔。只有 active 项目会被轮询。
+2. tick 取到期订阅，并用数据库租约避免多个 worker 同时处理。租约过期可恢复，订阅和下一次运行时间跨进程保存。
+3. 检索最近 arXiv 论文与 HF 平台热门，各最多 20 条；recent 时间窗口按间隔留一天重叠、最多 30 天。HF 热门不是全网最热，旧论文也可能热门。
+4. 本地在标题/摘要片段匹配技术词或短语，保留字段、命中词及原文片段。这只是可解释的候选筛选，不是模型判断的项目适用性。
+5. 同项目以 arXiv 基础 ID 去重，合并发现渠道，更新 last_seen，重复运行不重复增加候选。离线夹具有独立身份前缀及 discovery_mode，不覆盖真实来源。
+6. 保存运行状态和来源覆盖，成功后按间隔继续；单渠道失败标 partial，两者失败标 error，最迟一小时后可重试。不把失败伪装成无新论文。
+7. 候选不自动深读、生成方案、改代码或写入用户掌握记忆。用户选定论文后使用现有对话研究及项目方案路径继续。
+
+## CLI
+
+先用 `lodestar project list` 获取已有项目 ID；新增 GitHub 项目可运行 `lodestar project add URL --status active`。新增命令可能获取 GitHub 内容，但 watch 不上传其索引。
+
+```powershell
+# PROJECT_ID 替换为实际项目 ID；query 应只包含可以公开发送的词。
+.\.venv\Scripts\python.exe -X utf8 -m lodestar watch add --project-id PROJECT_ID --query "agent harness" --term harness --term "tool use" --interval-hours 24
+.\.venv\Scripts\python.exe -X utf8 -m lodestar watch tick
+.\.venv\Scripts\python.exe -X utf8 -m lodestar watch inbox --project-id PROJECT_ID
+# 持续轮询到期订阅；进程需要保持运行，Ctrl+C 停止。
+.\.venv\Scripts\python.exe -X utf8 -m lodestar watch worker --poll-seconds 60
+.\.venv\Scripts\python.exe -X utf8 -m lodestar watch disable --watch-id WATCH_ID
+```
+
+worker 只是应用运行进程，未替用户创建系统开机任务。可由现有进程管理或 Windows 任务计划程序定时执行 tick；本次没有修改系统任务。--cycles N 用于有限运行验收，0 表示持续运行。运行器关闭期间没有主动抓取；重新开启后处理到期订阅，超过 30 天的缺口无法保证补齐。
+
+## 隔离验收与实际结果
+
+离线测试需配置单独 LODESTAR_DB_PATH / LODESTAR_WORKSPACE_DIR，使用 `watch tick --offline` 或 `watch worker --offline --cycles 2 --poll-seconds 10`。不要把夹具当作实时推荐。
+
+2026-10-08 在独立数据库执行真实公开查询 agent harness，arXiv 与 HF 两者返回 ok，形成 13 条去重候选，模型调用为零。记录：workspace/watch-validation-20261008/run.json、inbox.json。订阅使用合成项目，没有上传实际项目内容；这一验收证明真实发现和落库，不证明论文对 Lodestar 语义适用。
+
+测试覆盖跨版本去重、合并渠道、重启到期判断、暂停/禁用、租约恢复、失败/部分成功、查询外发边界、自评记忆不被修改、离线来源与真实来源隔离。
+
+## 下一步
+
+在获准上下文内补充语义适用性评估和具体代码依据，串起候选深读与方案草案；再考虑用户可控通知、标记已处理及可复现 A/B。暂未自动生成每日方案或发送通知，也未启用永久后台服务。
+
+本轮最终全量 unittest 为 85 项，通过。实际 CLI add -> worker 两轮 -> inbox -> disable 通过，第二轮没有重复执行尚未到期订阅；记录在 workspace/watch-cli-validation-20261008/result.json。git diff --check 通过。

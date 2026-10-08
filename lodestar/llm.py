@@ -135,6 +135,14 @@ class LLMClient:
 class MockLLM:
     @staticmethod
     def complete(role: str, system: str, user: str) -> str:
+        if role == "applicability":
+            context = json.loads(user)
+            document, paper = context['documents'][0], context['papers'][0]
+            return json.dumps({'decision':'uncertain', 'paper_method':'离线夹具，不作真实方法判断',
+                'project_fit':'离线夹具，仅验证证据与状态流转', 'transfer_hypothesis':'未验证的夹具假设',
+                'project_refs':[{'path':document['path'],'quote':document['content'][:100]}],
+                'paper_refs':[{'url':paper['url'],'quote':paper['content'][:100]}],
+                'limitations':['需要真实模型输出和人工语义核对']}, ensure_ascii=False)
         if role == "technical_plan":
             return json.dumps({"missing_evidence": ["Offline fixture has no grounded proposal"]})
         if role == "conversation":

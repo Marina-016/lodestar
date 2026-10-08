@@ -22,6 +22,8 @@ class Config:
     # --- LLM ---
     model_calls_disabled: bool = False  # operational kill switch; mock remains usable
     llm_provider: str = "anthropic"
+    project_model_allowed_repository: str = ""  # explicit HTTPS GitHub repository export scope
+    project_model_allowed_paths: tuple = ()  # exact indexed paths, no wildcard
     llm_base_url: str = ""
     model: str = "claude-sonnet-5"
     judge_model: str = "claude-haiku-4-5-20251001"
@@ -87,6 +89,8 @@ def load_config() -> Config:
     c.search_mode = os.getenv("LODESTAR_SEARCH_MODE", c.search_mode)
     c.model_calls_disabled = os.getenv("LODESTAR_MODEL_CALLS_DISABLED", "false").lower() in {"1", "true", "yes", "on"}
     c.llm_provider = os.getenv("LODESTAR_LLM_PROVIDER", c.llm_provider)
+    c.project_model_allowed_repository = os.getenv("LODESTAR_PROJECT_MODEL_ALLOWED_REPOSITORY", "")
+    c.project_model_allowed_paths = tuple(p.strip() for p in os.getenv("LODESTAR_PROJECT_MODEL_ALLOWED_PATHS", "").split(",") if p.strip())
     c.llm_base_url = os.getenv("LODESTAR_LLM_BASE_URL", c.llm_base_url)
     if c.llm_provider == "dashscope":
         c.model = "qwen-flash"

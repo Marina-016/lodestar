@@ -1,7 +1,6 @@
 """Generate a bounded evidence-grounded proposal. Never executes proposed code."""
 from __future__ import annotations
 import json
-from lodestar.memory import repo
 from lodestar.llm import LLMError
 from lodestar.agent.plan_contract import validate, render, canonicalize_quotes
 
@@ -26,31 +25,23 @@ Do not assert a pretrained model provides task-specific labels without supplied 
 
 
 def generate(ws, llm, goal: str, sources: list[dict], project_id: int) -> dict:
-    project = next((p for p in repo.list_projects(ws.conn) if p['id'] == project_id), None)
-    if project is None:
-        raise ValueError(f'unknown registered project: {project_id}')
-    matches=repo.search_project_documents(ws.conn, goal, project_id=project_id, limit=3)
-    documents=[repo.get_project_document(ws.conn,d['id']) for d in matches]
-    documents=[{'path':d['path'],'content':d.get('content','')[:4000],'id':d['id'],
-                'indexed_at':d.get('indexed_at')} for d in documents]
-    evidence=[s for s in sources if s.get('source_type','paper')=='paper' and not s.get('read_error') and s.get('content')]
-    papers=[{'url':s['url'],'content':s['content'][:10000],'read_depth':s.get('read_depth'),
-             'coverage':s.get('coverage')} for s in evidence[:2]]
-    missing=[]
-    if not documents: missing.append('No relevant indexed project document.')
-    if not any(p['read_depth']=='full' for p in papers): missing.append('No body-level paper excerpt; full method applicability is unverified.')
+    from lodestar.agent.project_evidence import collect
+    context_evidence=collect(ws,goal,sources,project_id,live=getattr(llm,'mode',None)=='live')
+    documents=context_evidence['documents']
+    papers=context_evidence['papers']
+    missing=context_evidence['missing']
     result={'status':'draft','project_id':project_id,'project_documents':[
         {k:d[k] for k in ('id','path','indexed_at')} for d in documents],
         'paper_urls':[p['url'] for p in papers],'missing_evidence':missing,
         'semantic_review':'pending','execution_status':'not_run'}
+    if context_evidence['status']=='needs_export_scope':
+        result.update(status='needs_export_scope',contract_valid=False,plan='Project export scope is not authorized; no model call made.')
+        return result
     if not documents or not papers:
         result.update(contract_valid=False,plan='Evidence is insufficient for a grounded proposal.')
         return result
-    for source in [*documents, *papers]:
-        source['quote_candidates'] = [line.strip()[:160] for line in source['content'].splitlines()
-                                      if len(line.strip()) >= 40][:6]
     result['evidence_snapshot']={'documents':documents,'papers':papers}
-    context={'goal':goal,'project':{'name':project['name'],'description':project.get('description')},
+    context={'goal':goal,'project':{'id':project_id},
              'documents':documents,'papers':papers}
     try:
         proposal=llm.complete_json('technical_plan',SYSTEM,json.dumps(context,ensure_ascii=False))

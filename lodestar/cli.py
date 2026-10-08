@@ -50,6 +50,20 @@ def cmd_watch(args, cfg):
     try:
         if args.action == 'add':
             result = watch.subscribe(ws, args.project_id, args.query, args.term, args.interval_hours)
+        elif args.action in {'read', 'evidence', 'handoff', 'assess'}:
+            from lodestar.agent import candidate
+            if args.action == 'assess':
+                from lodestar.agent.project_evidence import export_allowed
+                project = repo.get_project(ws.conn, args.project_id)
+                blocked = cfg.llm_mode == 'live' and (cfg.model_calls_disabled or not project or not export_allowed(cfg, project))
+                client = None if blocked else LLMClient(cfg)
+                result = candidate.assess(ws, client, args.project_id, args.recommendation_id, args.goal)
+            elif args.action == 'read':
+                result = candidate.read(ws, args.project_id, args.recommendation_id, refresh=args.refresh)
+            elif args.action == 'evidence':
+                result = candidate.evidence(ws, args.project_id, args.recommendation_id)
+            else:
+                result = candidate.handoff(ws, args.project_id, args.recommendation_id, args.user)
         elif args.action == 'worker':
             import time
             cycle = 0
@@ -637,6 +651,18 @@ def main(argv=None):
     ww.add_argument('--offline', action='store_true')
     wi = wsub.add_parser('inbox')
     wi.add_argument('--project-id', type=int, required=True)
+    for action in ('read', 'evidence', 'handoff', 'assess'):
+        action_parser = wsub.add_parser(action)
+        action_parser.add_argument('--project-id', type=int, required=True)
+        action_parser.add_argument('--recommendation-id', type=int, required=True)
+        if action == 'assess':
+            action_parser.add_argument('--goal', required=True)
+            action_parser.add_argument('--mock', action='store_true')
+        if action == 'read':
+            action_parser.add_argument('--refresh', action='store_true')
+            action_parser.add_argument('--offline', action='store_true')
+        if action == 'handoff':
+            action_parser.add_argument('--user', default='default')
     wd = wsub.add_parser('disable')
     wd.add_argument('--watch-id', type=int, required=True)
     pw.set_defaults(fn=cmd_watch)

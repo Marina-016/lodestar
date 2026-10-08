@@ -41,3 +41,30 @@ worker 只是应用运行进程，未替用户创建系统开机任务。可由�
 在获准上下文内补充语义适用性评估和具体代码依据，串起候选深读与方案草案；再考虑用户可控通知、标记已处理及可复现 A/B。暂未自动生成每日方案或发送通知，也未启用永久后台服务。
 
 本轮最终全量 unittest 为 85 项，通过。实际 CLI add -> worker 两轮 -> inbox -> disable 通过，第二轮没有重复执行尚未到期订阅；记录在 workspace/watch-cli-validation-20261008/result.json。git diff --check 通过。
+
+
+## 候选深读与项目会话交接
+
+```powershell
+# RECOMMENDATION_ID 来自 inbox。全文模式需要显式打开；不调用模型。
+$env:LODESTAR_FULL_TEXT = "true"
+.\.venv\Scripts\python.exe -X utf8 -m lodestar watch read --project-id PROJECT_ID --recommendation-id RECOMMENDATION_ID
+.\.venv\Scripts\python.exe -X utf8 -m lodestar watch evidence --project-id PROJECT_ID --recommendation-id RECOMMENDATION_ID
+.\.venv\Scripts\python.exe -X utf8 -m lodestar watch handoff --project-id PROJECT_ID --recommendation-id RECOMMENDATION_ID --user me
+# handoff 返回 conversation_id；后续 chat followup/plan 使用现有模型授权与调用开关。
+```
+
+阅读保存在独立的 paper_candidate_reads 历史中。重复读取复用缓存；--refresh 追加新尝试，不删除旧证据。失败仍有审计记录，不能创建空证据会话；正文刷新退回摘要时保留已有正文供复用，同时新尝试如实标明摘要。证据带来源、读取层级、覆盖、跨度和模型未评估状态，跨进程保留。这里只交接论文证据与项目 ID，不外发项目代码，也不自动认定适用或掌握。
+
+离线推荐必须配 --offline 阅读，真实推荐禁止用离线夹具覆盖。选择已有正文优于较新的摘要；如果后续论文版本变化，需要显式按版本管理和重读，此阶段不声称证据一直最新。
+
+
+## 项目适用性评估
+
+`watch assess --project-id PROJECT_ID --recommendation-id RECOMMENDATION_ID --goal "要核对的项目问题"` 生成独立评估；可加 --mock 验证状态流转。先成功 read，且项目有相关本地索引。输出论文方法、项目依据、迁移假设、limitations 和精确引文；即使 contract_valid，semantic_review 仍 required，不能自动实施方案。每次评估绑定具体 read_id 并保存，不修改掌握记忆。
+
+live 项目上下文须同时匹配 LODESTAR_PROJECT_MODEL_ALLOWED_REPOSITORY 和 LODESTAR_PROJECT_MODEL_ALLOWED_PATHS（逗号分隔的精确索引路径，无通配符）。缺少授权范围返回 needs_export_scope，默认调用关闭返回 model_disabled；这两种情况不会创建模型客户端。只从批准路径取最多三个 4000 字符片段；不外发项目名称/描述或其他代码。此配置记录已有人工授权，不代表可以自行扩大范围。
+
+适用性评估暂未进行新一轮真实模型调用。已验证真实候选正文读取与会话交接，记录在 workspace/watch-validation-20261008/candidate-read.json、candidate-handoff.json。语义适用性及整条链路的真实模型验收仍待后续推进。
+
+本轮扩展后最终 100 项 unittest 通过，CLI mock 评估/未授权 live 阻止验证见 workspace/watch-validation-20261008/candidate-cli-assessment.json。旧式模型项目关联会外发名称/描述/技术栈，现已在 live 模式跳过，避免绕过精确文件白名单；离线演示保持原流程。演示索引采用已声明的核心路径优先，防止文档增长挤掉必要代码证据，仍遵守文件预算与根目录边界。

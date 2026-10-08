@@ -364,7 +364,8 @@ def seed_demo(cfg, clean: bool = False) -> dict:
 
         canonical_project = DEMO_PROJECTS[0]
         project_id = repo.upsert_project(conn, **canonical_project)
-        project_documents = index_local_project(PROJECT_ROOT)
+        preferred_paths = tuple(dict.fromkeys(path for link in DEMO_PROJECT_LINKS.values() for path in link['files']))
+        project_documents = index_local_project(PROJECT_ROOT, preferred_paths=preferred_paths)
         indexed_files = repo.replace_project_documents(conn, project_id, project_documents)
         indexed_paths = {doc["path"] for doc in project_documents}
 

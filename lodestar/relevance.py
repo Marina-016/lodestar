@@ -55,6 +55,9 @@ def score_project_relevance(research_text: str, project: dict, evidence_count: i
 def assess_relevance(cfg, llm: LLMClient, opportunities: list[str], projects: list[dict]) -> dict:
     if not opportunities or not projects:
         return {"mappings": [], "note": "无机会或无项目，跳过关联"}
+    if getattr(llm, 'mode', None) == 'live':
+        return {"mappings": [], "status": "needs_metadata_export_scope",
+                "note": "项目名称、描述及技术栈未获远端外发授权；使用获准代码片段的候选适用性评估。"}
     system = (
         "# ROLE: project_relevance\n\n"
         "你是 Lodestar（导星）的项目关联评估员。把研究得到的「可验证方向」映射到用户的真实项目。\n"

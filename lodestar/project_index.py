@@ -25,15 +25,29 @@ def _clean_text(text: str) -> str:
     return text[:MAX_CHARS_PER_FILE]
 
 
-def index_local_project(root: str | Path) -> list[dict]:
+def index_local_project(root: str | Path, preferred_paths: tuple[str, ...] = ()) -> list[dict]:
     root = Path(root).expanduser().resolve()
     if not root.is_dir():
         raise ValueError(f"local project path is not a directory: {root}")
     docs = []
-    for path in sorted(root.rglob("*")):
+    preferred = []
+    for raw in preferred_paths:
+        path = (root / raw).resolve()
+        try:
+            path.relative_to(root)
+        except ValueError:
+            raise ValueError('Preferred document must stay within the project root')
+        preferred.append(path)
+    seen = set()
+    for path in [*preferred, *sorted(root.rglob("*"))]:
         if len(docs) >= MAX_FILES:
             break
-        if not path.is_file():
+        if not path.is_file() or path in seen:
+            continue
+        seen.add(path)
+        try:
+            path.resolve().relative_to(root)
+        except ValueError:
             continue
         rel = path.relative_to(root)
         if not _allowed(rel) or path.stat().st_size > MAX_CHARS_PER_FILE * 4:

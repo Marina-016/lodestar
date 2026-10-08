@@ -70,3 +70,10 @@ workspace/context-policy-live-20261008：qwen3.8-flash，temperature=0，400 字
 2026-10-08 起的新运行同时保存 environment.json、requirements-frozen.txt 和 environment_hashes，包含 Python/平台及已安装 Python 包的精确版本，排除环境变量、凭据、安装源 URL 和路径。版本清单不包含本地 Lodestar 的安装地址；复跑还需相同源码版本。ab-check / context-policy-check 对声明的环境记录校验哈希；缺失或篡改会使记录不一致。旧结果不补写当时未记录的环境，也不能当作完整环境冻结。
 
 requirements-frozen.txt 用于在相同 Python/平台的隔离环境重建包版本，并非带 wheel 哈希的供应链锁定；它不锁定 OS 依赖、包索引内容或远端模型权重。代码实验可以重新执行固定输入；模型调查的记录可以重新评分，但再次 API 调用是重新采样，不能保证相同输出。不要为了复现旧模型结果而自动耗用新额度。
+
+
+## 当前版本与环境链最终验收
+
+workspace/context-policy-final-environment-20261008 使用当前版本从 CLI 真正运行同一协议，protocol SHA 与之前一致；12 次 qwen3.8-flash 调用、7142 Token。运行前控制台免费余额 723.54K、用完即停开启；没有项目代码或用户记忆输入。两组答案/原始出处联合指标仍为 append_only 1/2、source_bound 2/2。案例和期望答案未改，仍是已知合成诊断集，不能作独立泛化或总体收益证明。
+
+本轮 environment.json、requirements-frozen.txt 在运行时采集，并由结果哈希关联；context-policy-check consistent，协议、实现、逐轮输入、修订、评分与环境记录均已复核。随后将该诊断登记到独立数据库副本中的历史 CLM 调查草案 #1，保存新的 investigation #2；没有将它挪用为新中文优先级片段草案的效果。原来的成功/失败/无环境记录保留原样。

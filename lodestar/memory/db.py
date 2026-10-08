@@ -246,6 +246,10 @@ def open_db(db_path: Path) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(SCHEMA)
+    from lodestar.memory.learning import SCHEMA as LEARNING_SCHEMA
+    conn.executescript(LEARNING_SCHEMA)
+    from lodestar.memory.sessions import SCHEMA as SESSION_SCHEMA
+    conn.executescript(SESSION_SCHEMA)
     _migrate(conn)
     conn.commit()
     return conn

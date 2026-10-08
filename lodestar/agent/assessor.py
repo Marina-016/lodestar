@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from lodestar import prompts
 
-DEFAULT = {"sufficient": True, "gaps": [], "decision": "synthesize", "reason": "assess 失败，默认收尾"}
+DEFAULT = {"sufficient": False, "gaps": ["Evidence sufficiency assessment failed; completeness is unverified."], "decision": "synthesize", "reason": "assess 失败，默认收尾"}
 
 
 def assess(cfg, llm, goal: str, questions: list[str], evidence: str) -> dict:

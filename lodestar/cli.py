@@ -30,7 +30,8 @@ def cmd_research(args, cfg):
     # --yes = 自动化模式：跳过 Knowledge 确认与反馈输入
     interactive = (not args.yes) and sys.stdin.isatty()
     agent = ResearchAgent(ws, interactive=interactive)
-    result = agent.run(args.goal, apply_updates=None if not args.yes else True)
+    result = agent.run(args.goal, apply_updates=None if not args.yes else True,
+                       user_id=args.user, project_id=args.project_id, discovery_days=args.recent_days)
     if result.get("error"):
         print(f"[error] {result['error']}", file=sys.stderr)
         sys.exit(1)
@@ -38,6 +39,62 @@ def cmd_research(args, cfg):
     print(f"\n---\n产物目录: {result.get('workspace_dir')}")
     print(f"task_id: {result['task_id']}")
     ws.close()
+
+
+def cmd_model_check(args, cfg):
+    from lodestar.eval.quality import model_check
+    result = model_check(cfg)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    if result['status'] != 'ok':
+        raise SystemExit(1)
+
+
+def cmd_quality_check(args, cfg):
+    from lodestar.eval.quality import check_citations
+    answer = Path(args.answer).read_text(encoding='utf-8')
+    sources = json.loads(Path(args.sources).read_text(encoding='utf-8'))
+    if isinstance(sources, dict):
+        sources = sources.get('sources', [])
+    print(json.dumps(check_citations(answer, sources), ensure_ascii=False, indent=2))
+
+
+def cmd_chat(args, cfg):
+    from lodestar.agent.conversation import ConversationAgent
+    ws = Workspace(cfg)
+    try:
+        from lodestar.agent.routing import route
+        selected = route(args.message).intent if args.intent == 'auto' else args.intent
+        agent = ConversationAgent(ws, LLMClient(cfg) if args.action == 'send' and selected != 'feedback' else None)
+        if args.action == 'start':
+            result = {'conversation_id': agent.start(args.user, args.project_id)}
+        elif args.action == 'history':
+            result = agent.history(args.session, args.user)
+        else:
+            result = agent.turn(args.session, args.message, user_id=args.user,
+                intent=args.intent, technology=args.technology, method=args.method,
+                feedback=args.feedback, days=args.days)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    finally:
+        ws.close()
+
+
+def cmd_learning(args, cfg):
+    from lodestar.memory import learning
+    ws = Workspace(cfg)
+    try:
+        if args.action == "list":
+            result = learning.profile(ws.conn, args.user, args.technology)
+        elif args.action == "revoke":
+            if args.evidence_id is None:
+                raise ValueError("--evidence-id is required")
+            result = {"revoked": learning.revoke(ws.conn, args.evidence_id, args.user)}
+        else:
+            result = learning.record(ws.conn, user_id=args.user,
+                technology=args.technology or "", method=args.method, event=args.event,
+                evidence=args.evidence, paper_url=args.paper_url)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    finally:
+        ws.close()
 
 
 def cmd_eval(args, cfg):
@@ -385,7 +442,43 @@ def main(argv=None):
     pr.add_argument("--yes", action="store_true", help="跳过 Knowledge 更新确认，直接应用")
     pr.add_argument("--mock", action="store_true", help="LLM 用离线夹具（不烧 token）")
     pr.add_argument("--offline", action="store_true", help="检索/读取也走离线夹具（全离线可复现）")
+    pr.add_argument("--recent-days", type=int, default=None, help="Paper-first recent/trending discovery window (1-30 days)")
+    pr.add_argument("--user", default="default")
+    pr.add_argument("--project-id", type=int, default=None, help="Registered project for grounded technical proposal")
     pr.set_defaults(fn=cmd_research)
+
+    pcheck = sub.add_parser("model-check", help="One bounded live model connectivity check")
+    pcheck.set_defaults(fn=cmd_model_check)
+    pq = sub.add_parser("quality-check", help="Mechanical citation checks; semantic review remains manual")
+    pq.add_argument("--answer", required=True)
+    pq.add_argument("--sources", required=True)
+    pq.set_defaults(fn=cmd_quality_check)
+
+    pc = sub.add_parser("chat", help="Persistent headless research conversation")
+    pc.add_argument("action", choices=["start", "send", "history"])
+    pc.add_argument("--session")
+    pc.add_argument("--user", default="default")
+    pc.add_argument("--project-id", type=int)
+    pc.add_argument("--message", default="")
+    pc.add_argument("--intent", choices=["auto", "research", "followup", "plan", "feedback"], default="auto")
+    pc.add_argument("--technology")
+    pc.add_argument("--method", default="")
+    pc.add_argument("--feedback", choices=["discussed", "self_report", "attempted"], default="discussed")
+    pc.add_argument("--days", type=int, default=7)
+    pc.add_argument("--mock", action="store_true")
+    pc.add_argument("--offline", action="store_true")
+    pc.set_defaults(fn=cmd_chat)
+
+    pl = sub.add_parser("learning", help="User technology/method evidence")
+    pl.add_argument("action", choices=["list", "record", "revoke"])
+    pl.add_argument("--user", default="default")
+    pl.add_argument("--technology")
+    pl.add_argument("--method", default="")
+    pl.add_argument("--event", default="self_report")
+    pl.add_argument("--evidence", default="")
+    pl.add_argument("--paper-url", default="")
+    pl.add_argument("--evidence-id", type=int)
+    pl.set_defaults(fn=cmd_learning)
 
     pe = sub.add_parser("eval", help="跑 Golden Case 回归")
     pe.add_argument("--case", default=None, help="只跑指定 case id")
@@ -491,7 +584,15 @@ def main(argv=None):
     erun.add_argument("--timeout", type=int, default=30)
     pe.set_defaults(fn=cmd_experiment)
 
+    pad = sub.add_parser("agent-demo", help="Isolated backend demo; no network or model calls")
+    pad.add_argument("--out", required=True, help="New isolated output directory")
+    pad.add_argument("--recording", help="Directory containing saved research/followup JSON for replay")
+
     args = p.parse_args(argv)
+    if args.cmd == "agent-demo":
+        from lodestar.agent.demo import run_demo
+        print(json.dumps(run_demo(Path(args.out), Path(args.recording) if args.recording else None), ensure_ascii=False, indent=2))
+        return
     cfg = _make_config(args)
     args.fn(args, cfg)
 

@@ -16,7 +16,7 @@ from lodestar.agent import (assessor as assessor_mod, novelty as novelty_mod,
 from lodestar import relevance as relevance_mod
 from lodestar import venue as venue_mod
 from lodestar.llm import LLMClient, LLMError
-from lodestar.memory import repo
+from lodestar.memory import repo, learning
 from lodestar.tools.registry import call_tool
 from lodestar.trace.recorder import Trace
 
@@ -36,18 +36,31 @@ class ResearchAgent:
         self.cfg = ws.config
         self.llm = llm or LLMClient(self.cfg)
         self.judge = judge or LLMClient(self.cfg, judge=True)
+        self.discovery_days = None
+        self.learning_ctx = []
         self.interactive = sys.stdin.isatty() if interactive is None else interactive
 
     # ------------------------------------------------------------------
-    def run(self, goal: str, apply_updates: Optional[bool] = None, task_id: Optional[str] = None) -> dict:
+    def run(self, goal: str, apply_updates: Optional[bool] = None, task_id: Optional[str] = None, user_id: str = "default",
+            project_id: int | None = None, discovery_days: int | None = None, learning_technology: str | None = None) -> dict:
         """执行一次 Research Task。
 
         apply_updates: True=直接应用；False=全部拒绝；"pending"=留待 UI/用户后置应用；
-        None=交互式确认（非 tty 自动应用，供 eval/脚本）。
+        None=交互式确认（非 tty 保持 pending）。
         task_id: 可选，预生成 task_id（Web UI 需先建任务行再后台轮询）。
         """
         cfg = self.cfg
         ws = self.ws
+        if discovery_days is not None and not 1 <= discovery_days <= 30:
+            raise ValueError("discovery_days must be between 1 and 30")
+        self.discovery_days = discovery_days
+        self.research_goal = goal
+        self.user_id = user_id
+        self.project_id = project_id
+        self.learning_technology = learning_technology
+        self.last_read_sources = []
+        self.discovery_results = []
+        self.learning_ctx = learning.recall(ws.conn, goal, user_id)
         task_id = task_id or ws.new_task_id()
         ws.current_task_id = task_id
         trace = Trace(ws.conn, task_id, cfg.workspace_dir)
@@ -55,15 +68,18 @@ class ResearchAgent:
 
         try:
             return self._run_inner(goal, task_id, trace, apply_updates)
-        except LLMError as e:
+        except (LLMError, ValueError) as e:
             repo.finish_task(ws.conn, task_id, "", status="error", metrics={"error": str(e)})
             trace.log("error", {"error": str(e), "stage": "llm"})
             trace.dump_jsonl()
-            return {"task_id": task_id, "goal": goal, "error": str(e), "status": "error"}
+            return {"task_id": task_id, "goal": goal, "error": str(e), "status": "error",
+                    "read_sources": self.last_read_sources, "workspace_dir": str(cfg.workspace_dir / task_id)}
 
     # ------------------------------------------------------------------
     def _run_inner(self, goal, task_id, trace, apply_updates) -> dict:
         ws, cfg = self.ws, self.cfg
+
+        trace.log("learning_context", {"user_id": self.user_id, "profiles": len(self.learning_ctx)})
 
         # 1. Load Knowledge Context（PRD §2.1）
         knowledge_ctx = repo.search_concepts(ws.conn, goal, limit=10)
@@ -114,6 +130,8 @@ class ResearchAgent:
                 repo.update_source(ws.conn, sid, rank=s.get("rank"), reason=s.get("reason"))
 
         # 检索噪声优化：Brief 只展示被 Rerank 选中且分数达标的 Top-N（不含全部收集来源）
+        if self.discovery_days is not None:
+            ranked = self._balance_discovery_reads(ranked, cfg.rerank_min_score)
         key_sources = [s for s in ranked if s.get("score", 10) >= cfg.rerank_min_score][: cfg.rerank_top_n]
 
         # V1-R2：config 开启全文时，Top N 论文来源读 PDF 全文（token 预算守护）
@@ -125,6 +143,7 @@ class ResearchAgent:
                 repo.update_source(ws.conn, sid, read_depth=rs.get("read_depth", "none"))
 
         # 5. Assess（可有限 replan，受 max_agent_steps / max_search_queries 约束）
+        read_sources = [s for s in read_sources if not s.get("read_error") and s.get("content")]
         evidence = self._evidence_summary(read_sources)
         assess = assessor_mod.assess(cfg, self.llm, goal, plan["research_questions"], evidence)
         trace.log("assess", assess)
@@ -145,15 +164,34 @@ class ResearchAgent:
                 extra_ranked = reranker_mod.rerank(cfg, self.llm, goal, plan["research_questions"], added, knowledge_ctx)
                 key_sources += [s for s in extra_ranked if s.get("score", 10) >= cfg.rerank_min_score][: cfg.rerank_top_n]
                 # V1-R2：assess 判定证据不足才补搜 → 补搜的 Top 1 来源读全文
-                read_sources += self._deep_read(extra_ranked, trace, full_text_count=1)
+                read_sources += [s for s in self._deep_read(extra_ranked, trace, full_text_count=1)
+                                 if not s.get("read_error") and s.get("content")]
             assess = assessor_mod.assess(cfg, self.llm, goal, plan["research_questions"], self._evidence_summary(read_sources))
             trace.log("assess", assess)
 
+        # Keep bounded evidence recoverable even if model synthesis fails.
+        import json
+        self.last_read_sources = read_sources
+        evidence_dir = cfg.workspace_dir / task_id
+        evidence_dir.mkdir(parents=True, exist_ok=True)
+        (evidence_dir / 'read_evidence.json').write_text(
+            json.dumps(read_sources, ensure_ascii=False, indent=2), encoding='utf-8')
+        trace.log('evidence_checkpoint', {'sources': len(read_sources), 'path': 'read_evidence.json'})
+
         # 6. Cross-source Synthesis（PRD §13）
         synthesis = synthesizer_mod.synthesize(cfg, self.llm, goal, plan["research_questions"],
-                                               read_sources, knowledge_ctx)
+                                               read_sources, knowledge_ctx, self.learning_ctx)
         trace.log("synthesis", {"chars": len(synthesis)})
+        from lodestar.agent.exposure import record_exposure
+        trace.log("learning_exposure_start", {"user_id": self.user_id})
+        try:
+            exposure = record_exposure(ws, self.llm, task_id, self.user_id, synthesis, read_sources,
+                                       technology=self.learning_technology, goal=goal)
+            trace.log("learning_exposure", {"evidence": exposure})
+        except (LLMError, ValueError, TypeError) as error:
+            trace.log("learning_exposure_error", {"error": str(error)})
 
+        # Failed reads are excluded from evidence supplied to synthesis/novelty.
         # 7. Novelty Detection（PRD §12）
         novelty = novelty_mod.detect(cfg, self.llm, goal, synthesis, knowledge_ctx)
         trace.log("novelty", novelty)
@@ -174,6 +212,13 @@ class ResearchAgent:
             relevance = relevance_mod.assess_relevance(cfg, self.llm, opportunities, projects)
         trace.log("project_relevance", relevance)
 
+        technical_plan = None
+        if self.project_id is not None:
+            from lodestar.agent.project_plan import generate
+            trace.log("technical_plan_start", {"project_id": self.project_id})
+            technical_plan = generate(ws, self.llm, goal, read_sources, self.project_id)
+            trace.log("technical_plan", technical_plan)
+
         # 9. Brief + Finish
         metrics = {"queries": len(queries), "searches": searches,
                    "candidates_collected": len(candidates), "unique_sources": len(sources),
@@ -190,8 +235,11 @@ class ResearchAgent:
         depth_by_url = {rs["url"]: rs.get("read_depth", "none") for rs in read_sources}
         for ks in key_sources:
             ks["read_depth"] = depth_by_url.get(ks["url"], "none")
+        metrics['discovery'] = self.discovery_results
         brief_md = brief_mod.render_brief(cfg, task_id, goal, plan, queries, key_sources, read_sources,
-                                          synthesis, novelty, knowledge_ctx, assess, metrics, relevance)
+                                          synthesis, novelty, knowledge_ctx, assess, metrics, relevance, updates=applied)
+        if technical_plan:
+            brief_md += "\n\n## 技术方案（草案）\n" + technical_plan["plan"]
         repo.finish_task(ws.conn, task_id, brief_md, "finished", metrics)
         trace.log("finish", {"metrics": metrics, "workspace": str(cfg.workspace_dir / task_id)})
         trace.dump_jsonl()
@@ -202,7 +250,8 @@ class ResearchAgent:
             self._ask_feedback(task_id)
 
         return {"task_id": task_id, "goal": goal, "brief_md": brief_md, "sources": sources,
-                "metrics": metrics, "updates": applied, "workspace_dir": str(out_dir)}
+                "metrics": metrics, "updates": applied, "learning_profile": self.learning_ctx,
+                "technical_plan": technical_plan, "read_sources": read_sources, "workspace_dir": str(out_dir)}
 
     # ------------------------------------------------------------------
     # 研究循环子步骤
@@ -229,6 +278,20 @@ class ResearchAgent:
         """对每个 query 跑 search_papers + search_web，收集候选来源。"""
         ws, cfg = self.ws, self.cfg
         candidates: list[dict] = []
+        if self.discovery_days is not None:
+            for kind in ('recent', 'trending'):
+                if searches >= cfg.max_agent_steps:
+                    break
+                params = {'query': queries[0]['text'] if queries else '',
+                          'days': self.discovery_days, 'kind': kind}
+                trace.tool_call('discover_papers', params)
+                result = call_tool(ws, 'discover_papers', params)
+                trace.tool_result('discover_papers', result)
+                searches += 1
+                self.discovery_results.append({k: result.get(k) for k in ('kind','status','retrieved_at','from_utc','to_utc','error')})
+                self.discovery_results[-1]['count'] = len(result.get('sources', []))
+                candidates.extend(result.get('sources', []))
+            return candidates, searches
         for q in queries[: cfg.max_search_queries]:
             if searches >= cfg.max_agent_steps:
                 break
@@ -245,6 +308,21 @@ class ResearchAgent:
                     s["query"] = q["text"]
                     candidates.append(s)
         return candidates, searches
+
+    @staticmethod
+    def _balance_discovery_reads(ranked: list[dict], min_score: int) -> list[dict]:
+        """Read one recent and one platform-trending paper when both qualify.
+
+        Preserve model ranking within each channel; do not promote weak matches.
+        """
+        chosen = []
+        for kind in ('recent', 'trending'):
+            candidate = next((source for source in ranked
+                              if source.get('discovery_kind') == kind
+                              and source.get('score', 10) >= min_score), None)
+            if candidate is not None and candidate not in chosen:
+                chosen.append(candidate)
+        return chosen + [source for source in ranked if source not in chosen]
 
     @staticmethod
     def _dedup(candidates: list[dict]) -> list[dict]:
@@ -277,11 +355,14 @@ class ResearchAgent:
             params = {"url": s["url"], "char_budget": cfg.read_char_budget}
             if want_full:
                 params["full_text"] = True
+                params["query"] = self.research_goal
             trace.tool_call(tool, params)
             result = call_tool(ws, tool, params)
             trace.tool_result(tool, {"title": result.get("title"), "truncated": result.get("truncated"),
                                      "error": result.get("error"), "full_text_ok": result.get("full_text_ok")})
             item = dict(s)
+            item["coverage"] = result.get("coverage")
+            item["evidence_spans"] = result.get("evidence_spans", [])
             if result.get("read_depth") == "full" and result.get("full_text_ok"):
                 item["read_depth"] = "full"
                 remaining_full -= 1
@@ -289,7 +370,8 @@ class ResearchAgent:
                 item["read_depth"] = "abstract" if is_paper else "web"
             if result.get("error"):
                 item["read_error"] = result["error"]
-                item["content"] = f"（读取失败：{result['error']}）"
+                item["read_depth"] = "none"
+                item["content"] = ""
             else:
                 item["content"] = result.get("text", "")
             read_sources.append(item)
@@ -363,7 +445,7 @@ class ResearchAgent:
         if apply_updates is not None:
             return apply_updates
         if not self.interactive:
-            return True  # 非交互（eval/脚本）：自动应用
+            return "pending"  # Unattended research must not confirm its own proposals.
         if not updates:
             return True
         print("\n" + "=" * 60)

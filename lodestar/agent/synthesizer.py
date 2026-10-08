@@ -5,10 +5,12 @@ from lodestar import prompts
 
 
 def synthesize(cfg, llm, goal: str, questions: list[str], read_sources: list[dict],
-               knowledge_ctx: list[dict]) -> str:
+               knowledge_ctx: list[dict], learning_ctx: list[dict] | None = None) -> str:
     system, user = prompts.synthesis_prompt(cfg, goal, questions, read_sources, knowledge_ctx)
-    try:
-        text = llm.complete("synthesis", system, user)
-    except Exception as e:  # noqa: BLE001 —— 综合失败也要能收尾并留痕
-        return f"## 综合分析（生成失败）\nLLM 综合步骤报错：{e}\n已读取来源标题见 Trace。"
-    return text.strip()
+    from lodestar.memory.learning import prompt_context
+    system += "\nAdapt explanations to the learning evidence. Research knowledge is not user mastery."
+    user += "\n" + prompt_context(learning_ctx or [])
+    # Let the orchestrator mark the task failed; a placeholder is not an answer.
+    text = llm.complete("synthesis", system, user)
+    from lodestar.agent.scope import annotate_scope
+    return annotate_scope(text.strip())

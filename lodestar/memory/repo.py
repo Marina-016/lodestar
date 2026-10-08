@@ -507,14 +507,14 @@ def search_project_documents(conn: sqlite3.Connection, query: str, project_id: i
     terms = re.findall(r"[\w.-]+", query or "", flags=re.UNICODE)
     if not terms:
         return []
-    match = " OR ".join(terms[:8])
+    match = " OR ".join('"' + term.replace('"', '""') + '"' for term in terms[:8])
     sql = ("SELECT d.id,d.project_id,d.path,d.title,d.url,d.source,d.content FROM project_documents_fts f "
            "JOIN project_documents d ON d.id=f.rowid WHERE project_documents_fts MATCH ?")
     args: list = [match]
     if project_id is not None:
         sql += " AND d.project_id=?"
         args.append(project_id)
-    sql += " LIMIT ?"
+    sql += " ORDER BY bm25(project_documents_fts), d.path LIMIT ?"
     args.append(max(1, min(int(limit), 20)))
     try:
         rows = [dict(row) for row in conn.execute(sql, args).fetchall()]

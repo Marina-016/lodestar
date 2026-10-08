@@ -8,7 +8,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import requests
 from typing import Any, Dict
 
 try:
@@ -33,23 +35,15 @@ def _extract_json(text: str) -> Any:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
-    # 平衡括号扫描
-    for opener, closer in (("{", "}"), ("[", "]")):
-        if opener not in text:
+    decoder = json.JSONDecoder()
+    for start, character in enumerate(text):
+        if character not in '{[':
             continue
-        start = text.index(opener)
-        depth = 0
-        for i in range(start, len(text)):
-            ch = text[i]
-            if ch == opener:
-                depth += 1
-            elif ch == closer:
-                depth -= 1
-                if depth == 0:
-                    try:
-                        return json.loads(text[start : i + 1])
-                    except json.JSONDecodeError:
-                        break
+        try:
+            data, _ = decoder.raw_decode(text[start:])
+            return data
+        except json.JSONDecodeError:
+            continue
     raise LLMError(f"无法从 LLM 输出解析 JSON。输出前 300 字符：{text[:300]!r}")
 
 
@@ -59,10 +53,21 @@ class LLMClient:
         self.judge = judge
         self.mode = config.llm_mode
         self.model = config.judge_model if judge else config.model
+        if self.mode == "live" and config.model_calls_disabled:
+            raise LLMError("Model calls are disabled by LODESTAR_MODEL_CALLS_DISABLED")
         self._client = None
-        if self.mode == "live":
+        self._dashscope = None
+        if self.mode == "live" and config.llm_provider == "dashscope":
+            from lodestar.providers.dashscope import DashScopeClient
+            try:
+                self._dashscope = DashScopeClient(config)
+            except ValueError as error:
+                raise LLMError(str(error)) from error
+        elif self.mode == "live":
             if anthropic is None:
                 raise LLMError("anthropic SDK 未安装，无法使用 live 模式。")
+            if not (os.getenv('ANTHROPIC_API_KEY') or os.getenv('ANTHROPIC_AUTH_TOKEN')):
+                raise LLMError('Missing ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN; live mode cannot use mock credentials.')
             self._client = anthropic.Anthropic(timeout=config.llm_timeout_s)
 
     # ---------- 对外接口 ----------
@@ -71,12 +76,14 @@ class LLMClient:
             return MockLLM.complete(role, system, user)
         return self._complete_live(role, system, user, max_tokens)
 
-    def complete_json(self, role: str, system: str, user: str, max_tokens: int | None = None) -> Dict:
+    def complete_json(self, role: str, system: str, user: str, max_tokens: int | None = None, *, allow_list: bool = False) -> Dict | list:
         if self.mode == "mock":
             text = MockLLM.complete(role, system, user)
         else:
             text = self._complete_live(role, system, user, max_tokens)
         data = _extract_json(text)
+        if allow_list and isinstance(data, list):
+            return data
         if not isinstance(data, dict):
             raise LLMError(f"期望 JSON 对象，实际得到 {type(data).__name__}：{str(data)[:200]}")
         return data
@@ -86,6 +93,11 @@ class LLMClient:
         """默认关 thinking（省 token、防空输出）；空文本重试一次（预算×2）；
         thinking 参数不被模型支持时自动去掉重试。"""
         mt = max_tokens or (self.config.judge_max_tokens if self.judge else self.config.max_tokens)
+        if self._dashscope is not None:
+            try:
+                return self._dashscope.complete(role, self.model, system, user, mt)
+            except (ValueError, KeyError, IndexError, requests.RequestException) as error:
+                raise LLMError(f"DashScope request failed: {type(error).__name__}") from error
         kw: dict = {}
         if not self.config.llm_thinking:
             kw["thinking"] = {"type": "disabled"}
@@ -123,6 +135,12 @@ class LLMClient:
 class MockLLM:
     @staticmethod
     def complete(role: str, system: str, user: str) -> str:
+        if role == "technical_plan":
+            return json.dumps({"missing_evidence": ["Offline fixture has no grounded proposal"]})
+        if role == "conversation":
+            return "离线会话夹具：复用已保存证据；不代表真实模型推理结果。"
+        if role == "learning_exposure":
+            return json.dumps({"items": []})  # Fixtures do not fabricate paper/explanation matches.
         fn = getattr(MockLLM, f"_role_{role}", None)
         if fn is None:
             raise LLMError(f"mock 模式未实现 role={role!r}，请检查 prompts 与 mock 同步。")

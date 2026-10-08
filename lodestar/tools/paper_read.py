@@ -129,7 +129,7 @@ def _extract_pdf_text(path: Path) -> tuple[str | None, dict]:
     return text, _parse_sections(text)
 
 
-def _read_arxiv_full(cfg, arxiv_id, meta, base: str, url: str, char_budget: int) -> dict:
+def _read_arxiv_full(cfg, arxiv_id, meta, base: str, url: str, char_budget: int, query: str = "") -> dict:
     dest = _pdf_cache_path(cfg, f"arxiv_{arxiv_id}")
     if not _download_pdf(f"https://arxiv.org/pdf/{arxiv_id}", dest, cfg.tool_timeout_s):
         return _result(base, meta["title"], url, "abstract", False, char_budget,
@@ -138,11 +138,28 @@ def _read_arxiv_full(cfg, arxiv_id, meta, base: str, url: str, char_budget: int)
     if text is None:
         return _result(base, meta["title"], url, "abstract", False, char_budget,
                        "PDF 无文本层（疑似扫描件），已回退摘要级", [])
+    if query:
+        from lodestar.retrieval import select_excerpt
+        excerpt = select_excerpt(text, query, max(500, char_budget - len(base)))
+        result = _result(base + "\n\n" + excerpt['text'], meta['title'], url,
+                         'full', True, char_budget, 'Query-selected PDF excerpts; offsets refer to extracted PDF text.',
+                         list(sections), excerpt['truncated'])
+        result.update({k: v for k, v in excerpt.items() if k != 'text'})
+        return result
     parts = [base]
     for key in ("introduction", "method", "methods", "methodology", "experiments",
                 "experimental_setup", "results", "conclusion"):
         if key in sections:
             parts.append(f"\n## {key}\n{sections[key][:4000]}")
+    method_keys = {"method", "methods", "methodology", "approach"}
+    if not method_keys.intersection(sections):
+        # Nonstandard numbered headings must not silently omit the main body.
+        body, truncated = _truncate(base + "\n\n## Bounded PDF body excerpt\n" + text, char_budget)
+        result = _result(body, meta["title"], url, "full", True, char_budget,
+                         "Method headings not recognized; returning a bounded raw body excerpt, not complete coverage.",
+                         list(sections), truncated)
+        result["coverage"] = "raw_body_excerpt"
+        return result
     body, truncated = _truncate("\n".join(parts), char_budget)
     return _result(body, meta["title"], url, "full", True, char_budget,
                    f"PDF 全文抽取成功（{len(text)} 字符 → 按节截断）", list(sections.keys()), truncated)
@@ -175,7 +192,7 @@ def _result(body: str, title: str, url: str, read_depth: str, full_ok: bool,
 # ----------------------------------------------------------------------
 # 主工具
 # ----------------------------------------------------------------------
-def tool_read_paper(ws, url: str, char_budget: int | None = None, full_text: bool = False):
+def tool_read_paper(ws, url: str, char_budget: int | None = None, full_text: bool = False, query: str = ""):
     cfg: Config = ws.config
     char_budget = char_budget or cfg.read_char_budget
 
@@ -192,7 +209,7 @@ def tool_read_paper(ws, url: str, char_budget: int | None = None, full_text: boo
         base = (f"# {meta['title']}\nauthors: {', '.join(meta['authors'])}\n"
                 f"published: {meta['date']}\n\n## Abstract\n{meta['abstract']}")
         if full_text and cfg.full_text_enabled:
-            return _read_arxiv_full(cfg, arxiv_id, meta, base, url, char_budget)
+            return _read_arxiv_full(cfg, arxiv_id, meta, base, url, char_budget, query=query)
         return _result(base, meta["title"], url, "abstract", False, char_budget,
                        "abstract 级读取", [])
 
@@ -209,5 +226,5 @@ register(
     description="读取论文：arXiv 摘要级（默认）；full_text=True 且开启全文时读 PDF 正文（按节递进、硬截断、优雅降级）",
     fn=tool_read_paper,
     parameters={"url": {"type": "string", "required": True}, "char_budget": {"type": "integer"},
-                "full_text": {"type": "boolean"}},
+                "full_text": {"type": "boolean"}, "query": {"type": "string"}},
 )

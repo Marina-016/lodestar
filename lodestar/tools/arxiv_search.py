@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
 import xml.etree.ElementTree as ET
 
 import requests
@@ -17,7 +18,8 @@ def _clean_arxiv_text(text: str, limit: int = 500) -> str:
     return re.sub(r"\s+", " ", text or "").strip()[:limit]
 
 
-def _search_arxiv(query: str, max_results: int = 6, timeout: int = 30, field: str = "abs") -> list[dict]:
+def _search_arxiv(query: str, max_results: int = 6, timeout: int = 30, field: str = "abs", *, sort_by: str = "relevance",
+                  since: datetime | None = None, until: datetime | None = None) -> list[dict]:
     # field: all=全文(噪声多) | abs=摘要(默认，精确) | ti=标题(最严)
     params = {
         "search_query": f"{field}:{query}",
@@ -25,6 +27,11 @@ def _search_arxiv(query: str, max_results: int = 6, timeout: int = 30, field: st
         "max_results": max_results,
         "sortBy": "relevance",
     }
+    params['sortBy'] = sort_by
+    params['sortOrder'] = 'descending'
+    if since is not None and until is not None:
+        params['search_query'] = (f'({field}:{query}) AND submittedDate:['
+                                 f'{since:%Y%m%d%H%M} TO {until:%Y%m%d%H%M}]')
     resp = requests.get(ARXIV_API, params=params, timeout=timeout,
                         headers={"User-Agent": "Lodestar/0.1 (personal research workspace)"})
     resp.raise_for_status()
@@ -42,7 +49,12 @@ def _search_arxiv(query: str, max_results: int = 6, timeout: int = 30, field: st
             "authors": authors[:5],
             "date": entry.findtext(f"{ATOM}published", "")[:10],
             "snippet": _clean_arxiv_text(entry.findtext(f"{ATOM}summary"), 600),
-            "dedup_key": f"arxiv:{arxiv_id}",
+            "dedup_key": "arxiv:" + re.sub(r"v\d+$", "", arxiv_id),
+            "paper_id": re.sub(r"v\d+$", "", arxiv_id),
+            "version": arxiv_id,
+            "published_at": entry.findtext(f"{ATOM}published", ""),
+            "updated_at": entry.findtext(f"{ATOM}updated", ""),
+            "retrieved_at": datetime.now(timezone.utc).isoformat(),
         })
     return sources
 

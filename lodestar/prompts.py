@@ -24,8 +24,8 @@ SYSTEM_BASE = (
 def render_knowledge_ctx(concepts: list[dict]) -> str:
     """把 Knowledge State 渲染进 prompt 的上下文片段。"""
     if not concepts:
-        return "（用户 Knowledge State 为空：本次不假设用户已知任何概念，Novelty 判定降级为相对空库。）"
-    lines = ["## 用户已知概念（Knowledge State）", ""]
+        return "（研究知识库为空：Novelty 判定相对空库；用户掌握程度只能由独立学习证据判断。）"
+    lines = ["## 已保存的研究知识（不是用户掌握证据）", ""]
     for c in concepts:
         notes = "；".join(c.get("notes", []) or [])
         related = "、".join(c.get("related", []) or [])
@@ -161,16 +161,22 @@ def synthesis_prompt(cfg: Config, goal: str, questions: list[str], read_sources:
         "禁止写成『Paper A 讲什么、Paper B 讲什么』，必须形成结构化结论。\n"
         "输出 markdown，至少包含以下小节（语言：{lang}）：\n"
         "- ## 共同观点：多个来源一致认同的结论\n"
-        "- ## 主要技术路线：归纳 2-4 条技术路径\n"
+        "- ## 主要技术路线：归纳证据支持的 1-4 条技术路径\n"
         "- ## 方法差异：各工作改进的是哪一层（Prompt / Skill / Memory / Policy / Tool 策略）\n"
-        "- ## 相互冲突：来源间的分歧与争议\n"
-        "- ## 研究空白：仍未被解决/较少被研究的问题\n"
-        "- ## 当前趋势：整体方向\n"
-        "每个结论必须标注支持它的来源标题（方括号引用），没有来源支撑的判断不要写。"
+        "- ## 观察到的方法差异或分歧：没有冲突证据就明确写未观察到\n"
+        "- ## 当前证据的缺口：哪些问题尚未被所给片段覆盖，不能推断整个领域不存在工作\n"
+        "- ## 这些论文体现的方向：不能推断整个领域主流或方法替代\n"
+        """每个结论用可点击的来源标题和URL引用，没有来源支撑的判断不要写。
+区分论文发布日与热门平台观察时间。热门不等于新发布，也不等于全网最热。
+只读取有界片段，read_depth=full表示正文片段而非整篇全文；abstract只有摘要。
+不得声称读完整篇论文或未提供的章节。证据少时不要把比较差异写成已证实的冲突，也不要由论文未提及推断研究领域不存在该工作。"""
     ).format(lang="中文" if cfg.brief_language == "zh" else "English")
     body = []
     for s in read_sources:
-        body.append(f"## 来源: {s['title']}  ({s['url']})\n{(s.get('content') or s.get('snippet') or '')[:cfg.read_char_budget]}\n")
+        body.append(f"## 来源: {s['title']}  ({s['url']})\n"
+                    f"发布日期={s.get('date')}；发现类型={s.get('discovery_kind')}；平台={s.get('provider')}；"
+                    f"检索时间={s.get('retrieved_at')}；读取深度={s.get('read_depth')}；覆盖={s.get('coverage')}\n"
+                    f"{(s.get('content') or s.get('snippet') or '')[:cfg.read_char_budget]}\n")
     user = (
         f"## 研究目标\n{goal}\n\n## 研究问题\n" + "\n".join(f"- {q}" for q in questions) + "\n\n"
         + "\n".join(body)
@@ -184,7 +190,7 @@ def synthesis_prompt(cfg: Config, goal: str, questions: list[str], read_sources:
 # ----------------------------------------------------------------------
 def novelty_prompt(cfg: Config, goal: str, synthesis: str, knowledge_ctx: list[dict]):
     system = SYSTEM_ROLE_MARKER.format(role="novelty") + "\n\n" + SYSTEM_BASE + (
-        "你负责判定本次研究相对用户已有知识到底新在哪里。\n"
+        "你负责判定本次研究相对研究知识库的新内容，不得推断用户掌握程度。\n"
         "规则：\n"
         "- high = 真正的新技术/新概念/新关系；medium = 已有概念的实质性延伸；low = 已有概念的重新包装。\n"
         "- 如果只是再次提出用户已知的观点，必须标 low 并说明是哪个已有概念。\n"

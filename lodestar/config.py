@@ -20,6 +20,9 @@ class Config:
     llm_mode: str = "live"          # live | mock（mock = 离线夹具，冒烟/回归用）
     search_mode: str = "live"       # live | mock（mock = 检索/读取也走离线夹具，全离线可复现）
     # --- LLM ---
+    model_calls_disabled: bool = False  # operational kill switch; mock remains usable
+    llm_provider: str = "anthropic"
+    llm_base_url: str = ""
     model: str = "claude-sonnet-5"
     judge_model: str = "claude-haiku-4-5-20251001"
     max_tokens: int = 4000
@@ -82,6 +85,12 @@ def load_config() -> Config:
     c = Config()
     c.llm_mode = os.getenv("LODESTAR_LLM_MODE", c.llm_mode)
     c.search_mode = os.getenv("LODESTAR_SEARCH_MODE", c.search_mode)
+    c.model_calls_disabled = os.getenv("LODESTAR_MODEL_CALLS_DISABLED", "false").lower() in {"1", "true", "yes", "on"}
+    c.llm_provider = os.getenv("LODESTAR_LLM_PROVIDER", c.llm_provider)
+    c.llm_base_url = os.getenv("LODESTAR_LLM_BASE_URL", c.llm_base_url)
+    if c.llm_provider == "dashscope":
+        c.model = "qwen-flash"
+        c.judge_model = "qwen-flash"
     c.model = os.getenv("LODESTAR_MODEL", c.model)
     if os.getenv("LODESTAR_CONVERSATION_TIMEOUT"):
         c.conversation_timeout_s = max(15, min(int(os.environ["LODESTAR_CONVERSATION_TIMEOUT"]), 120))

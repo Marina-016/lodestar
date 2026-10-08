@@ -85,3 +85,62 @@ def assess(ws,llm,project_id,recommendation_id,goal):
             (recommendation_id,saved['id'],result['status'],json.dumps(result,ensure_ascii=False),
              datetime.now(timezone.utc).isoformat(timespec='seconds')))
     return {**result,'assessment_id':cursor.lastrowid,'read_id':saved['id']}
+
+
+def plan(ws,llm,project_id,recommendation_id,goal,assessment_id=None):
+    saved=evidence(ws,project_id,recommendation_id)
+    if saved is None:
+        raise ValueError('Read the candidate before generating a plan')
+    query='SELECT * FROM paper_candidate_assessments WHERE recommendation_id=?'
+    parameters=[recommendation_id]
+    if assessment_id is not None:
+        query+=' AND id=?';parameters.append(assessment_id)
+    else:
+        query+=" AND status='assessed'"
+    row=ws.conn.execute(query+' ORDER BY id DESC LIMIT 1',parameters).fetchone()
+    if row is None:
+        return {'status':'needs_assessment','model_calls':0}
+    assessment=json.loads(row['result'])
+    result={'status':'needs_assessment','model_calls':0}
+    if row['read_id']!=saved['id']:
+        result['status']='needs_reassessment'
+    elif row['status']!='assessed' or not assessment.get('contract_valid'):
+        result['reason']='Assessment has not passed the evidence contract'
+    elif assessment['assessment']['decision']=='not_applicable':
+        result['status']='not_applicable'
+    else:
+        snapshot=assessment['evidence_snapshot']
+        stale=False
+        for document in snapshot['documents']:
+            current=repo.get_project_document(ws.conn,document['id'])
+            if not current or current['project_id']!=project_id or current['path']!=document['path'] or current['content'][:4000]!=document['content']:
+                stale=True
+                break
+        live=llm is None or getattr(llm,'mode',None)=='live'
+        from lodestar.agent.project_evidence import export_allowed
+        project=repo.get_project(ws.conn,project_id)
+        if stale:
+            result['status']='needs_reassessment'
+        elif live and (not export_allowed(ws.config,project) or any(d['path'] not in ws.config.project_model_allowed_paths for d in snapshot['documents'])):
+            result['status']='needs_export_scope'
+        elif live and assessment.get('mode')!='live':
+            result['status']='needs_live_assessment'
+        else:
+            from lodestar.agent.project_plan import _generate
+            context={'status':'ready','documents':snapshot['documents'],'papers':snapshot['papers'],
+                     'missing':assessment.get('missing_evidence',[])}
+            result=_generate(ws,llm,goal,project_id,context,assessment['assessment'])
+    result.update(assessment_id=row['id'],read_id=row['read_id'],recommendation_id=recommendation_id,
+                  applicability_review=assessment.get('semantic_review','required'))
+    with ws.conn:
+        cursor=ws.conn.execute('INSERT INTO paper_candidate_plans(recommendation_id,assessment_id,read_id,status,result,created_at) VALUES(?,?,?,?,?,?)',
+            (recommendation_id,row['id'],row['read_id'],result['status'],json.dumps(result,ensure_ascii=False),
+             datetime.now(timezone.utc).isoformat(timespec='seconds')))
+    return {**result,'plan_id':cursor.lastrowid}
+
+
+def plans(ws,project_id,recommendation_id):
+    _recommendation(ws,project_id,recommendation_id)
+    rows=ws.conn.execute('SELECT * FROM paper_candidate_plans WHERE recommendation_id=? ORDER BY id DESC LIMIT 20',
+                         (recommendation_id,)).fetchall()
+    return [{**dict(row),'result':json.loads(row['result'])} for row in rows]

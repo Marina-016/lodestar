@@ -85,3 +85,96 @@ class CandidateTests(unittest.TestCase):
                                  reader=Mock(return_value={'text':'fallback abstract','read_depth':'abstract'}))
         self.assertEqual(refreshed['evidence']['read_depth'],'abstract')
         self.assertEqual(candidate.evidence(self.ws,self.project,self.id)['id'],original['read_id'])
+
+    def _assessed_candidate(self):
+        from dataclasses import replace
+        from lodestar.llm import LLMClient
+        repo.replace_project_documents(self.ws.conn,self.project,[
+            {'path':'core.py','content':'memory checkpoint store with traceable bounded evidence'}])
+        candidate.read(self.ws,self.project,self.id,reader=self.reader)
+        assessment=candidate.assess(self.ws,LLMClient(replace(self.config,llm_mode='mock')),
+                                    self.project,self.id,'memory')
+        self.assertEqual(assessment['status'],'assessed')
+        return assessment
+
+    def _plan_client(self):
+        paper=candidate.evidence(self.ws,self.project,self.id)['evidence']
+        llm=Mock();llm.mode='mock'
+        llm.complete_json.return_value={
+            'problem':{'description':'Bound memory evidence', 'project_refs':[{
+                'path':'core.py','quote':'memory checkpoint store with traceable bounded evidence'}]},
+            'method':{'description':'Unverified paper transfer hypothesis','paper_refs':[{
+                'url':paper['url'],'quote':paper['content'][:80]}]},
+            'changes':[{'path':'core.py','description':'Preserve source offsets'}],
+            'experiment':{'hypothesis':'Better traceability','baseline':'current','candidate':'offsets',
+                          'metrics':['manual source location accuracy'],'constraints':['fixed tasks']},
+            'risks':['no demonstrated benefit'],'missing_evidence':['No A/B executed']}
+        return llm
+
+    def test_plan_uses_assessed_snapshot_and_persists_lineage(self):
+        assessment=self._assessed_candidate();llm=self._plan_client()
+        result=candidate.plan(self.ws,llm,self.project,self.id,'new wording',assessment['assessment_id'])
+        self.assertTrue(result['contract_valid'])
+        self.assertEqual(result['assessment_id'],assessment['assessment_id'])
+        self.assertEqual(result['read_id'],assessment['read_id'])
+        self.assertEqual(result['execution_status'],'not_run')
+        payload=json.loads(llm.complete_json.call_args.args[2])
+        self.assertEqual(payload['documents'],assessment['evidence_snapshot']['documents'])
+        self.assertEqual(payload['unreviewed_applicability']['decision'],'uncertain')
+        self.assertEqual(candidate.plans(self.ws,self.project,self.id)[0]['id'],result['plan_id'])
+
+    def test_new_read_or_changed_project_requires_reassessment(self):
+        self._assessed_candidate();llm=self._plan_client()
+        candidate.read(self.ws,self.project,self.id,refresh=True,reader=self.reader)
+        self.assertEqual(candidate.plan(self.ws,llm,self.project,self.id,'memory')['status'],'needs_reassessment')
+        llm.complete_json.assert_not_called()
+        self._assessed_candidate()
+        repo.replace_project_documents(self.ws.conn,self.project,[{'path':'core.py','content':'changed memory code'}])
+        self.assertEqual(candidate.plan(self.ws,llm,self.project,self.id,'memory')['status'],'needs_reassessment')
+        llm.complete_json.assert_not_called()
+
+    def test_plan_requires_assessment_and_does_not_promote_non_applicable(self):
+        candidate.read(self.ws,self.project,self.id,reader=self.reader)
+        llm=self._plan_client()
+        self.assertEqual(candidate.plan(self.ws,llm,self.project,self.id,'memory')['status'],'needs_assessment')
+        assessment=self._assessed_candidate()
+        stored={k:v for k,v in assessment.items() if k not in ('assessment_id','read_id')}
+        stored['assessment']['decision']='not_applicable'
+        self.ws.conn.execute('UPDATE paper_candidate_assessments SET result=? WHERE id=?',
+                             (json.dumps(stored),assessment['assessment_id']))
+        self.ws.conn.commit()
+        self.assertEqual(candidate.plan(self.ws,llm,self.project,self.id,'memory')['status'],'not_applicable')
+        llm.complete_json.assert_not_called()
+
+    def test_mock_assessment_cannot_feed_live_plan(self):
+        self._assessed_candidate()
+        repo.upsert_project(self.ws.conn,'Project',url='https://github.com/example/project',status='active')
+        self.config.project_model_allowed_repository='https://github.com/example/project'
+        self.config.project_model_allowed_paths=('core.py',)
+        llm=self._plan_client();llm.mode='live'
+        self.assertEqual(candidate.plan(self.ws,llm,self.project,self.id,'memory')['status'],'needs_live_assessment')
+        llm.complete_json.assert_not_called()
+
+    def test_experiment_links_measured_outputs_to_plan_without_adoption(self):
+        from lodestar.agent import candidate_experiment
+        self._assessed_candidate()
+        plan=candidate.plan(self.ws,self._plan_client(),self.project,self.id,'memory')
+        root=Path(self.temp.name)
+        protocol=root/'protocol.json'
+        protocol.write_text(json.dumps({'version':1,'hypothesis':'fixed exact-output diagnostic',
+            'dataset_kind':'functional_fixture','grader':'exact_output',
+            'cases':[{'id':'one','input':1,'expected':2}]}),encoding='utf-8')
+        baseline=root/'baseline.py';other=root/'other.py'
+        baseline.write_text("import json;print(json.dumps({'status':'complete','results':[{'case_id':'one','output':1}]}))",encoding='utf-8')
+        other.write_text("import json;print(json.dumps({'status':'complete','results':[{'case_id':'one','output':2}]}))",encoding='utf-8')
+        result=candidate_experiment.execute(self.ws,self.project,self.id,plan['plan_id'],protocol,baseline,other,root/'ab')
+        self.assertEqual(result['verdict'],'measured')
+        self.assertEqual(result['adoption_status'],'not_decided')
+        self.assertEqual(result['lineage']['plan_id'],plan['plan_id'])
+        self.assertEqual(result['lineage']['read_id'],plan['read_id'])
+        self.assertEqual(candidate_experiment.history(self.ws,self.project,self.id)[0]['id'],result['experiment_id'])
+        stored=json.loads((root/'ab/result.json').read_text(encoding='utf-8'))
+        self.assertEqual(stored['lineage'],result['lineage'])
+        with self.assertRaises(ValueError):
+            candidate_experiment.execute(self.ws,self.project,self.id,999,protocol,baseline,other,root/'invalid')
+        self.assertFalse((root/'invalid').exists())

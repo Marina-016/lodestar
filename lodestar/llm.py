@@ -144,7 +144,18 @@ class MockLLM:
                 'paper_refs':[{'url':paper['url'],'quote':paper['content'][:100]}],
                 'limitations':['需要真实模型输出和人工语义核对']}, ensure_ascii=False)
         if role == "technical_plan":
-            return json.dumps({"missing_evidence": ["Offline fixture has no grounded proposal"]})
+            context = json.loads(user)
+            document, paper = context['documents'][0], context['papers'][0]
+            return json.dumps({
+                'problem':{'description':'离线流程夹具：保存与核对来源证据，不判断实际项目问题',
+                    'project_refs':[{'path':document['path'],'quote':document['content'][:100]}]},
+                'method':{'description':'离线夹具，论文方法和项目迁移均未作语义判断',
+                    'paper_refs':[{'url':paper['url'],'quote':paper['content'][:100]}]},
+                'changes':[{'path':document['path'],'description':'离线夹具：保留来源定位元数据，不执行代码'}],
+                'experiment':{'hypothesis':'未验证的流程夹具假设','baseline':'现有流程占位',
+                    'candidate':'候选流程占位','metrics':['来源元数据保留诊断'],
+                    'constraints':['离线夹具，不能证明语义适用或实验收益']},
+                'risks':['未评估真实语义适用性'],'missing_evidence':['真实模型评估与实际实验尚缺']},ensure_ascii=False)
         if role == "conversation":
             return "离线会话夹具：复用已保存证据；不代表真实模型推理结果。"
         if role == "learning_exposure":

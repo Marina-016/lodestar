@@ -18,6 +18,14 @@ CREATE TABLE IF NOT EXISTS paper_recommendations (
  last_seen TEXT NOT NULL, channels TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'unread',
  UNIQUE(project_id, paper_key)
 );
+CREATE TABLE IF NOT EXISTS paper_candidate_experiments (
+ id INTEGER PRIMARY KEY, recommendation_id INTEGER NOT NULL, plan_id INTEGER NOT NULL,
+ result_path TEXT NOT NULL, result TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS paper_candidate_plans (
+ id INTEGER PRIMARY KEY, recommendation_id INTEGER NOT NULL, assessment_id INTEGER NOT NULL,
+ read_id INTEGER NOT NULL, status TEXT NOT NULL, result TEXT NOT NULL, created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS paper_candidate_assessments (
  id INTEGER PRIMARY KEY, recommendation_id INTEGER NOT NULL, read_id INTEGER NOT NULL,
  status TEXT NOT NULL, result TEXT NOT NULL, created_at TEXT NOT NULL

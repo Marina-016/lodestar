@@ -68,3 +68,10 @@ live 项目上下文须同时匹配 LODESTAR_PROJECT_MODEL_ALLOWED_REPOSITORY �
 适用性评估暂未进行新一轮真实模型调用。已验证真实候选正文读取与会话交接，记录在 workspace/watch-validation-20261008/candidate-read.json、candidate-handoff.json。语义适用性及整条链路的真实模型验收仍待后续推进。
 
 本轮扩展后最终 100 项 unittest 通过，CLI mock 评估/未授权 live 阻止验证见 workspace/watch-validation-20261008/candidate-cli-assessment.json。旧式模型项目关联会外发名称/描述/技术栈，现已在 live 模式跳过，避免绕过精确文件白名单；离线演示保持原流程。演示索引采用已声明的核心路径优先，防止文档增长挤掉必要代码证据，仍遵守文件预算与根目录边界。
+
+
+## 候选到方案与实验（2026-10-08）
+
+新增 watch plan/plans/experiment/experiments。方案复用选定适用性评估的论文与项目证据快照，不因新 goal 静默换一组证据。正文重读或已绑定项目片段改变后返回 needs_reassessment。默认选择最近成功评估，失败尝试不覆盖成功记录；not_applicable 不继续生成方案，mock/test 评估不能直接进入 live 方案。所有草案保留 semantic_review required。
+
+成对实验保存方案血缘及实际输出，详见 [paired-experiments.md](paired-experiments.md)。112 项全量 unittest 通过，隔离 agent-pipeline-demo CLI 完成，模型调用与掌握事件均为零。真实发现/阅读已验证；新增评估与方案仍只有本地夹具验收，当前百炼控制台未登录，免费额度未重新确认，因此未调用模型。历史测试数量是当时阶段记录。

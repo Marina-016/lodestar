@@ -26,11 +26,16 @@ Do not assert a pretrained model provides task-specific labels without supplied 
 
 def generate(ws, llm, goal: str, sources: list[dict], project_id: int) -> dict:
     from lodestar.agent.project_evidence import collect
-    context_evidence=collect(ws,goal,sources,project_id,live=getattr(llm,'mode',None)=='live')
+    context_evidence=collect(ws,goal,sources,project_id,live=llm is None or getattr(llm,'mode',None)=='live')
+    return _generate(ws,llm,goal,project_id,context_evidence)
+
+
+def _generate(ws,llm,goal,project_id,context_evidence,assessment=None):
     documents=context_evidence['documents']
     papers=context_evidence['papers']
     missing=context_evidence['missing']
-    result={'status':'draft','project_id':project_id,'project_documents':[
+    mode='not_called' if llm is None else ('live' if getattr(llm,'mode',None)=='live' else 'mock' if getattr(llm,'mode',None)=='mock' else 'test')
+    result={'mode':mode,'status':'draft','project_id':project_id,'project_documents':[
         {k:d[k] for k in ('id','path','indexed_at')} for d in documents],
         'paper_urls':[p['url'] for p in papers],'missing_evidence':missing,
         'semantic_review':'pending','execution_status':'not_run'}
@@ -41,8 +46,13 @@ def generate(ws, llm, goal: str, sources: list[dict], project_id: int) -> dict:
         result.update(contract_valid=False,plan='Evidence is insufficient for a grounded proposal.')
         return result
     result['evidence_snapshot']={'documents':documents,'papers':papers}
+    if llm is None:
+        return {**result,'status':'model_disabled','contract_valid':False,'model_calls':0,
+                'plan':'Model calls are disabled; evidence retained.'}
     context={'goal':goal,'project':{'id':project_id},
              'documents':documents,'papers':papers}
+    if assessment is not None:
+        context['unreviewed_applicability']={k:assessment[k] for k in ('decision','transfer_hypothesis','limitations')}
     try:
         proposal=llm.complete_json('technical_plan',SYSTEM,json.dumps(context,ensure_ascii=False))
         canonicalize_quotes(proposal,documents,papers)

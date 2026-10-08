@@ -41,6 +41,14 @@ def cmd_research(args, cfg):
     ws.close()
 
 
+def cmd_ab(args, cfg):
+    from lodestar.eval.paired import run
+    report = run(args.protocol, args.baseline, args.candidate, args.out, args.timeout)
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    if report['verdict'] in {'inconclusive', 'fail'}:
+        raise SystemExit(1)
+
+
 def cmd_watch(args, cfg):
     from lodestar.agent import watch
     from lodestar.memory import watch as store
@@ -50,14 +58,26 @@ def cmd_watch(args, cfg):
     try:
         if args.action == 'add':
             result = watch.subscribe(ws, args.project_id, args.query, args.term, args.interval_hours)
-        elif args.action in {'read', 'evidence', 'handoff', 'assess'}:
+        elif args.action in {'experiment', 'experiments'}:
+            from lodestar.agent import candidate_experiment
+            if args.action == 'experiment':
+                result = candidate_experiment.execute(ws, args.project_id, args.recommendation_id,
+                    args.plan_id, args.protocol, args.baseline, args.candidate, args.out, args.timeout)
+            else:
+                result = candidate_experiment.history(ws, args.project_id, args.recommendation_id)
+        elif args.action in {'read', 'evidence', 'handoff', 'assess', 'plan', 'plans'}:
             from lodestar.agent import candidate
-            if args.action == 'assess':
+            if args.action in {'assess', 'plan'}:
                 from lodestar.agent.project_evidence import export_allowed
                 project = repo.get_project(ws.conn, args.project_id)
                 blocked = cfg.llm_mode == 'live' and (cfg.model_calls_disabled or not project or not export_allowed(cfg, project))
                 client = None if blocked else LLMClient(cfg)
-                result = candidate.assess(ws, client, args.project_id, args.recommendation_id, args.goal)
+                if args.action == 'assess':
+                    result = candidate.assess(ws, client, args.project_id, args.recommendation_id, args.goal)
+                else:
+                    result = candidate.plan(ws, client, args.project_id, args.recommendation_id, args.goal, args.assessment_id)
+            elif args.action == 'plans':
+                result = candidate.plans(ws, args.project_id, args.recommendation_id)
             elif args.action == 'read':
                 result = candidate.read(ws, args.project_id, args.recommendation_id, refresh=args.refresh)
             elif args.action == 'evidence':
@@ -634,6 +654,14 @@ def main(argv=None):
     erun.add_argument("--timeout", type=int, default=30)
     pe.set_defaults(fn=cmd_experiment)
 
+    pab = sub.add_parser('ab', help='Run reviewed Python arms on a fixed exact-output protocol')
+    pab.add_argument('--protocol', required=True)
+    pab.add_argument('--baseline', required=True)
+    pab.add_argument('--candidate', required=True)
+    pab.add_argument('--out', required=True, help='New immutable result directory')
+    pab.add_argument('--timeout', type=int, default=30)
+    pab.set_defaults(fn=cmd_ab)
+
     pw = sub.add_parser('watch', help='Model-free scheduled public paper discovery')
     wsub = pw.add_subparsers(dest='action', required=True)
     wa = wsub.add_parser('add')
@@ -651,13 +679,20 @@ def main(argv=None):
     ww.add_argument('--offline', action='store_true')
     wi = wsub.add_parser('inbox')
     wi.add_argument('--project-id', type=int, required=True)
-    for action in ('read', 'evidence', 'handoff', 'assess'):
+    for action in ('read', 'evidence', 'handoff', 'assess', 'plan', 'plans', 'experiment', 'experiments'):
         action_parser = wsub.add_parser(action)
         action_parser.add_argument('--project-id', type=int, required=True)
         action_parser.add_argument('--recommendation-id', type=int, required=True)
-        if action == 'assess':
+        if action == 'experiment':
+            action_parser.add_argument('--plan-id', type=int, required=True)
+            for field in ('protocol', 'baseline', 'candidate', 'out'):
+                action_parser.add_argument('--'+field, required=True)
+            action_parser.add_argument('--timeout', type=int, default=30)
+        if action in {'assess', 'plan'}:
             action_parser.add_argument('--goal', required=True)
             action_parser.add_argument('--mock', action='store_true')
+        if action == 'plan':
+            action_parser.add_argument('--assessment-id', type=int)
         if action == 'read':
             action_parser.add_argument('--refresh', action='store_true')
             action_parser.add_argument('--offline', action='store_true')
@@ -671,10 +706,17 @@ def main(argv=None):
     pad.add_argument("--out", required=True, help="New isolated output directory")
     pad.add_argument("--recording", help="Directory containing saved research/followup JSON for replay")
 
+    ppd = sub.add_parser('agent-pipeline-demo', help='Isolated candidate-to-A/B fixture demonstration')
+    ppd.add_argument('--out', required=True)
+
     args = p.parse_args(argv)
     if args.cmd == "agent-demo":
         from lodestar.agent.demo import run_demo
         print(json.dumps(run_demo(Path(args.out), Path(args.recording) if args.recording else None), ensure_ascii=False, indent=2))
+        return
+    if args.cmd == 'agent-pipeline-demo':
+        from lodestar.agent.pipeline_demo import run
+        print(json.dumps(run(args.out), ensure_ascii=False, indent=2))
         return
     cfg = _make_config(args)
     args.fn(args, cfg)

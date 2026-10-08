@@ -18,6 +18,15 @@ def export_allowed(config, project):
                 and config.project_model_allowed_paths)
 
 
+def paper_context(source):
+    """Carry source-location metadata through the bounded proposal context."""
+    return {'url':source['url'],'content':source['content'][:10000],
+                       'read_depth':source.get('read_depth'),'coverage':source.get('coverage'),
+                       'evidence_spans':source.get('evidence_spans',[]),
+                       'context_truncated':len(source['content'])>10000,
+                       'span_coordinates':'Original extracted source offsets; not PDF page coordinates or semantic proof.'}
+
+
 def collect(ws, goal, sources, project_id, *, live=False):
     project=repo.get_project(ws.conn,project_id)
     if project is None:
@@ -43,11 +52,7 @@ def collect(ws, goal, sources, project_id, *, live=False):
             continue
         if live and source.get('read_mode')=='mock':
             continue
-        papers.append({'url':source['url'],'content':source['content'][:10000],
-                       'read_depth':source.get('read_depth'),'coverage':source.get('coverage'),
-                       'evidence_spans':source.get('evidence_spans',[]),
-                       'context_truncated':len(source['content'])>10000,
-                       'span_coordinates':'Original extracted source offsets; not PDF page coordinates or semantic proof.'})
+        papers.append(paper_context(source))
         if len(papers)==2:
             break
     missing=[]

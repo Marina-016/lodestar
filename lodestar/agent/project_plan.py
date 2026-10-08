@@ -19,6 +19,9 @@ Do not claim correctness from keyword overlap, quote presence, or unavailable ex
 Lexical counts may be diagnostics only, never coverage_verified, semantic correctness or confidence.
 For semantic metrics specify human-labelled cases; do not invent an evaluator or improvement threshold.
 Separate paper findings, project-specific hypotheses and what the proposed experiment actually measures.
+Bounded excerpts do not establish absence elsewhere in a project. Describe suspected defects as hypotheses unless directly demonstrated by supplied code; never contradict an explicit existing separation or guard.
+Never infer trusted provenance or user evidence from keywords, user-ID-like text or a hardcoded label in a generic retriever. Provenance must come from an explicit caller/source contract; if that contract is not supplied, record the gap instead of proposing fabricated labels.
+Do not turn an uncertain applicability decision into an established need. Explain any architecture mismatch and which evidence would justify the intervention.
 Prefer a small deterministic change to existing data flow. Missing support belongs in missing_evidence.
 Do not assert a pretrained model provides task-specific labels without supplied evidence.
 """

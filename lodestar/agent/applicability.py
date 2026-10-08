@@ -14,6 +14,7 @@ Return JSON: {"decision":"relevant|uncertain|not_applicable", "paper_method":"..
 "limitations":["specific missing evidence"]}.
 Separate paper findings from project hypotheses. Use exact source quotes, preferably quote_candidates.
 Keyword overlap or exact quotes do not establish semantic applicability or correctness.
+Limit project claims to supplied excerpts; unseen implementation is unknown, not absent. Distinguish existing mechanisms from unverified deficiencies, and do not propose provenance inferred from text keywords.
 Do not invent dependencies, benchmark scores, gains, unseen methods or user mastery.
 When evidence is incomplete prefer uncertain; no experiment has run. Do not generate executable code.
 """

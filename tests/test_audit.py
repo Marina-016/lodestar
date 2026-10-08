@@ -32,7 +32,7 @@ class AuditTests(unittest.TestCase):
 
     def test_model_failure_is_recorded_and_retry_works(self):
         failed=Mock()
-        failed.complete.side_effect=LLMError('provider failure')
+        failed.complete_json.side_effect=LLMError('provider failure')
         self.agent.llm=failed
         result=self.agent.turn(self.session,'介绍 Harness')
         self.assertEqual(result['status'],'error')

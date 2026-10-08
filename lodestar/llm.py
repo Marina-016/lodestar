@@ -156,6 +156,8 @@ class MockLLM:
                     'candidate':'候选流程占位','metrics':['来源元数据保留诊断'],
                     'constraints':['离线夹具，不能证明语义适用或实验收益']},
                 'risks':['未评估真实语义适用性'],'missing_evidence':['真实模型评估与实际实验尚缺']},ensure_ascii=False)
+        if role == "conversation_grounded":
+            return json.dumps({"claims": [], "hypotheses": [], "gaps": ["离线会话夹具：复用已保存证据；不代表真实模型推理结果。"]}, ensure_ascii=False)
         if role == "conversation":
             return "离线会话夹具：复用已保存证据；不代表真实模型推理结果。"
         if role == "learning_exposure":

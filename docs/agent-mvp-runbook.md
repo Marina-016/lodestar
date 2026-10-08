@@ -95,4 +95,4 @@ try {
 
 项目订阅和候选的实际命令顺序是 watch add → tick/worker → inbox → read → evidence/handoff → assess → plan。模型门禁和三文件授权仍适用。propose_change 审阅两组实现后显式 watch experiment；investigate 使用独立协议运行诊断，再 context-policy-check 和 watch investigation；no_change 保留理由。详细参数见 proactive-paper-discovery.md、paired-experiments.md、context-policy-investigation.md。
 
-追问现在也提取 supported explained 方法接触，提取失败保留回答及审计元数据，不提升掌握。程序附上实际提供的论文链接及有界范围，来源清单不代表逐句核验。真实验证已确认双重引用和 unknown 掌握；回答对来源保存机制仍有未支持推断，需继续改进，不能称通用讲解质量已验收。
+追问现在也提取 supported explained 方法接触，提取失败保留回答及审计元数据，不提升掌握。程序附上实际提供的论文链接及有界范围，来源清单不代表逐句核验。真实验证已确认双重引用和 unknown 掌握；结构化输出区分论文事实、推测、缺口和一般知识，引用不匹配的陈述不交付。当前代码回放已将来源保存机制列为缺口；这只验收本次问题，不是通用语义质量保证。

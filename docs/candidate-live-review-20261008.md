@@ -18,3 +18,10 @@
 方案现有三种 action：propose_change、investigate、no_change。后两者要求明确理由和 changes=[]，保持引用与缺口校验；不允许启动绑定方案的实现 A/B。旧草案缺少 action 时按 propose_change 兼容。诊断协议可以保留，但不代表执行或采用。
 
 workspace/candidate-live-action-validation-20261008 完成真实 12000 字符正文、uncertain 评估和 no_change 草案。人工审核认为本例无需改动的结论可接受：现有 learning.py 已限制 actor 与掌握事件，论文尚未提供具体可转移方法。不是把高层记忆概念强行改造成来源标签。保留真实输入/引用/用量/manifest/review；不声称一次运行证明整体语义可靠性，没有实验收益或掌握变化。
+
+
+## 第二篇论文：Context Language Models
+
+真实 watch 候选 arXiv:2609.37725 已读取 12000 字符正文片段；记录在 workspace/candidate-context-validation-20261008。该论文把上下文作为模型可编辑文件，是一个具体的上下文管理方法。真实评估返回 uncertain，草案选择 investigate、changes=[]，将后续工作限定为临时研究上下文的接口兼容与隔离检查。
+
+人工审核接受其作为调查方向：可以在独立实验中比较可编辑临时上下文与受限 append-only 策略，但不能宣称当前整个项目都是 append-only，也不能编辑原始引文或用户掌握事件。输出为英文，未遵守中文要求，需要改进语言质量。当前没有完整 CLM 实现、论文基准复现或项目收益证明。下一步先完成本地接口/隔离调查，再准备固定任务和明确预算的受限原型；不能把受限原型说成论文完整实现。

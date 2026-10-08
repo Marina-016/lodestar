@@ -104,3 +104,22 @@ class WatchTests(unittest.TestCase):
         self.assertEqual(len(inbox),2)
         self.assertEqual({r['source']['discovery_mode'] for r in inbox},{'test','mock'})
         self.assertEqual(sum(r['paper_key'].startswith('fixture:') for r in inbox),1)
+
+    def test_new_version_resets_read_state_and_old_version_cannot_downgrade(self):
+        version = [1]
+        def discover(ws,query,*,kind,**kwargs):
+            return {'status':'ok','sources':[{'title':'Agent memory','url':'https://arxiv.org/abs/2601.00001v'+str(version[0])}]}
+        watch.tick(self.ws,now=self.now,discovery=discover)
+        self.ws.conn.execute("UPDATE paper_recommendations SET state='read'");self.ws.conn.commit()
+        version[0]=2
+        watch.tick(self.ws,now=self.now+timedelta(days=1),discovery=discover)
+        row=store.inbox(self.ws.conn,self.project)[0]
+        self.assertEqual(row['state'],'unread')
+        self.assertTrue(row['source']['url'].endswith('v2'))
+        self.ws.conn.execute("UPDATE paper_recommendations SET state='read'");self.ws.conn.commit()
+        version[0]=1
+        watch.tick(self.ws,now=self.now+timedelta(days=2),discovery=discover)
+        rows=store.inbox(self.ws.conn,self.project)
+        self.assertEqual(len(rows),1)
+        self.assertEqual(rows[0]['state'],'read')
+        self.assertTrue(rows[0]['source']['url'].endswith('v2'))

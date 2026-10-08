@@ -33,6 +33,11 @@ def match_terms(source, terms):
     return matches
 
 
+def _version(source):
+    match = re.search(r'v(\d+)$', urlparse(source.get('url', '')).path)
+    return int(match.group(1)) if match else 0
+
+
 def tick(ws, *, now=None, discovery=discover, limit=10):
     fixed_clock = now is not None
     now = now or datetime.now(timezone.utc)
@@ -74,13 +79,20 @@ def tick(ws, *, now=None, discovery=discover, limit=10):
                     if key not in candidates:
                         candidates[key] = {'source':{**source, 'discovery_mode':report.get('mode','live')},
                                            'matches':matched,'channels':[]}
+                    elif _version(source) > _version(candidates[key]['source']):
+                        candidates[key]['source'] = {**source, 'discovery_mode': report.get('mode', 'live')}
+                        candidates[key]['matches'] = matched
                     candidates[key]['channels'].append(kind)
             for key,item in candidates.items():
-                old = ws.conn.execute('SELECT channels FROM paper_recommendations WHERE project_id=? AND paper_key=?',
+                old = ws.conn.execute('SELECT channels,source,matches FROM paper_recommendations WHERE project_id=? AND paper_key=?',
                                       (row['project_id'],key)).fetchone()
+                if old and _version(json.loads(old['source'])) > _version(item['source']):
+                    item['source'] = json.loads(old['source'])
+                    item['matches'] = json.loads(old['matches'])
                 channels = sorted(set(item['channels'] + (json.loads(old['channels']) if old else [])))
                 ws.conn.execute("""INSERT INTO paper_recommendations(project_id,paper_key,source,matches,first_seen,last_seen,channels)
                     VALUES(?,?,?,?,?,?,?) ON CONFLICT(project_id,paper_key) DO UPDATE SET
+                    state=CASE WHEN json_extract(paper_recommendations.source,'$.url') != json_extract(excluded.source,'$.url') THEN 'unread' ELSE paper_recommendations.state END,
                     source=excluded.source,matches=excluded.matches,last_seen=excluded.last_seen,channels=excluded.channels""",
                     (row['project_id'],key,json.dumps(item['source'],ensure_ascii=False),json.dumps(item['matches'],ensure_ascii=False),
                      stamp,stamp,json.dumps(channels)))

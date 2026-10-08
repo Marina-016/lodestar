@@ -49,6 +49,14 @@ def cmd_ab(args, cfg):
         raise SystemExit(1)
 
 
+def cmd_ab_check(args, cfg):
+    from lodestar.eval.paired import verify
+    result = verify(args.directory)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    if result['status'] != 'consistent':
+        raise SystemExit(1)
+
+
 def cmd_watch(args, cfg):
     from lodestar.agent import watch
     from lodestar.memory import watch as store
@@ -661,6 +669,10 @@ def main(argv=None):
     pab.add_argument('--out', required=True, help='New immutable result directory')
     pab.add_argument('--timeout', type=int, default=30)
     pab.set_defaults(fn=cmd_ab)
+
+    pac = sub.add_parser('ab-check', help='Recompute saved A/B scores without executing code')
+    pac.add_argument('directory')
+    pac.set_defaults(fn=cmd_ab_check)
 
     pw = sub.add_parser('watch', help='Model-free scheduled public paper discovery')
     wsub = pw.add_subparsers(dest='action', required=True)

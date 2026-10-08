@@ -2,7 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from lodestar.eval.paired import run,validate_protocol
+from lodestar.eval.paired import run,validate_protocol,verify
 
 
 class PairedTests(unittest.TestCase):
@@ -76,3 +76,29 @@ class PairedTests(unittest.TestCase):
         report=run(self.path,self.base,self.candidate,self.root/'deleted-protocol')
         self.assertEqual(report['artifact_integrity'],'changed_during_run')
         self.assertTrue((self.root/'deleted-protocol/result.json').exists())
+
+    def test_verifier_rederives_outputs_and_rejects_edited_scores(self):
+        output=self.root/'verify'
+        report=run(self.path,self.base,self.candidate,output)
+        self.assertEqual(verify(output)['status'],'consistent')
+        report['arms']['candidate']['exact_output_rate']=0
+        (output/'result.json').write_text(json.dumps(report),encoding='utf-8')
+        self.assertEqual(verify(output)['status'],'invalid')
+
+    def test_verifier_checks_input_hash_and_verdict(self):
+        output=self.root/'verify'
+        report=run(self.path,self.base,self.candidate,output)
+        report['verdict']='pass'
+        (output/'result.json').write_text(json.dumps(report),encoding='utf-8')
+        self.assertEqual(verify(output)['status'],'invalid')
+        report['verdict']='measured'
+        (output/'result.json').write_text(json.dumps(report),encoding='utf-8')
+        (output/'input.json').write_text('{}',encoding='utf-8')
+        self.assertEqual(verify(output)['status'],'invalid')
+
+    def test_verifier_missing_artifacts_and_failed_runs(self):
+        self.assertEqual(verify(self.root/'missing')['status'],'invalid')
+        self.candidate.write_text('raise ValueError("failure")',encoding='utf-8')
+        output=self.root/'failed'
+        run(self.path,self.base,self.candidate,output)
+        self.assertEqual(verify(output)['status'],'consistent')

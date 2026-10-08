@@ -31,3 +31,10 @@
 ```
 
 此命令在读取应用配置前建立独立数据库，使用合成论文与 mock 评估/方案，串起读取、评估、方案、会话交接和实际成对实验。实验冻结实际 paper_context 函数，检查 6 个字段传递样本。2026-10-08 记录位于 workspace/agent-pipeline-demo-20261008：基线 3/6、当前函数 6/6，verdict=measured，模型调用和掌握事件均为零。这只是字段传递的功能诊断，不代表真实论文评估、语义准确性或用户掌握。演示不会覆盖已有输出目录。
+
+
+## 记录复核与重跑
+
+`python -m lodestar ab-check RESULT_DIRECTORY` 不执行脚本、不调用模型。它核对协议/输入/代码/评分器哈希，读取原始 stdout 重新评分，并核对差值、判定、lineage 和采用状态；失败返回非零退出码。consistent 只表示本地记录一致，不认证作者身份或标签来源。current_grader_differs 单独提示当前评分器版本与快照不同；复核使用当前 exact_output 规则，不执行归档评分器。
+
+重跑仍使用显式 `ab`：将保存目录内 protocol.json、baseline/arm.py、candidate/arm.py 作为输入，选择新的 --out 目录。执行前仍需检查脚本；不自动执行下载的实验。2026-10-08 在 workspace/agent-pipeline-rerun-20261008 重跑已有六样本实验，逐项输出和差值相同，记录复核 consistent；当前评分器源码因增加复核功能而与原记录不同。此复现只覆盖上述自包含脚本和本机 Python，不代表复杂外部依赖实验复现。

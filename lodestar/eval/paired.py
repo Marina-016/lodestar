@@ -163,3 +163,65 @@ def run(protocol_path,baseline_path,candidate_path,output,timeout=30):
         report.update(verdict='inconclusive',artifact_integrity='changed_during_run')
     _write(output/'result.json',report)
     return report
+
+
+def verify(directory):
+    """Check saved artifacts and independently rederive scores; never execute arms."""
+    directory = Path(directory).resolve()
+    errors = []
+    try:
+        report = _load((directory / 'result.json').read_text(encoding='utf-8'))
+        protocol_bytes = (directory / 'protocol.json').read_bytes()
+        protocol = _load(protocol_bytes.decode('utf-8'))
+        validate_protocol(protocol)
+        artifacts = {'protocol': protocol_bytes,
+                     'input': (directory / 'input.json').read_bytes(),
+                     'grader': (directory / 'grader.py').read_bytes(),
+                     **{arm: (directory / arm / 'arm.py').read_bytes()
+                        for arm in ('baseline', 'candidate')}}
+        for name, content in artifacts.items():
+            if report.get('hashes', {}).get(name) != _hash(content):
+                errors.append(name + ': hash mismatch')
+        payload = {'seed': protocol.get('seed', 0),
+                   'cases': [{'id': case['id'], 'input': case['input']}
+                             for case in protocol['cases']]}
+        if _load(artifacts['input'].decode('utf-8')) != payload:
+            errors.append('input differs from fixed protocol')
+        for arm in ('baseline', 'candidate'):
+            saved = report['arms'][arm]
+            if saved['status'] != 'complete':
+                continue
+            raw = _load((directory / arm / 'stdout.txt').read_text(encoding='utf-8'))
+            derived = _grade(raw, protocol['cases'])
+            if saved.get('rows') != derived['rows'] or saved.get('exact_output_rate') != derived['exact_output_rate']:
+                errors.append(arm + ': recorded score differs from raw outputs')
+        if all(report['arms'][arm]['status'] == 'complete' for arm in ('baseline', 'candidate')):
+            base, cand = (report['arms'][arm] for arm in ('baseline', 'candidate'))
+            delta = cand['exact_output_rate'] - base['exact_output_rate']
+            improved = [b['case_id'] for b, c in zip(base['rows'], cand['rows']) if not b['correct'] and c['correct']]
+            regressed = [b['case_id'] for b, c in zip(base['rows'], cand['rows']) if b['correct'] and not c['correct']]
+            threshold = protocol.get('min_delta')
+            verdict = 'measured' if threshold is None else ('pass' if delta >= threshold and not regressed else 'fail')
+            if report.get('delta') != delta or report.get('improved_cases') != improved or report.get('regressed_cases') != regressed:
+                errors.append('comparison differs from derived outputs')
+            if report.get('verdict') != verdict and report.get('artifact_integrity') != 'changed_during_run':
+                errors.append('verdict differs from protocol')
+        elif report.get('verdict') != 'inconclusive':
+            errors.append('failed execution cannot have a conclusive verdict')
+        for field, expected in {'seed': protocol.get('seed', 0), 'case_count': len(protocol['cases']),
+                                'dataset_kind': protocol['dataset_kind'], 'hypothesis': protocol['hypothesis'],
+                                'grader': protocol['grader']}.items():
+            if report.get(field) != expected:
+                errors.append(field + ': differs from protocol')
+        if report.get('lineage') != protocol.get('lineage'):
+            errors.append('lineage differs from protocol')
+        if report.get('adoption_status') != 'not_decided':
+            errors.append('experiment cannot decide adoption')
+        grader_changed = artifacts['grader'] != Path(__file__).read_bytes()
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, IndexError) as exc:
+        errors.append(type(exc).__name__ + ': ' + str(exc))
+        grader_changed = None
+    return {'status': 'invalid' if errors else 'consistent', 'errors': errors,
+            'directory': str(directory), 'current_grader_differs': grader_changed,
+            'execution': 'not_run', 'semantic_review': 'not_performed',
+            'warning': 'Local consistency check, not authenticated provenance, repeatability or paper benefit.'}

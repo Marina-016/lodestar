@@ -20,13 +20,13 @@ class RoutingTests(unittest.TestCase):
         self.assertEqual(route('“懂了”是什么意思？').intent,'followup')
         self.assertTrue(route('这个方法具体怎么做').supplement)
 
-    def test_auto_feedback_clarifies_then_records_only_self_report(self):
+    def test_auto_feedback_without_topic_answers_without_recording(self):
         with tempfile.TemporaryDirectory() as temp:
             ws=Workspace(Config(llm_mode='mock',search_mode='mock',db_path=Path(temp)/'db',workspace_dir=Path(temp)/'ws'))
             try:
                 agent=ConversationAgent(ws,LLMClient(ws.config))
                 session=agent.start()
-                self.assertEqual(agent.turn(session,'懂了')['status'],'needs_clarification')
+                self.assertEqual(agent.turn(session,'懂了')['status'],'answered')
                 self.assertEqual(learning.profile(ws.conn),[])
                 agent.turn(session,'介绍 Harness',technology='Harness')
                 result=agent.turn(session,'懂了')

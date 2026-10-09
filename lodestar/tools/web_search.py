@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import xml.etree.ElementTree as ET
 
 import requests
 from bs4 import BeautifulSoup
@@ -59,6 +60,21 @@ def _dedup_key(title: str) -> str:
     return "title:" + re.sub(r"[^a-z0-9]+", "", title.lower())[:80]
 
 
+def _search_bing(query: str, max_results: int, timeout: int) -> list[dict]:
+    response = requests.get('https://www.bing.com/search',
+        params={'q': query, 'format': 'rss'}, headers={'User-Agent': UA}, timeout=min(timeout, 12))
+    response.raise_for_status()
+    sources = []
+    for item in ET.fromstring(response.content).findall('./channel/item')[:max_results]:
+        title, url = item.findtext('title', ''), item.findtext('link', '')
+        if not title or not url.startswith(('https://', 'http://')):
+            continue
+        sources.append({'source_type': 'web', 'title': title, 'url': url,
+            'snippet': item.findtext('description', '')[:600], 'date': '',
+            'authors': [], 'dedup_key': _dedup_key(title), 'provider': 'bing'})
+    return sources
+
+
 def tool_search_web(ws, query: str, max_results: int | None = None):
     cfg: Config = ws.config
     max_results = max_results or cfg.web_results_per_query
@@ -71,22 +87,19 @@ def tool_search_web(ws, query: str, max_results: int | None = None):
         return {"sources": [], "error": f"不支持 web_search_backend={cfg.web_search_backend!r}（V0 仅 duckduckgo）"}
     try:
         sources, note = _search_duckduckgo(query, max_results, cfg.tool_timeout_s)
+        if not sources:
+            raise ValueError('DuckDuckGo returned no usable results')
         return {"sources": sources, "note": note}
     except Exception as e:  # noqa: BLE001
-        # Keep live research useful when the general web endpoint is unavailable.
-        # arXiv is an independent, keyless source and preserves evidence provenance.
+        # Keep a general-web fallback: scholarly results cannot replace news.
         try:
-            from lodestar.tools.arxiv_search import _search_arxiv
-            sources = _search_arxiv(query, max_results=max_results, timeout=min(cfg.tool_timeout_s, 12),
-                                    field=cfg.arxiv_search_field)
-            if sources:
-                return {"sources": sources,
-                        "note": "DuckDuckGo unavailable; live arXiv fallback returned " + str(len(sources)) + " sources.",
-                        "fallback": "arxiv"}
+            sources = _search_bing(query, max_results, cfg.tool_timeout_s)
+            return {'sources': sources, 'fallback': 'bing',
+                    'provider_errors': [{'provider': 'duckduckgo', 'error': str(e)}],
+                    'note': f'Bing returned {len(sources)} results; search snippets are not verified publication dates.'}
         except Exception as fallback_error:  # noqa: BLE001
-            return {"sources": [], "error": "web search failed: " + str(e) + "; arXiv fallback failed: " + str(fallback_error),
+            return {"sources": [], "error": "web search failed: " + str(e) + "; Bing fallback failed: " + str(fallback_error),
                     "note": "query=" + repr(query)}
-        return {"sources": [], "error": "web search failed: " + str(e), "note": "query=" + repr(query)}
 
 
 register(

@@ -60,6 +60,10 @@ class ConversationAgent:
         automatic = intent == 'auto'
         if automatic:
             intent = decision.intent
+            if intent == 'research':
+                # Conversational news/search requests use the same adaptive loop.
+                # The full report pipeline remains available via explicit research.
+                intent = 'followup'
             if intent == 'feedback':
                 feedback = 'self_report'
                 if not technology:
@@ -75,15 +79,11 @@ class ConversationAgent:
                         # A newer unlabelled topic cannot inherit an older label.
                         break
                 if not technology:
-                    answer = '你指的是哪个技术或方法？这条自评尚未写入学习记忆。'
-                    repo.add_message(self.ws.conn, conversation_id, 'user', message)
-                    repo.add_message(self.ws.conn, conversation_id, 'assistant', answer, kind='clarification')
-                    return {'status': 'needs_clarification', 'answer': answer, 'intent': intent}
+                    intent = 'followup'
             if intent == 'plan' and session['project_id'] is None:
-                answer = '需要先绑定一个已登记项目，才能生成有项目依据的方案。'
-                repo.add_message(self.ws.conn, conversation_id, 'user', message)
-                repo.add_message(self.ws.conn, conversation_id, 'assistant', answer, kind='clarification')
-                return {'status': 'needs_project', 'answer': answer, 'intent': intent}
+                # Discuss a provisional approach; a grounded project plan still
+                # requires explicit project binding through the plan interface.
+                intent = 'followup'
         if intent not in {'research', 'followup', 'plan', 'feedback'}:
             raise ValueError('unsupported intent')
         if intent == 'feedback' and (not technology or feedback not in {'discussed', 'self_report', 'attempted'}):
@@ -116,7 +116,7 @@ class ConversationAgent:
         else:
             sources = json.loads(session['evidence'])
             supplements = []
-            if (decision.supplement or intent == 'plan') and sources:
+            if intent == 'plan' and sources:
                 from dataclasses import replace
                 from types import SimpleNamespace
                 from lodestar.tools.registry import call_tool
@@ -151,19 +151,40 @@ class ConversationAgent:
                 answer = result['plan']
             else:
                 context = {'message': message,
+                    'require_sources': decision.intent == 'research',
                     'history': [{'role': m['role'], 'content': m['content'][:3000]} for m in self.history(conversation_id,user_id,8)],
                     'learning': learning.recall(self.ws.conn, message + ' ' + (technology or ''), user_id),
                     'papers': [{**s, 'content': s.get('content', '')[:12000]} for s in sources[:5]],
                     'supplement_reads': supplements}
+                from lodestar.agent.dialogue import gather
+                context = gather(self.ws, self.llm, context, session['project_id'])
+                events = context.pop('dialogue_events')
+                sources = context['papers']
+                supplements = [{'url': event['params']['url'],
+                                'error': event['result'].get('error'),
+                                'coverage': event['result'].get('coverage'),
+                                'read_depth': event['result'].get('read_depth')}
+                               for event in events if event.get('action') == 'read_paper'
+                               and event.get('params', {}).get('url')]
+                with self.ws.conn:
+                    self.ws.conn.execute('UPDATE agent_sessions SET evidence=? WHERE conversation_id=?',
+                        (json.dumps(sources, ensure_ascii=False), conversation_id))
+                if session['task_id']:
+                    from lodestar.trace.recorder import Trace
+                    trace = Trace(self.ws.conn, session['task_id'], self.ws.config.workspace_dir)
+                    for event in events:
+                        if 'result' in event:
+                            trace.tool_call(event['action'], event['params'])
+                            trace.tool_result(event['action'], event['result'])
+                    trace.dump_jsonl()
                 from lodestar.agent.explanation import explain
                 answer, grounding = explain(self.llm, context)
                 from lodestar.agent.scope import annotate_scope
-                from lodestar.agent.sources import attach_paper_sources
-                answer = attach_paper_sources(annotate_scope(answer), sources)
+                answer = annotate_scope(answer)
                 result = {'status': 'answered', 'evidence_reused': len(sources), 'supplement_reads': supplements,
-                          'grounding': grounding}
+                          'grounding': grounding, 'dialogue_events': events}
         assistant_message = repo.add_message(self.ws.conn, conversation_id, 'assistant', answer,
-                         task_id=result.get('task_id') or session['task_id'], metadata={'intent': intent, 'grounding': result.get('grounding')})
+                         task_id=result.get('task_id') or session['task_id'], metadata={'intent': intent, 'grounding': result.get('grounding'), 'dialogue_events': result.get('dialogue_events')})
         if intent == 'followup':
             from lodestar.agent.exposure import record_exposure
             from lodestar.llm import LLMError
@@ -178,7 +199,7 @@ class ConversationAgent:
                 result['learning_exposure_status'] = 'error'
                 result['learning_exposure_error'] = type(error).__name__
                 result['warning'] = '讲解已保留，方法接触记录更新未完成；未提升掌握程度。'
-            metadata = {'intent': intent, 'grounding': result.get('grounding'), **{k: v for k, v in result.items()
+            metadata = {'intent': intent, 'grounding': result.get('grounding'), 'dialogue_events': result.get('dialogue_events'), **{k: v for k, v in result.items()
                 if k.startswith('learning_exposure')}}
             with self.ws.conn:
                 self.ws.conn.execute('UPDATE messages SET metadata=? WHERE id=?',

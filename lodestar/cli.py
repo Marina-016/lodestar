@@ -177,7 +177,7 @@ def cmd_chat(args, cfg):
     try:
         from lodestar.agent.routing import route
         selected = route(args.message).intent if args.intent == 'auto' else args.intent
-        agent = ConversationAgent(ws, LLMClient(cfg) if args.action == 'send' and selected != 'feedback' else None)
+        agent = ConversationAgent(ws, LLMClient(cfg) if args.action == 'send' and args.intent != 'feedback' else None)
         if args.action == 'start':
             result = {'conversation_id': agent.start(args.user, args.project_id)}
         elif args.action == 'history':

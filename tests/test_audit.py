@@ -27,7 +27,7 @@ class AuditTests(unittest.TestCase):
         self.agent.turn(self.session,'介绍 Harness',technology='Harness')
         self.agent.turn(self.session,'换个话题，介绍 diffusion')
         result=self.agent.turn(self.session,'懂了')
-        self.assertEqual(result['status'],'needs_clarification')
+        self.assertEqual(result['status'],'answered')
         self.assertEqual(learning.profile(self.ws.conn),[])
 
     def test_model_failure_is_recorded_and_retry_works(self):

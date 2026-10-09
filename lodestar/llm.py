@@ -104,7 +104,8 @@ class LLMClient:
         for attempt in (1, 2):
             try:
                 resp = self._client.messages.create(
-                    model=self.model, max_tokens=mt, temperature=self.config.temperature,
+                    model=self.model, max_tokens=mt,
+                    extra_body={'temperature': self.config.temperature},
                     system=system, messages=[{"role": "user", "content": user}], **kw,
                 )
                 text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
@@ -156,6 +157,13 @@ class MockLLM:
                     'candidate':'候选流程占位','metrics':['来源元数据保留诊断'],
                     'constraints':['离线夹具，不能证明语义适用或实验收益']},
                 'risks':['未评估真实语义适用性'],'missing_evidence':['真实模型评估与实际实验尚缺']},ensure_ascii=False)
+        if role == "dialogue_step":
+            context = json.loads(user)
+            from lodestar.agent.routing import route
+            papers = context.get('papers', [])
+            if route(context['message']).supplement and papers and not context.get('tool_results'):
+                return json.dumps({'action': 'read_paper', 'url': papers[0]['url']})
+            return json.dumps({'action': 'answer'})
         if role == "conversation_grounded":
             return json.dumps({"claims": [], "hypotheses": [], "gaps": ["离线会话夹具：复用已保存证据；不代表真实模型推理结果。"]}, ensure_ascii=False)
         if role == "conversation":

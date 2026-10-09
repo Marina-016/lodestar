@@ -16,7 +16,7 @@ def route(message: str) -> Route:
         return Route('followup', '用户限制动作；保守沿用上下文')
     if re.search(r'有什么新|最新|新进展|今天.*技术|重新检索|search.*new|latest|new papers', text):
         return Route('research', '用户要求获取新信息')
-    if re.search(r'我的项目|项目.*方案|生成.*方案|用在.*项目|apply.*project', text):
+    if re.search(r'项目.*方案|生成.*方案|用在.*项目|apply.*project', text):
         return Route('plan', '用户要求结合项目')
     # Only standalone acknowledgements are feedback, not questions about meaning.
     if re.fullmatch(r'(我)?(懂了|理解了|明白了|了解了)[。！!\s]*', text):

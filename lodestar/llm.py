@@ -80,7 +80,9 @@ class LLMClient:
         if self.mode == "mock":
             text = MockLLM.complete(role, system, user)
         else:
-            text = self._complete_live(role, system, user, max_tokens)
+            if not allow_list and 'json' not in system.lower():
+                system += '\nReturn a JSON object.'
+            text = self._complete_live(role, system, user, max_tokens, json_mode=not allow_list)
         data = _extract_json(text)
         if allow_list and isinstance(data, list):
             return data
@@ -89,13 +91,13 @@ class LLMClient:
         return data
 
     # ---------- 内部 ----------
-    def _complete_live(self, role: str, system: str, user: str, max_tokens: int | None) -> str:
+    def _complete_live(self, role: str, system: str, user: str, max_tokens: int | None, *, json_mode=False) -> str:
         """默认关 thinking（省 token、防空输出）；空文本重试一次（预算×2）；
         thinking 参数不被模型支持时自动去掉重试。"""
         mt = max_tokens or (self.config.judge_max_tokens if self.judge else self.config.max_tokens)
         if self._dashscope is not None:
             try:
-                return self._dashscope.complete(role, self.model, system, user, mt)
+                return self._dashscope.complete(role, self.model, system, user, mt, json_mode=json_mode)
             except (ValueError, KeyError, IndexError, requests.RequestException) as error:
                 raise LLMError(f"DashScope request failed: {type(error).__name__}") from error
         kw: dict = {}

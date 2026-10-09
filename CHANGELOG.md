@@ -1,6 +1,24 @@
 # Changelog
 
-## [Unreleased] - 2026-10-08
+## [Unreleased] - 2026-10-09
+
+### Changed
+
+- Simplified ordinary dialogue to model-led tool selection and direct Markdown answers; removed forced answer blocks, quote gates and title-only rendering. Structured memory and experiment safeguards remain separate.
+- Passed complete paper abstracts to the model and preserved candidate context for consecutive questions.
+
+### Fixed
+
+- Added shared arXiv request spacing, metadata caching and failure cooldowns; applied recent-date filters and normalized search terms.
+- Preserved Chinese paper explanations instead of replacing them with links; corrected provider JSON-mode handling for structured calls.
+
+### Validation
+
+- 189 regression tests passed.
+- Live three-turn acceptance passed: recent AI papers, explanation of the second paper, and a three-sentence rewrite without network tools. This checks the interaction flow, not full factual correctness.
+- Local credentials, databases and runtime logs remain excluded from Git.
+
+## Backend MVP - 2026-10-08
 
 ### Added
 

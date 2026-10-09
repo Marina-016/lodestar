@@ -11,6 +11,8 @@ from lodestar.tools.registry import register
 
 
 def discover(ws, query: str, days: int = 7, kind: str = 'recent', limit: int = 20):
+    if not isinstance(query, str):
+        raise ValueError('query must be text')
     if kind not in {'recent', 'trending'}:
         raise ValueError('kind must be recent or trending')
     days = max(1, min(int(days), 30))
@@ -25,7 +27,7 @@ def discover(ws, query: str, days: int = 7, kind: str = 'recent', limit: int = 2
     provider = 'arxiv' if kind == 'recent' else 'huggingface'
     try:
         if kind == 'recent':
-            sources = _search_arxiv(query, limit, ws.config.tool_timeout_s,
+            sources = _search_arxiv(query.strip() or 'cat:cs.AI', limit, ws.config.tool_timeout_s,
                 ws.config.arxiv_search_field, sort_by='submittedDate',
                 since=since, until=now)
         else:
@@ -44,6 +46,7 @@ def discover(ws, query: str, days: int = 7, kind: str = 'recent', limit: int = 2
                     'url': f'https://arxiv.org/abs/{paper_id}',
                     'authors': [a['name'] for a in paper.get('authors', [])],
                     'date': paper.get('publishedAt', '')[:10], 'snippet': abstract[:600],
+                    'abstract': abstract,
                     'dedup_key': f'arxiv:{paper_id}', 'hf_rank': rank,
                     'hf_upvotes': paper.get('upvotes'),
                     'hf_submitted_at': paper.get('submittedOnDailyAt')})
@@ -57,10 +60,14 @@ def discover(ws, query: str, days: int = 7, kind: str = 'recent', limit: int = 2
     except (requests.RequestException, ValueError, KeyError) as exc:
         return {'status': 'error', 'sources': [], 'kind': kind,
                 'provider': provider, 'retrieved_at': now.isoformat(),
-                'error': f'{provider} discovery failed: {exc}'}
+                'error': f'{provider} discovery failed: {exc}',
+                'failure_kind': getattr(exc, 'failure_kind', 'invalid_query' if isinstance(exc, ValueError) else 'provider_unavailable'),
+                'retry_after': getattr(exc, 'retry_after', None),
+                'recovery': 'For arXiv outages, discover_papers kind=trending uses independent HF data. '
+                            'HF is platform popularity, not a substitute for the requested submission window.'}
 
 
-register('discover_papers', 'Discover recent arXiv submissions or HF trending papers; report coverage and failures.',
+register('discover_papers', 'Discover recent arXiv submissions (empty query browses cs.AI) or HF trending papers; report coverage and failures.',
          discover, {'query': {'type': 'string', 'required': True},
                     'days': {'type': 'integer'}, 'kind': {'type': 'string'},
                     'limit': {'type': 'integer'}})

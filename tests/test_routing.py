@@ -30,8 +30,8 @@ class RoutingTests(unittest.TestCase):
                 self.assertEqual(learning.profile(ws.conn),[])
                 agent.turn(session,'介绍 Harness',technology='Harness')
                 result=agent.turn(session,'懂了')
-                self.assertEqual(result['intent'],'feedback')
-                self.assertEqual(learning.profile(ws.conn)[0]['mastery'],'unknown')
+                self.assertEqual(result['intent'],'followup')
+                self.assertEqual(learning.profile(ws.conn),[])
             finally:
                 ws.close()
 

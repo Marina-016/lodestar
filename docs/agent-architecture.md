@@ -4,15 +4,17 @@
 下文的固定追问补读和四节展示描述为此前版本。最新实现与验证边界见
 [对话 harness 调整](dialogue-harness.md)。研究和显式方案路径继续沿用原流程。
 
-当前只实现本地 CLI/服务层，界面未改。主编排是确定性代码，LLM 生成内容；工具错误、来源证据和状态变化保存到 Trace。
+当前只实现本地 CLI/服务层，界面未改。普通对话由模型选择只读动作，宿主执行并保存证据；显式研究、方案和反馈继续使用结构化流程。
 
 ```mermaid
 flowchart TD
-  Q[用户消息] --> R[保守规则路由]
-  R --> D[research: 新论文研究]
-  R --> F[followup: 基于会话证据解释]
-  R --> P[plan: 登记项目的技术草案]
-  R --> M[feedback: 用户接触或自评]
+  Q[用户消息] --> R[模型结合历史决策]
+  R --> F[搜索 / 阅读 / 项目检索]
+  F --> R
+  R --> H[自然回答与证据持久化]
+  API[显式结构化接口] --> D[research: 新论文报告]
+  API --> P[plan: 项目实验草案]
+  API --> M[feedback: 明确学习观察]
   D --> S[最近 arXiv + HF 平台热门]
   S --> E[去重 排序 有界正文或摘要]
   E --> A[证据评估 跨来源讲解]
@@ -29,13 +31,13 @@ flowchart TD
 
 | 阶段 | 实际调用 | 边界与产物 |
 |---|---|---|
-| 路由 | agent/routing.py 规则 | 默认 auto；用户可指定 intent。复杂意图可能需要澄清 |
+| 普通对话 | agent/dialogue.py 模型决策循环 | 默认 auto；不经过关键词路由。显式 intent 保留结构化接口 |
 | 研究规划 | planner/queries 的 LLM 内容调用 | 查询、研究问题与工具政策保存 Trace |
 | 新发布发现 | discover_papers recent → arXiv API | UTC 滚动窗口 1–30 天，默认 7 天；有查询和返回条数限制 |
 | 热门发现 | discover_papers trending → HF daily_papers API | 仅 HF 平台关注信号；旧论文也可热门，不代表全网最热 |
 | 阅读 | read_paper；非论文分支 read_webpage | PDF 有界正文片段、覆盖标签、字符跨度；失败不伪装成功，摘要降级明确标记；合格来源存在时优先兼顾新发布和热门各一篇 |
 | 讲解 | assess/synthesis/novelty | 引用来源，区分已读范围；研究知识笔记更新可待确认，不代表用户掌握 |
-| 追问 | ConversationAgent + conversation LLM | 重启后复用持久化证据；细节问题最多补读两篇已保存论文 |
+| 追问 | ConversationAgent + dialogue_step / conversation_grounded | 模型选择是否搜索、读哪些来源，重启后复用证据 |
 | 个人学习记忆 | read_learning_profile / record_learning_evidence；内部 learning 仓储 | technology + method + paper URL + 证据。解释/讨论/自评不升掌握，示范类证据由调用方核验 |
 | 项目证据 | project CLI 登记/index + repo 搜索 | 本地有界代码/文档索引；本轮远端验收只获准三个文件片段 |
 | 方案 | technical_plan LLM + plan_contract | 问题/论文方法/候选改动/对照协议/风险/缺口。校验原文与已提供路径，最多一次修复，始终 draft |
@@ -59,3 +61,6 @@ flowchart TD
 
 
 2026-10-08 追问讲解现在使用 conversation_grounded：论文陈述必须附指定来源的原文引用；只恢复 PDF 空白换行，不替换词语、标点或省略号。未匹配陈述不交付，原始模型草案和错误保留。每条通过的陈述附出处链接，推测、缺口及一般知识说明单独显示；字面校验不证明语义支持。一般知识仍由 LLM 组织，不写入个人学习记忆；方法接触只从通过校验的论文陈述提取，排除一般知识、推测、缺口。
+
+2026-10-09 检索层改为共享 arXiv 客户端；模型可用 discover_papers 和明确 days 日期条件。
+候选元数据与已读正文隔离并支持跨轮追问，详见 [论文检索可靠性](retrieval-reliability.md)。

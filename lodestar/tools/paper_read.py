@@ -16,6 +16,7 @@ import requests
 
 from lodestar.config import Config
 from lodestar.tools.registry import register
+from lodestar.tools import arxiv_client
 
 ARXIV_API = "https://export.arxiv.org/api/query"
 ATOM = "{http://www.w3.org/2005/Atom}"
@@ -32,10 +33,8 @@ def _extract_arxiv_id(url: str) -> str | None:
 
 
 def _fetch_abstract(arxiv_id: str, timeout: int) -> dict:
-    resp = requests.get(ARXIV_API, params={"search_query": f"id:{arxiv_id}", "max_results": 1},
-                        timeout=timeout, headers={"User-Agent": "Lodestar/0.1"})
-    resp.raise_for_status()
-    root = ET.fromstring(resp.text)
+    feed = arxiv_client.query({'id_list': arxiv_id, 'max_results': 1}, timeout)
+    root = ET.fromstring(feed.text)
     entry = root.find(f"{ATOM}entry")
     if entry is None:
         raise ValueError(f"arXiv 无此论文: {arxiv_id}")

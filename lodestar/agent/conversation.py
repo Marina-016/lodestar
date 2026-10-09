@@ -55,35 +55,11 @@ class ConversationAgent:
         session = self._session(conversation_id, user_id)
         if not message.strip():
             raise ValueError('message is required')
-        from lodestar.agent.routing import route
-        decision = route(message)
         automatic = intent == 'auto'
         if automatic:
-            intent = decision.intent
-            if intent == 'research':
-                # Conversational news/search requests use the same adaptive loop.
-                # The full report pipeline remains available via explicit research.
-                intent = 'followup'
-            if intent == 'feedback':
-                feedback = 'self_report'
-                if not technology:
-                    # Use an explicit topic from the latest message, never invent a concept.
-                    for previous in reversed(self.history(conversation_id, user_id)):
-                        metadata = json.loads(previous.get('metadata') or '{}')
-                        if previous['role'] != 'user':
-                            continue
-                        if metadata.get('technology'):
-                            technology = metadata['technology']
-                            method = metadata.get('method', '')
-                            break
-                        # A newer unlabelled topic cannot inherit an older label.
-                        break
-                if not technology:
-                    intent = 'followup'
-            if intent == 'plan' and session['project_id'] is None:
-                # Discuss a provisional approach; a grounded project plan still
-                # requires explicit project binding through the plan interface.
-                intent = 'followup'
+            # Natural language goes through one model-led loop. Structured workflows
+            # are explicit API choices, never inferred from keywords.
+            intent = 'followup'
         if intent not in {'research', 'followup', 'plan', 'feedback'}:
             raise ValueError('unsupported intent')
         if intent == 'feedback' and (not technology or feedback not in {'discussed', 'self_report', 'attempted'}):
@@ -150,9 +126,15 @@ class ConversationAgent:
                 result = generate(self.ws, self.llm, message, sources, session['project_id'])
                 answer = result['plan']
             else:
-                context = {'message': message,
-                    'require_sources': decision.intent == 'research',
-                    'history': [{'role': m['role'], 'content': m['content'][:3000]} for m in self.history(conversation_id,user_id,8)],
+                history = self.history(conversation_id, user_id, 8)
+                candidates = []
+                for previous in reversed(history):
+                    metadata = json.loads(previous.get('metadata') or '{}')
+                    if previous['role'] == 'assistant' and 'candidates' in metadata:
+                        candidates = metadata['candidates']
+                        break
+                context = {'message': message, 'candidates': candidates,
+                    'history': [{'role': m['role'], 'content': m['content'][:3000]} for m in history],
                     'learning': learning.recall(self.ws.conn, message + ' ' + (technology or ''), user_id),
                     'papers': [{**s, 'content': s.get('content', '')[:12000]} for s in sources[:5]],
                     'supplement_reads': supplements}
@@ -179,12 +161,10 @@ class ConversationAgent:
                     trace.dump_jsonl()
                 from lodestar.agent.explanation import explain
                 answer, grounding = explain(self.llm, context)
-                from lodestar.agent.scope import annotate_scope
-                answer = annotate_scope(answer)
                 result = {'status': 'answered', 'evidence_reused': len(sources), 'supplement_reads': supplements,
-                          'grounding': grounding, 'dialogue_events': events}
+                          'grounding': grounding, 'dialogue_events': events, 'candidates': context['candidates']}
         assistant_message = repo.add_message(self.ws.conn, conversation_id, 'assistant', answer,
-                         task_id=result.get('task_id') or session['task_id'], metadata={'intent': intent, 'grounding': result.get('grounding'), 'dialogue_events': result.get('dialogue_events')})
+                         task_id=result.get('task_id') or session['task_id'], metadata={'intent': intent, 'grounding': result.get('grounding'), 'dialogue_events': result.get('dialogue_events'), 'candidates': result.get('candidates', [])})
         if intent == 'followup':
             from lodestar.agent.exposure import record_exposure
             from lodestar.llm import LLMError
@@ -199,10 +179,10 @@ class ConversationAgent:
                 result['learning_exposure_status'] = 'error'
                 result['learning_exposure_error'] = type(error).__name__
                 result['warning'] = '讲解已保留，方法接触记录更新未完成；未提升掌握程度。'
-            metadata = {'intent': intent, 'grounding': result.get('grounding'), 'dialogue_events': result.get('dialogue_events'), **{k: v for k, v in result.items()
+            metadata = {'intent': intent, 'grounding': result.get('grounding'), 'dialogue_events': result.get('dialogue_events'), 'candidates': result.get('candidates', []), **{k: v for k, v in result.items()
                 if k.startswith('learning_exposure')}}
             with self.ws.conn:
                 self.ws.conn.execute('UPDATE messages SET metadata=? WHERE id=?',
                     (json.dumps(metadata, ensure_ascii=False), assistant_message['id']))
         return {'status': 'ok', **result, 'conversation_id': conversation_id, 'answer': answer, 'intent': intent,
-                'route_reason': decision.reason if automatic else 'explicit intent'}
+                'route_reason': 'model-led dialogue' if automatic else 'explicit intent'}

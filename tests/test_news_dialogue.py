@@ -20,6 +20,7 @@ class NewsDialogueTests(unittest.TestCase):
             {'action': 'search_web', 'query': 'AI news'},
             {'action': 'read_webpage', 'url': url}, {'action': 'answer'},
             {'blocks': [{'kind': 'claim', 'text': '官方发布了新模型。', 'paper_url': url, 'quote': quote}]}]
+        self.llm.complete.return_value = f'来源报道发布了新模型。[来源]({url})'
         with patch('lodestar.tools.registry.call_tool', side_effect=[
                 {'sources': [{'url': url}]}, {'text': quote}]), patch(
                 'lodestar.agent.conversation.ResearchAgent') as research:
@@ -50,11 +51,13 @@ class NewsDialogueTests(unittest.TestCase):
         self.assertEqual(result['fallback'], 'bing')
         self.assertEqual(len(result['sources']), 1)
 
-    def test_news_cannot_bypass_citations_via_background(self):
-        self.llm.complete_json.return_value = {'blocks': [
-            {'kind': 'background', 'text': 'A new model was released today.'},
-            {'kind': 'gap', 'text': '没有可核对的今日来源。'}]}
-        answer, audit = explain(self.llm, {'papers': [], 'require_sources': True})
-        self.assertNotIn('A new model', answer)
-        self.assertFalse(audit['contract_valid'])
-        self.assertEqual(self.llm.complete_json.call_count, 2)
+    def test_news_answer_receives_clock_and_actual_source_errors(self):
+        self.llm.complete.return_value = '当前来源请求失败，无法确认今天的消息。'
+        context = {'papers':[], 'current_time':'2026-10-09T12:00:00+08:00',
+            'tool_results':[{'action':'search_web','result':{'error':'network timeout'}}]}
+        answer, audit = explain(self.llm, context)
+        payload = json.loads(self.llm.complete.call_args.args[2])
+        self.assertEqual(payload['current_time'],context['current_time'])
+        self.assertEqual(payload['tool_results'][0]['result']['error'],'network timeout')
+        self.assertEqual(answer,self.llm.complete.return_value)
+        self.assertIn('not a factual correctness verdict',audit['validation_scope'])

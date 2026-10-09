@@ -46,13 +46,14 @@ class AgentContractTests(unittest.TestCase):
         <id>http://arxiv.org/abs/2601.00001v2</id><title>Agent</title>
         <published>2026-01-01T00:00:00Z</published><updated>2026-01-03T00:00:00Z</updated>
         <summary>Method</summary></entry></feed>'''
-        with patch('lodestar.tools.arxiv_search.requests.get', return_value=response) as request:
+        from lodestar.tools.arxiv_client import Feed
+        with patch('lodestar.tools.arxiv_client.query', return_value=Feed(response.text, '2026-01-05T00:00:00+00:00', False)) as request:
             sources = _search_arxiv('agent', sort_by='submittedDate',
                 since=datetime(2026, 1, 1, tzinfo=timezone.utc),
                 until=datetime(2026, 1, 5, tzinfo=timezone.utc))
         self.assertEqual(sources[0]['dedup_key'], 'arxiv:2601.00001')
         self.assertEqual(sources[0]['version'], '2601.00001v2')
-        self.assertIn('submittedDate:[202601010000 TO 202601050000]', request.call_args.kwargs['params']['search_query'])
+        self.assertIn('submittedDate:[202601010000 TO 202601050000]', request.call_args.args[0]['search_query'])
 
     def test_project_plan_requires_evidence_and_never_executes(self):
         project_id = repo.upsert_project(self.ws.conn, 'test', description='Memory agent', status='active')

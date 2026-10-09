@@ -15,7 +15,7 @@
 <p align="center">
   <img alt="Python 3.10+" src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white">
   <img alt="Demo replay" src="https://img.shields.io/badge/Demo-Curated%20Replay-F28C28">
-  <img alt="Tests" src="https://img.shields.io/badge/Tests-147%20backend%20checks-2EA44F">
+  <img alt="Tests" src="https://img.shields.io/badge/Tests-189%20backend%20checks-2EA44F">
   <img alt="License" src="https://img.shields.io/badge/License-Apache--2.0-4A5568">
 </p>
 
@@ -26,7 +26,8 @@
 
 2026-10-09 本地更新：`chat send` 普通对话增加按需读取循环，支持直接解释、类比、
 对比、改写和代码示例；模型可组合论文检索、相关论文补读与已授权项目上下文，
-每轮最多 5 次工具调用，时事问题支持网页检索和读取。回答按问题组织，引文审计保存在消息元数据中。
+每轮最多 5 次工具调用，时事问题支持网页检索和读取。普通回答直接展示模型生成的 Markdown，
+不再强制结构化分块或用标题列表替换讲解；检索提供完整摘要，工具与来源范围保存在消息元数据中。
 详见 [对话 harness 调整](docs/dialogue-harness.md)。旧 UI / 在线 Demo 仍是独立入口。
 
 当前交付是本地 CLI 与 Agent 服务层。前端尚未重做，在线 Demo 展示的是历史 UI 回放，不代表本分支的实时后端能力。

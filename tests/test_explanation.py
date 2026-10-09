@@ -1,44 +1,45 @@
+import json
 import unittest
 from unittest.mock import Mock
+
 from lodestar.agent.explanation import explain
+from lodestar.llm import LLMError
 
 
 class ExplanationTests(unittest.TestCase):
-    def test_unmatched_claim_is_not_delivered_and_inference_is_labelled(self):
+    def test_full_abstract_reaches_model_and_chinese_intro_reaches_user(self):
+        abstract = 'Opening sentence. ' * 90 + 'IMPORTANT END OF ABSTRACT'
+        url = 'https://arxiv.org/abs/2601.00001'
         llm = Mock()
-        llm.complete_json.return_value = {'claims': [
-            {'text': '直接描述文件编辑', 'paper_url': 'https://paper', 'quote': 'The context is an editable file.'},
-            {'text': '引用必定完整保存', 'paper_url': 'https://paper', 'quote': 'This quote is absent from the source.'}],
-            'hypotheses': ['保留出处也许需要独立记录'], 'gaps': ['未提供引用机制']}
-        answer, audit = explain(llm, {'papers':[{'source_type':'paper','url':'https://paper',
-                                       'content':'The context is an editable file.'}]})
-        self.assertIn('直接描述文件编辑', answer)
-        self.assertNotIn('引用必定完整保存', answer)
-        self.assertIn('尚未验证的推测', answer)
-        self.assertIn('当前证据缺口', answer)
-        self.assertFalse(audit['contract_valid'])
-        self.assertEqual(audit['semantic_review'], 'required')
+        llm.complete.return_value = f'根据摘要，这篇工作讨论长期记忆。结尾强调实际约束。[论文]({url})'
+        answer, audit = explain(llm, {'papers':[], 'candidates':[
+            {'url':url,'abstract':abstract,'snippet':abstract[:600]}]})
+        payload = json.loads(llm.complete.call_args.args[2])
+        self.assertEqual(payload['sources'][0]['content'],abstract)
+        self.assertIn('结尾强调实际约束',answer)
+        self.assertEqual(answer,llm.complete.return_value)
+        self.assertEqual(audit['source_depths'][url],'abstract')
 
-    def test_malformed_lists_never_become_assertions(self):
-        llm = Mock(); llm.complete_json.return_value = {'claims':'unsupported', 'hypotheses':[None], 'gaps':[]}
-        answer, audit = explain(llm, {'papers':[]})
-        self.assertNotIn('unsupported', answer)
-        self.assertFalse(audit['contract_valid'])
+    def test_body_overrides_abstract_without_losing_publication_date(self):
+        url = 'https://paper'
+        llm = Mock();llm.complete.return_value = '正文提供了更多细节。'
+        explain(llm, {'candidates':[{'url':url,'date':'2026-01-01','abstract':'Abstract'}],
+            'papers':[{'url':url,'content':'Method details','read_depth':'full'}]})
+        source = json.loads(llm.complete.call_args.args[2])['sources'][0]
+        self.assertEqual(source['content'],'Method details')
+        self.assertEqual(source['read_depth'],'full')
+        self.assertEqual(source['date'],'2026-01-01')
 
-    def test_generic_background_remains_available_without_paper_claims(self):
-        llm = Mock(); llm.complete_json.return_value = {'claims':[], 'hypotheses':[], 'gaps':[],
-            'background':['Harness 通常编排模型与工具调用。']}
-        answer, audit = explain(llm, {'papers':[]})
-        self.assertIn('Harness', answer)
-        self.assertIn('不写入个人学习记忆', answer)
-        self.assertEqual(audit['validated_claims'], [])
+    def test_tool_failure_and_project_context_are_available_to_model(self):
+        llm = Mock();llm.complete.return_value = '来源暂不可用。'
+        events = [{'action':'search_papers','result':{'error':'timeout','sources':[]}},
+                  {'action':'project_context','result':{'documents':[{'path':'a.py','content':'approved'}]}}]
+        explain(llm, {'papers':[], 'tool_results':events})
+        payload = json.loads(llm.complete.call_args.args[2])
+        self.assertEqual(payload['tool_results'][0]['result']['error'],'timeout')
+        self.assertEqual(payload['tool_results'][1]['result']['documents'][0]['content'],'approved')
 
-    def test_only_pdf_whitespace_is_restored_and_original_draft_retained(self):
-        llm = Mock(); llm.complete_json.return_value = {'claims':[
-            {'text':'编辑上下文', 'paper_url':'https://paper', 'quote':'The context is an editable file.'}], 'hypotheses':[], 'gaps':[]}
-        answer, audit = explain(llm, {'papers':[{'source_type':'paper', 'url':'https://paper',
-                                       'content':'The context is an\neditable file.'}]})
-        self.assertTrue(audit['contract_valid'])
-        self.assertTrue(audit['validated_claims'][0]['whitespace_restored'])
-        self.assertEqual(audit['draft']['claims'][0]['quote'], 'The context is an editable file.')
-        self.assertIn('[原文出处](https://paper)', answer)
+    def test_empty_answer_does_not_claim_task_success(self):
+        llm = Mock();llm.complete.return_value = '   '
+        with self.assertRaises(LLMError): explain(llm, {'papers':[]})
+        llm.complete.assert_called_once()

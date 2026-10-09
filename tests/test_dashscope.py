@@ -33,3 +33,15 @@ class DashScopeTests(unittest.TestCase):
             request.assert_not_called()
         cfg.llm_mode = 'mock'
         self.assertIsNone(LLMClient(cfg)._dashscope)
+
+    def test_structured_mode_is_only_used_for_json_object_calls(self):
+        cfg = Config(llm_mode='live',llm_provider='dashscope',llm_base_url='https://dashscope.aliyuncs.com/compatible-mode/v1')
+        response = unittest.mock.Mock()
+        response.ok = True
+        response.json.return_value = {'choices':[{'finish_reason':'stop','message':{'content':'{}'}}]}
+        with patch.dict('os.environ',{'DASHSCOPE_API_KEY':'fixture'}), patch('lodestar.providers.dashscope.requests.post',return_value=response) as call:
+            client = LLMClient(cfg)
+            client.complete_json('probe','Return JSON','hello')
+            self.assertEqual(call.call_args.kwargs['json']['response_format'],{'type':'json_object'})
+            client.complete('probe','Return prose','hello')
+            self.assertNotIn('response_format',call.call_args.kwargs['json'])

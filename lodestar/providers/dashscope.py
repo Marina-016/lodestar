@@ -15,12 +15,14 @@ class DashScopeClient:
             raise ValueError('DashScope requires an official HTTPS endpoint')
         self.usage = []
 
-    def complete(self, role, model, system, user, max_tokens):
+    def complete(self, role, model, system, user, max_tokens, *, json_mode=False):
+        payload = {'model': model, 'messages': [{'role': 'system', 'content': system},
+                    {'role': 'user', 'content': user}], 'max_tokens': max_tokens,
+                    'temperature': self.config.temperature, 'enable_thinking': False}
+        if json_mode:
+            payload['response_format'] = {'type': 'json_object'}
         response = requests.post(self.base_url + '/chat/completions',
-            headers={'Authorization': 'Bearer ' + self.key},
-            json={'model': model, 'messages': [{'role': 'system', 'content': system},
-                {'role': 'user', 'content': user}], 'max_tokens': max_tokens,
-                'temperature': self.config.temperature, 'enable_thinking': False},
+            headers={'Authorization': 'Bearer ' + self.key}, json=payload,
             timeout=self.config.llm_timeout_s)
         if not response.ok:
             raise ValueError(f'DashScope HTTP {response.status_code}')

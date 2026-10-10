@@ -1,9 +1,65 @@
 """Source facts, not judgments of scientific importance or authority."""
 from datetime import datetime, timezone
 from dataclasses import replace
+from hashlib import sha256
 
 from lodestar import venue
 from lodestar.tools.arxiv_search import RECENT_DAYS, time_window
+
+READ_CONTEXT_CHARS = 12000
+MAX_READINGS = 4
+_EXCERPT_SEPARATOR = '\n\n[Next retrieved excerpt]\n\n'
+
+
+def _merge_body_readings(old, new):
+    """Keep distinct body reads, not just the last query, within one source budget."""
+    readings = {}
+    for source in (old, new):
+        parts = source.get('readings') or [{'text': source.get('content', ''),
+            'query': source.get('read_query', ''), 'coverage': source.get('coverage'),
+            'evidence_spans': source.get('evidence_spans', []),
+            'truncated': source.get('truncated', False),
+            'context_truncated': source.get('context_truncated', False)}]
+        for part in parts:
+            if not part.get('text'):
+                continue
+            identity = part.get('digest') or sha256(part['text'].encode('utf-8')).hexdigest()
+            # Re-reading can restore a previously compacted passage. Re-merging a
+            # saved candidate must not duplicate it or replace it with less text.
+            if identity not in readings or len(part['text']) > len(readings[identity]['text']):
+                readings[identity] = {**part, 'digest': identity}
+    if not readings:
+        return {}
+    omitted = len(readings) > MAX_READINGS
+    parts = list(readings.values())[-MAX_READINGS:]
+    remaining = READ_CONTEXT_CHARS - len(_EXCERPT_SEPARATOR) * (len(parts) - 1)
+    # Short passages use only what they need; split the rest fairly across long
+    # passages so an experiment read cannot push all method evidence out.
+    for count, part in enumerate(sorted(parts, key=lambda p: len(p['text']))):
+        allowance = remaining // (len(parts) - count)
+        text = part['text']
+        if len(text) > allowance:
+            marker = '\n[... context omitted ...]\n'
+            keep = allowance - len(marker)
+            head = keep * 2 // 3
+            part['text'] = text[:head] + marker + text[-(keep - head):]
+            part['context_truncated'] = True
+        remaining -= len(part['text'])
+    return {'content': _EXCERPT_SEPARATOR.join(p['text'] for p in parts),
+            'readings': parts, 'coverage': 'multiple_bounded_excerpts' if len(parts) > 1
+                else parts[0].get('coverage') or 'bounded_body_excerpt',
+            'evidence_spans': [],  # Original-document offsets belong to individual readings.
+            'span_coordinates': 'Original extracted document offsets before context compaction; not offsets in retained text.',
+            'context_truncated': omitted or old.get('context_truncated', False)
+                or new.get('context_truncated', False) or any(p.get('context_truncated') for p in parts)}
+
+
+def _lookup_time(source):
+    try:
+        timestamp = datetime.fromisoformat(source.get('verified_at', ''))
+        return timestamp if timestamp.tzinfo else timestamp.replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return None
 
 
 def merge_sources(sources):
@@ -15,14 +71,30 @@ def merge_sources(sources):
             continue
         old = merged.setdefault(url, {})
         incoming = {k: v for k, v in source.items() if v is not None and v != ''}
+        latest = incoming.get('latest_publication_lookup')
+        if not latest and _lookup_time(incoming):
+            latest = {k: incoming[k] for k in ('publication_status', 'verified_at', 'publication_evidence',
+                       'lookups', 'lookup_note', 'recovery') if k in incoming}
+        previous = old.get('latest_publication_lookup', {})
+        if latest and (_lookup_time(latest) or datetime.min.replace(tzinfo=timezone.utc)) >= (
+                _lookup_time(previous) or datetime.min.replace(tzinfo=timezone.utc)):
+            incoming['latest_publication_lookup'] = dict(latest)
+        else:
+            incoming.pop('latest_publication_lookup', None)
         if ((old.get('publication_status') == 'publication_record_found' and incoming.get('publication_status') != 'publication_record_found')
                 or (old.get('verified_at') and incoming.get('publication_status') in (None, 'not_checked'))):
             for key in ('publication_status', 'venue', 'venue_note', 'metadata_provider', 'external_ids',
-                        'publication_evidence', 'record_url', 'is_published', 'lookup_note', 'verified_at', 'lookups'):
+                        'publication_evidence', 'record_url', 'is_published', 'lookup_note', 'verified_at', 'lookups', 'recovery'):
                 incoming.pop(key, None)
+        if incoming.get('publication_status') == 'publication_record_found':
+            old.pop('recovery', None)
         if old.get('read_depth') == 'full' and incoming.get('read_depth') != 'full':
-            for key in ('content', 'read_depth', 'coverage', 'evidence_spans'):
+            for key in ('content', 'read_depth', 'coverage', 'evidence_spans', 'read_query',
+                        'readings', 'truncated', 'context_truncated'):
                 incoming.pop(key, None)
+        elif old.get('read_depth') == incoming.get('read_depth') == 'full' and (
+                old.get('readings') or incoming.get('readings') or old.get('content') != incoming.get('content')):
+            incoming.update(_merge_body_readings(old, incoming))
         old.update(incoming)
     return list(merged.values())
 
@@ -54,12 +126,18 @@ def assess(sources, now=None):
 def answer_context(context):
     """One evidence packet, not repeated transcripts of every abstract and old answer."""
     sources = merge_sources(context['candidates'] + context['papers'])
+    # content is a compatibility view for learning/planning consumers. Send each
+    # reading once, with its query and original-source spans, not both views.
+    sources = [{**{k: v for k, v in s.items() if k != 'content'},
+                'readings': [{k: v for k, v in r.items() if k != 'digest'} for r in s['readings']]}
+               if s.get('readings') else s for s in sources]
     operations = []
     for event in context['dialogue_events']:
         result = event['result']
         operations.append({'action': event['action'], 'params': event['params'],
             **{k: result[k] for k in ('error', 'query_results', 'effective_query', 'time_window',
-                'failure_kind', 'recovery', 'skipped_queries') if k in result},
+                'failure_kind', 'recovery', 'skipped_queries', 'read_depth', 'coverage',
+                'query_matched', 'truncated', 'full_text_ok', 'note') if k in result},
             **({'result': result} if event['action'] == 'project_context' else {})})
     return {'current_time': context['current_time'], 'sources': sources,
             'evidence_assessment': assess(sources), 'operations': operations,
@@ -70,14 +148,11 @@ def answer_context(context):
 
 def publication_lookup_fresh(source, now=None):
     """A cached unsuccessful lookup must not become a permanent publication verdict."""
-    try:
-        timestamp = datetime.fromisoformat(source.get('verified_at', ''))
-        if timestamp.tzinfo is None:
-            timestamp = timestamp.replace(tzinfo=timezone.utc)
-        age = ((now or datetime.now(timezone.utc)) - timestamp).total_seconds()
-        return 0 <= age <= 900
-    except (ValueError, TypeError):
+    timestamp = _lookup_time(source.get('latest_publication_lookup') or source)
+    if timestamp is None:
         return False
+    age = ((now or datetime.now(timezone.utc)) - timestamp).total_seconds()
+    return 0 <= age <= 900
 
 
 def verify_publication(ws, source):

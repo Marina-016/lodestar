@@ -6,6 +6,7 @@ import uuid
 
 from lodestar.agent.loop import ResearchAgent
 from lodestar.agent.project_plan import generate
+from lodestar.agent.evidence import merge_sources
 from lodestar.memory import learning, repo
 from lodestar.chat_settings import snapshot
 
@@ -162,9 +163,11 @@ class ConversationAgent:
                     if (not read.get('error') and read.get('text')
                             and read.get('query_matched') is not False
                             and not (source.get('read_depth') == 'full' and read.get('read_depth') != 'full')):
-                        sources[index] = {**source, 'content': read['text'],
+                        sources[index] = merge_sources([source, {'url': source['url'], 'content': read['text'],
+                            'read_query': message,
                             'read_depth': read.get('read_depth'), 'coverage': read.get('coverage'),
-                            'evidence_spans': read.get('evidence_spans', [])}
+                            'evidence_spans': read.get('evidence_spans', []),
+                            'truncated': read.get('truncated', False)}])[0]
                 with self.ws.conn:
                     self.ws.conn.execute('UPDATE agent_sessions SET evidence=? WHERE conversation_id=?',
                         (json.dumps(sources, ensure_ascii=False), conversation_id))

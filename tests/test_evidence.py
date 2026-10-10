@@ -63,6 +63,78 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual(merged['external_ids'], {'DOI': 'known'})
         self.assertEqual(first['content'], 'Full body')
 
+    def test_multiple_body_reads_keep_passages_and_provenance_without_prompt_duplicates(self):
+        first = {'url': 'paper', 'content': 'METHOD EVIDENCE', 'read_depth': 'full',
+                 'read_query': 'method', 'coverage': 'query_excerpt',
+                 'evidence_spans': [{'start': 100, 'end': 115}]}
+        second = {'url': 'paper', 'content': 'EXPERIMENT EVIDENCE', 'read_depth': 'full',
+                  'read_query': 'experiment', 'coverage': 'query_excerpt',
+                  'evidence_spans': [{'start': 500, 'end': 519}]}
+        merged = merge_sources([first, second])[0]
+        self.assertIn(first['content'], merged['content'])
+        self.assertIn(second['content'], merged['content'])
+        self.assertEqual([r['query'] for r in merged['readings']], ['method', 'experiment'])
+        self.assertEqual(merged['readings'][0]['evidence_spans'], first['evidence_spans'])
+        self.assertNotIn('readings', first)
+        packet = answer_context({'current_time': 'now', 'papers': [merged],
+                                 'candidates': [first], 'dialogue_events': []})
+        import json
+        for text in (first['content'], second['content']):
+            self.assertEqual(json.dumps(packet).count(text), 1)
+
+    def test_read_context_is_bounded_balanced_and_deduplicates_compacted_passages(self):
+        sources = [{'url': 'paper', 'read_depth': 'full', 'read_query': str(i),
+                    'content': f'BEGIN {i} ' + str(i) * 12000 + f' END {i}'} for i in range(6)]
+        merged = merge_sources(sources)[0]
+        self.assertLessEqual(len(merged['content']), 12000)
+        self.assertLessEqual(len(merged['readings']), 4)
+        self.assertTrue(merged['context_truncated'])
+        for i in range(2, 6):
+            self.assertIn(f'BEGIN {i}', merged['content'])
+            self.assertIn(f'END {i}', merged['content'])
+        repeated = merge_sources([merged, sources[-1], merged])[0]
+        self.assertEqual(len(repeated['readings']), len(merged['readings']))
+        self.assertLessEqual(len(repeated['content']), 12000)
+
+    def test_body_reads_do_not_merge_across_paper_versions(self):
+        merged = merge_sources([{'url': f'https://arxiv.org/abs/2601.00001v{i}',
+                                 'content': f'Version {i}', 'read_depth': 'full'} for i in (1, 2)])
+        self.assertEqual(len(merged), 2)
+        self.assertEqual(merged[0]['content'], 'Version 1')
+        self.assertEqual(merged[1]['content'], 'Version 2')
+
+    def test_failed_refresh_preserves_record_but_exposes_and_caches_latest_attempt(self):
+        old = {'url': 'paper', 'publication_status': 'publication_record_found',
+               'venue': 'Journal', 'verified_at': '2026-10-01T12:00:00+00:00',
+               'record_url': 'https://publisher/paper', 'external_ids': {'DOI': 'known'}}
+        failed = {'url': 'paper', 'publication_status': 'unresolved', 'venue': None,
+                  'verified_at': '2026-10-10T11:55:00+00:00', 'external_ids': {},
+                  'publication_evidence': 'Providers unavailable',
+                  'recovery': 'Publication status remains unknown.'}
+        merged = merge_sources([old, failed])[0]
+        self.assertEqual(merged['publication_status'], 'publication_record_found')
+        self.assertEqual(merged['venue'], 'Journal')
+        self.assertEqual(merged['external_ids'], {'DOI': 'known'})
+        self.assertEqual(merged['verified_at'], old['verified_at'])
+        self.assertEqual(merged['latest_publication_lookup']['publication_status'], 'unresolved')
+        self.assertNotIn('recovery', merged)
+        self.assertTrue(publication_lookup_fresh(merged, datetime(2026, 10, 10, 12, tzinfo=timezone.utc)))
+        repeated = merge_sources([merged, old])[0]
+        self.assertEqual(repeated['latest_publication_lookup'], merged['latest_publication_lookup'])
+        refreshed = merge_sources([merged, {**old, 'verified_at': '2026-10-10T12:00:00+00:00'}])[0]
+        self.assertEqual(refreshed['latest_publication_lookup']['publication_status'], 'publication_record_found')
+
+    def test_answer_packet_keeps_read_outcomes_without_rejected_text(self):
+        packet = answer_context({'current_time': 'now', 'papers': [], 'candidates': [],
+            'dialogue_events': [{'action': 'read_paper', 'params': {'url': 'paper'}, 'result': {
+                'text': 'UNMATCHED CONTENT', 'query_matched': False, 'read_depth': 'full',
+                'coverage': 'query_excerpt', 'truncated': True, 'note': 'No relevant passage found'}}]})
+        outcome = packet['operations'][0]
+        self.assertFalse(outcome['query_matched'])
+        self.assertTrue(outcome['truncated'])
+        self.assertEqual(outcome['note'], 'No relevant passage found')
+        self.assertNotIn('text', outcome)
+
     def test_answer_packet_includes_evidence_once_not_raw_logs(self):
         source = {'url': 'paper', 'abstract': 'COMPLETE ABSTRACT'}
         context = {'current_time': '2026-10-10', 'papers': [source], 'candidates': [source],

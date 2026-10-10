@@ -288,27 +288,31 @@ def _execute(ws, context, project_id, allowed_urls, decision):
         if (not result.get('error') and result.get('text')
                 and result.get('query_matched') is not False):
             known = next((s for s in merge_sources(context['candidates'] + context['papers']) if s['url'] == params['url']), {})
-            source = {**known, **{k: result[k] for k in ('date', 'date_basis', 'authors', 'journal_reference', 'author_reported_doi', 'author_comment', 'published_at', 'updated_at') if result.get(k)},
+            observation = {**{k: result[k] for k in ('date', 'date_basis', 'authors', 'journal_reference', 'author_reported_doi', 'author_comment', 'published_at', 'updated_at') if result.get(k)},
                       'url': params['url'], 'source_type': 'paper' if action == 'read_paper' else 'web',
                       'title': result.get('title') or known.get('title') or params['url'],
                       'content': result['text'][:12000],
+                      'read_query': params.get('query', ''),
                       'read_depth': result.get('read_depth', 'abstract' if action == 'read_paper' else 'web'),
                       'coverage': result.get('coverage'),
-                      'evidence_spans': result.get('evidence_spans', [])}
+                      'evidence_spans': result.get('evidence_spans', []),
+                      'truncated': result.get('truncated', False),
+                      'context_truncated': len(result['text']) > 12000}
+            source = merge_sources([known, observation])[0]
             if action == 'read_paper' and ws.config.enrich_venues and not publication_lookup_fresh(known):
                 publication = verify_publication(ws, source)
-                source.update(publication)
+                source = merge_sources([source, publication])[0]
                 result = {**result, 'publication': publication}
                 for candidate in context['candidates']:
                     if candidate['url'] == source['url']:
-                        candidate.update(publication)
+                        candidate.update(merge_sources([candidate, publication])[0])
                 record_url = publication.get('record_url')
                 if isinstance(record_url, str) and record_url.startswith('https://'):
                     allowed_urls.add(record_url)
             if action == 'read_paper':
                 result = {**result, 'evidence_assessment': assess([source])}
             old = next((p for p in context['papers'] if p['url'] == source['url']), None)
-            if not (old and old.get('read_depth') == 'full' and source['read_depth'] != 'full'):
+            if not (old and old.get('read_depth') == 'full' and observation['read_depth'] != 'full'):
                 context['papers'] = [source] + [p for p in context['papers'] if p['url'] != source['url']]
                 context['papers'] = context['papers'][:5]
     else:

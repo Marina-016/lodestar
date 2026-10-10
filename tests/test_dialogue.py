@@ -71,6 +71,84 @@ class DialogueTests(unittest.TestCase):
         self.assertIn('Body evidence', snapshots[2][-1]['content'][0]['content'])
         self.llm.complete_json.assert_not_called()
 
+    def test_reserved_answer_retains_method_and_experiment_reads(self):
+        url = 'https://arxiv.org/abs/2601.00001'
+        self.ws.config.enrich_venues = False
+        self.llm.dialogue_step.side_effect = [calls({'action': 'read_paper', 'url': url,
+            'full_text': True, 'query': query}) for query in ('method', 'experiment')] + [answer()]
+        with patch('lodestar.tools.registry.call_tool', side_effect=[
+                {'text': 'METHOD PASSAGE', 'read_depth': 'full', 'coverage': 'query_excerpt'},
+                {'text': 'EXPERIMENT PASSAGE', 'read_depth': 'full', 'coverage': 'query_excerpt'}]):
+            context = self.run_dialogue(max_calls=2, context={'message': '比较方法和实验', 'papers': [{'url': url}]})
+        final_packet = self.llm.dialogue_step.call_args.args[1][0]['content']
+        for text in ('METHOD PASSAGE', 'EXPERIMENT PASSAGE'):
+            self.assertEqual(final_packet.count(text), 1)
+            self.assertIn(text, context['papers'][0]['content'])
+        self.assertEqual(context['grounding']['completion_mode'], 'reserved_answer')
+
+    def test_multiple_reads_survive_agent_restart_and_followup(self):
+        url = 'https://arxiv.org/abs/2601.00001'
+        self.ws.config.enrich_venues = False
+        self.llm.dialogue_step.side_effect = [calls({'action': 'search_papers', 'query': 'agent'}),
+            calls({'action': 'read_paper', 'url': url, 'full_text': True, 'query': 'method'}),
+            calls({'action': 'read_paper', 'url': url, 'full_text': True, 'query': 'experiment'}), answer()]
+        agent = ConversationAgent(self.ws, self.llm)
+        session = agent.start()
+        with patch('lodestar.tools.registry.call_tool', side_effect=[{'sources': [{'url': url}]},
+                {'text': 'PERSISTED METHOD', 'read_depth': 'full'},
+                {'text': 'PERSISTED EXPERIMENT', 'read_depth': 'full'}]):
+            agent.turn(session, '分析论文')
+        config = self.ws.config
+        self.ws.close()
+        self.ws = Workspace(config)
+        self.llm.dialogue_step.side_effect = [answer()]
+        with patch('lodestar.tools.registry.call_tool') as tool:
+            ConversationAgent(self.ws, self.llm).turn(session, '实验是否支持这个机制？')
+        tool.assert_not_called()
+        packet = next(m['content'] for m in self.llm.dialogue_step.call_args.args[1]
+                      if m['role'] == 'user' and m['content'].startswith('Current source context'))
+        self.assertEqual(packet.count('PERSISTED METHOD'), 1)
+        self.assertEqual(packet.count('PERSISTED EXPERIMENT'), 1)
+
+    def test_explicit_plan_read_uses_the_same_non_destructive_evidence_merge(self):
+        from lodestar.memory import repo
+        project = repo.upsert_project(self.ws.conn, 'demo', url='https://github.com/example/demo')
+        agent = ConversationAgent(self.ws, self.llm)
+        session = agent.start(project_id=project)
+        source = {'url': 'https://paper', 'source_type': 'paper', 'read_depth': 'full',
+                  'content': 'OLD METHOD', 'read_query': 'method'}
+        with self.ws.conn:
+            self.ws.conn.execute('UPDATE agent_sessions SET evidence=? WHERE conversation_id=?',
+                                 (json.dumps([source]), session))
+        with patch('lodestar.tools.registry.call_tool', return_value={
+                'text': 'NEW EXPERIMENT', 'read_depth': 'full'}), patch(
+                'lodestar.agent.conversation.generate', return_value={'plan': 'A proposal'}) as generate:
+            agent.turn(session, '提出方案', intent='plan')
+        merged = generate.call_args.args[3][0]
+        self.assertIn('OLD METHOD', merged['content'])
+        self.assertIn('NEW EXPERIMENT', merged['content'])
+
+    def test_read_refresh_failure_keeps_known_record_and_avoids_repeating_lookup(self):
+        url = 'https://arxiv.org/abs/2601.00001'
+        source = {'url': url, 'source_type': 'paper', 'publication_status': 'publication_record_found',
+                  'venue': 'Journal', 'external_ids': {'DOI': 'known'},
+                  'record_url': 'https://publisher/paper', 'verified_at': '2020-01-01T00:00:00+00:00'}
+        failure = {'url': url, 'publication_status': 'unresolved', 'venue': None,
+                   'external_ids': {}, 'verified_at': datetime.now(timezone.utc).isoformat(),
+                   'publication_evidence': 'Provider unavailable'}
+        self.llm.dialogue_step.side_effect = [calls({'action': 'read_paper', 'url': url,
+            'full_text': True, 'query': query}) for query in ('method', 'experiment')] + [answer()]
+        with patch('lodestar.tools.registry.call_tool', side_effect=[
+                {'text': 'Method', 'read_depth': 'full'}, {'text': 'Experiment', 'read_depth': 'full'}]), patch(
+                'lodestar.agent.dialogue.verify_publication', return_value=failure) as lookup:
+            context = self.run_dialogue(context={'message': '分析论文', 'papers': [], 'candidates': [source]})
+        lookup.assert_called_once()
+        for saved in (context['papers'][0], context['candidates'][0]):
+            self.assertEqual(saved['publication_status'], 'publication_record_found')
+            self.assertEqual(saved['venue'], 'Journal')
+            self.assertEqual(saved['external_ids'], {'DOI': 'known'})
+            self.assertEqual(saved['latest_publication_lookup']['publication_status'], 'unresolved')
+
     def test_empty_results_can_be_rewritten(self):
         self.llm.dialogue_step.side_effect = [
             calls({'action': 'search_papers', 'query': 'AI4AI'}),

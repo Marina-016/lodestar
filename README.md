@@ -15,7 +15,7 @@
 <p align="center">
   <img alt="Python 3.10+" src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white">
   <img alt="Demo replay" src="https://img.shields.io/badge/Demo-Curated%20Replay-F28C28">
-  <img alt="Last verified tests" src="https://img.shields.io/badge/Tests-254%20offline%20checks-2EA44F">
+  <img alt="Last verified tests" src="https://img.shields.io/badge/Tests-263%20offline%20checks-2EA44F">
   <img alt="License" src="https://img.shields.io/badge/License-Apache--2.0-4A5568">
 </p>
 
@@ -28,7 +28,7 @@
 模型自主组合论文/Web 检索、补读、发表核验和已授权项目上下文，共享默认 8 次操作预算，
 另保留一次回答调用。交互入口支持流式输出、同服务模型/档位/思考切换。
 普通回答直接输出 Markdown，不再强制结构化分块；工具、来源范围和配置保存在元数据中。
-最近记录 254 项离线回归通过，但事实性、相关性和深入分析仍有已知缺口，
+最近记录 263 项离线回归通过，但事实性、相关性和深入分析仍有已知缺口，
 详见 [harness 验证与限制](docs/dialogue-harness.md)。旧 UI / 在线 Demo 仍是独立入口。
 
 当前交付是本地 CLI 与 Agent 服务层。前端尚未重做，在线 Demo 展示的是历史 UI 回放，不代表本分支的实时后端能力。

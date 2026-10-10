@@ -15,22 +15,26 @@
 <p align="center">
   <img alt="Python 3.10+" src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white">
   <img alt="Demo replay" src="https://img.shields.io/badge/Demo-Curated%20Replay-F28C28">
-  <img alt="Tests" src="https://img.shields.io/badge/Tests-189%20backend%20checks-2EA44F">
+  <img alt="Last verified tests" src="https://img.shields.io/badge/Tests-254%20offline%20checks-2EA44F">
   <img alt="License" src="https://img.shields.io/badge/License-Apache--2.0-4A5568">
 </p>
 
 > Lodestar 面向 AI 从业者，用于探索和落地最新 Agent 技术。它探索的不是“如何让模型回答更长”，而是：**Agent 如何形成有证据的判断，理解它和当前项目的关系，在用户确认后沉淀为记忆，并把洞察推进成可验证实验。**
 
 
-## 当前后端 MVP · 2026-10-08
+## 当前后端与产品计划 · 2026-10-10
 
-2026-10-09 本地更新：`chat send` 普通对话增加按需读取循环，支持直接解释、类比、
-对比、改写和代码示例；模型可组合论文检索、相关论文补读与已授权项目上下文，
-每轮最多 5 次工具调用，时事问题支持网页检索和读取。普通回答直接展示模型生成的 Markdown，
-不再强制结构化分块或用标题列表替换讲解；检索提供完整摘要，工具与来源范围保存在消息元数据中。
-详见 [对话 harness 调整](docs/dialogue-harness.md)。旧 UI / 在线 Demo 仍是独立入口。
+`chat send` 普通对话使用连续原生工具循环，支持直接解释、比较、改写和代码示例；
+模型自主组合论文/Web 检索、补读、发表核验和已授权项目上下文，共享默认 8 次操作预算，
+另保留一次回答调用。交互入口支持流式输出、同服务模型/档位/思考切换。
+普通回答直接输出 Markdown，不再强制结构化分块；工具、来源范围和配置保存在元数据中。
+最近记录 254 项离线回归通过，但事实性、相关性和深入分析仍有已知缺口，
+详见 [harness 验证与限制](docs/dialogue-harness.md)。旧 UI / 在线 Demo 仍是独立入口。
 
 当前交付是本地 CLI 与 Agent 服务层。前端尚未重做，在线 Demo 展示的是历史 UI 回放，不代表本分支的实时后端能力。
+
+下一阶段定义已更新为“默认连续单入口 + 用户显式独立任务 + 可管理记忆”，不是个人助理人设。
+白色简洁 UI、任务隔离、记忆范围/版本/删除和验收均写入 [当前 PRD](docs/agent-prd.md)，尚未实现。
 
 ```text
 项目登记/索引 → 论文订阅 → 近期 arXiv / HF 平台热门 → 去重候选
@@ -248,7 +252,7 @@ python -m unittest discover -s tests -q
 python -m lodestar --help
 ```
 
-真实研究和项目订阅使用 [运行手册](docs/agent-mvp-runbook.md)。密钥仅放本地被忽略的 `.env`；模型调用默认保持关闭。免费额度及服务端用完即停必须在运行前核对，不做付费回退。项目代码外发需精确仓库/文件授权，登记项目不等于授权发送整个仓库。公开仓库不包含本机数据库、PDF、真实录制和实验输出，运行证据的范围和结果已写入验收文档。
+真实研究和项目订阅使用 [运行手册](docs/agent-mvp-runbook.md)，当前对话使用 [交互用法](docs/chat-usage.md)。密钥仅放本地被忽略的 `.env`；示例环境显式关闭模型调用，但代码默认未禁用，须检查实际配置与费用授权。历史免费额度不代表当前余额，不自动付费回退。项目代码外发需精确仓库/文件授权，登记项目不等于授权发送整个仓库。仓库不包含本机数据库、PDF、真实录制和实验输出，运行证据的范围和结果已写入验收文档。
 
 历史 UI 回放可选使用 `python -m lodestar ui --port 8123 --no-browser`；其配置见原演示文档，不是本次前端开发成果。
 
@@ -265,7 +269,7 @@ python -m lodestar --help
 
 当前验证覆盖来源及模式隔离、版本与去重、失败恢复、用户/项目边界、引文与方案契约、实验独立评分/篡改检查、环境记录及 CLI。详细证明范围见 [验收台账](docs/agent-goal-audit-20261008.md)。精确引文和绿色测试不保证模型的每个结论正确；诊断原型不是完整论文复现，也没有自动接入生产策略。
 
-后续优先准备独立真实项目任务和来源语义标注，做重复实验后再决定生产策略；永久后台/通知、学习表现判卷、技术别名/语义召回与 UI 单独规划。详见 [后续计划](docs/agent-long-term-plan.md)。
+下一阶段按 PRD 实施单入口实时前端、显式独立任务和可管理记忆；同时保留研究质量的独立审核。来源语义标注、代表性项目重复实验、永久后台/通知、学习表现判卷、语义召回和多用户服务另行验收。详见 [当前计划](docs/agent-long-term-plan.md)。
 
 ## 安全与公开仓库策略
 

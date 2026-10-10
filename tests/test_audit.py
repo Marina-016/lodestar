@@ -10,6 +10,7 @@ from lodestar.config import Config
 from lodestar.context import Workspace
 from lodestar.llm import LLMClient, LLMError
 from lodestar.memory import learning, repo
+from tests.test_dialogue import calls
 
 
 class AuditTests(unittest.TestCase):
@@ -32,13 +33,29 @@ class AuditTests(unittest.TestCase):
 
     def test_model_failure_is_recorded_and_retry_works(self):
         failed=Mock()
-        failed.complete_json.side_effect=LLMError('provider failure')
+        failed.dialogue_step.side_effect=LLMError('provider failure')
         self.agent.llm=failed
         result=self.agent.turn(self.session,'介绍 Harness')
         self.assertEqual(result['status'],'error')
         self.assertEqual(self.agent.history(self.session)[-1]['kind'],'error')
         self.agent.llm=LLMClient(self.ws.config)
         self.assertEqual(self.agent.turn(self.session,'继续解释')['status'],'answered')
+
+    def test_failed_dialogue_retains_retrieved_candidates_and_safe_diagnostic(self):
+        failed = Mock()
+        failed.dialogue_step.side_effect = [
+            calls({'action': 'search_web', 'query': 'AI'}),
+            LLMError('private provider output', code='stream_interrupted', role='conversation')]
+        self.agent.llm = failed
+        with patch('lodestar.tools.registry.call_tool', return_value={
+                'sources': [{'url': 'https://example.com', 'snippet': 'A public result'}]}):
+            result = self.agent.turn(self.session, '今天有什么ai新闻')
+        self.assertIn('对话', result['answer'])
+        self.assertNotIn('private provider output', json.dumps(result))
+        metadata = json.loads(self.agent.history(self.session)[-1]['metadata'])
+        self.assertEqual(metadata['model_error']['code'], 'stream_interrupted')
+        self.assertEqual(metadata['candidates'][0]['url'], 'https://example.com')
+        self.assertEqual(len(metadata['dialogue_events']), 1)
 
     def test_no_match_supplement_preserves_original_body(self):
         source={'url':'https://arxiv.org/abs/2609.33439','source_type':'paper','content':'useful body','read_depth':'full'}

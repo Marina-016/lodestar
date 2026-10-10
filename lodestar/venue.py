@@ -3,11 +3,11 @@
 定位：确定性 code（PRD §26③），不是 Agent 工具——在检索去重后由编排器调用一次。
 
 provider 链（config.venue_providers，默认顺序）：
-  semanticscholar（按 arXiv id）→ openalex（按 arXiv id）→
+  semanticscholar（按 arXiv id）→ openalex（按 title）→
   dblp（按 title）→ crossref（按 title）
-- 前一个**成功**即停；明确未收录（404/空结果）→ 继续下一个 provider。
+- 发现正式发表记录才停止；只有预印本或不完整记录则继续后续 provider。
 - 遇 429 把该 provider 标记为「本批次限流」不再硬闯；瞬时错误（断连/超时）退避重试一次。
-- 基于 title 的 provider 带**近精确相似度守卫 ≥0.8**（实测 Dblp 的 title 搜索对短/常见短语标题
+- 基于 title 的 provider 带**近精确相似度守卫 ≥0.95**（实测 Dblp 的 title 搜索对短/常见短语标题
   会把相似但不是同一篇的论文排前面——0.5 阈值会错挂 venue，故收紧到近精确；达不到就诚实 None，
   绝不把别的论文的 venue 标到本篇头上，这是 Faithfulness 红线）。
 - 礼貌约束：请求带 mailto UA、批间 sleep 1.2s（dblp 要求 ~1 req/s，超打会被断连/429）。
@@ -23,40 +23,41 @@ from typing import Optional
 import requests
 
 S2_URL = "https://api.semanticscholar.org/graph/v1/paper/arXiv:{arxiv_id}"
-OPENALEX_URL = "https://api.openalex.org/works?filter=ids.arxiv:{arxiv_id}"
+OPENALEX_URL = "https://api.openalex.org/works"
 DBLP_URL = "https://dblp.org/search/publ/api"
 CROSSREF_URL = "https://api.crossref.org/works"
 
 MISSING_VENUE = None
 PREPRINT_VENUE = "arXiv preprint"
-TITLE_SIM_THRESHOLD = 0.8  # title 型源只信近精确匹配，防错挂别的论文 venue
+TITLE_SIM_THRESHOLD = 0.95  # Favor unknown over attaching a similar paper's venue.
 DBLP_PREPRINT_TYPE = {"Informal and Other Publications", "Reference"}
-CROSSREF_PREPRINT_TYPE = {"posted-content", "report", "standard"}
 
 
 def _extract_arxiv_id(source: dict) -> Optional[str]:
     dk = source.get("dedup_key") or ""
     if dk.startswith("arxiv:"):
-        return dk.split("arxiv:", 1)[1]
+        return re.sub(r'v\d+$', '', dk.split("arxiv:", 1)[1])
     m = re.search(r"arxiv\.org/(?:abs|pdf)/([A-Za-z0-9.]+)", source.get("url") or "")
-    return m.group(1) if m else None
+    return re.sub(r'v\d+$', '', m.group(1)) if m else None
 
 
 def _title_sim(a: str, b: str) -> float:
-    return SequenceMatcher(None, (a or "").lower(), (b or "").lower()).ratio()
+    def normalize(text):
+        return ' '.join(re.sub(r'[^\w]+', ' ', text or '').casefold().split())
+    return SequenceMatcher(None, normalize(a), normalize(b)).ratio()
 
 
 def _pick_best(hits: list[tuple[dict, float, bool]]) -> Optional[tuple[dict, bool]]:
     """hits: [(info/raw, sim, is_published)]。
 
     只信近精确匹配（sim >= TITLE_SIM_THRESHOLD），否则返回 None（诚实缺失，不错挂）。
-    同相似度档（0.1）内优先已发表条目（dblp 常并列 CoRR 与正式发表两条）。
+    优先题名匹配度，仅相同精度（0.01）内优先已发表条目。
     """
-    best, best_score = None, -1.0
+    best, best_score = None, (-1.0, False)
     for raw, sim, is_published in hits:
         if sim < TITLE_SIM_THRESHOLD:
             continue
-        score = round(sim, 1) * 10 + (1 if is_published else 0)  # 同档内 published 胜出
+        score = (round(sim, 2), is_published)  # Identity before publication preference.
         if score > best_score:
             best, best_score = (raw, is_published), score
     return best
@@ -67,7 +68,7 @@ def _pick_best(hits: list[tuple[dict, float, bool]]) -> Optional[tuple[dict, boo
 # ----------------------------------------------------------------------
 def _fetch_semanticscholar(arxiv_id: str, title: str, timeout: float, ua: str) -> Optional[dict]:
     resp = requests.get(S2_URL.format(arxiv_id=arxiv_id),
-                        params={"fields": "title,venue,publicationVenue,externalIds,year,publicationTypes"},
+                        params={"fields": "title,url,venue,publicationVenue,externalIds,year,publicationTypes"},
                         timeout=timeout, headers={"User-Agent": ua})
     if resp.status_code == 429:
         return {"_rate_limited": True}
@@ -77,22 +78,45 @@ def _fetch_semanticscholar(arxiv_id: str, title: str, timeout: float, ua: str) -
     d = resp.json()
     pub_types = d.get("publicationTypes") or []
     venue = d.get("venue") or (d.get("publicationVenue") or {}).get("name")
-    return _result(venue, bool(pub_types), {"ArXiv": arxiv_id}, "Semantic Scholar")
+    published = bool(venue) and bool(set(pub_types) & {'JournalArticle', 'Conference', 'Book', 'BookSection'})
+    if not published and ('Preprint' in pub_types or (venue or '').casefold() in {'arxiv', 'corr'}):
+        venue = PREPRINT_VENUE
+    return _result(venue, published, {**(d.get('externalIds') or {}), "ArXiv": arxiv_id},
+                   "Semantic Scholar", d.get('url'))
 
 
 def _fetch_openalex(arxiv_id: str, title: str, timeout: float, ua: str) -> Optional[dict]:
-    resp = requests.get(OPENALEX_URL.format(arxiv_id=arxiv_id), timeout=timeout, headers={"User-Agent": ua})
+    if not title:
+        return None
+    # ids.arxiv is not a supported works ID filter. Match titles conservatively,
+    # then inspect all locations: a repository copy may accompany a journal copy.
+    resp = requests.get(OPENALEX_URL, params={'search': title, 'per-page': 5},
+                        timeout=timeout, headers={"User-Agent": ua})
     if resp.status_code == 429:
         return {"_rate_limited": True}
     resp.raise_for_status()
     works = (resp.json().get("results")) or []
     if not works:
         return None
-    w = works[0]
-    src = ((w.get("primary_location") or {}).get("source") or {})
-    is_published = bool(src.get("id")) and src.get("type") not in ("repository",)
+    def publication_location(work):
+        locations = [work.get('primary_location') or {}] + (work.get('locations') or [])
+        return next((loc for loc in locations if loc.get('version') == 'publishedVersion'
+            and (loc.get('source') or {}).get('type') in {'journal', 'conference', 'book series'}), None)
+    best = _pick_best([(w, _title_sim(title, w.get('display_name', '')), publication_location(w) is not None) for w in works])
+    if best is None:
+        return None
+    w = best[0]
+    locations = [w.get('primary_location') or {}] + (w.get('locations') or [])
+    publication = publication_location(w)
+    location = publication or locations[0]
+    src = location.get('source') or {}
+    is_published = publication is not None
     ext = {"OpenAlex": w.get("id"), "DOI": (w.get("ids") or {}).get("doi")}
-    return _result(src.get("display_name"), is_published, ext | {"ArXiv": arxiv_id}, "OpenAlex")
+    name = src.get('display_name')
+    if not is_published and src.get('type') == 'repository' and 'arxiv' in (name or '').casefold():
+        name = PREPRINT_VENUE
+    return _result(name, is_published, ext | {"ArXiv": arxiv_id}, "OpenAlex",
+                   location.get('landing_page_url') or w.get('id'))
 
 
 def _sanitize_dblp_query(title: str) -> str:
@@ -121,7 +145,7 @@ def _fetch_dblp(arxiv_id: str, title: str, timeout: float, ua: str) -> Optional[
         cands = []
         for h in hits:
             info = h.get("info", {}) or {}
-            is_pub = (info.get("type") or "") not in DBLP_PREPRINT_TYPE
+            is_pub = bool(info.get('type')) and info['type'] not in DBLP_PREPRINT_TYPE
             cands.append((info, _title_sim(title, info.get("title") or ""), is_pub))
         best = _pick_best(cands)
         if best is not None:
@@ -129,7 +153,7 @@ def _fetch_dblp(arxiv_id: str, title: str, timeout: float, ua: str) -> Optional[
             venue = info.get("venue")
             if (venue or "").upper() == "CORR":  # CoRR = arXiv 仓库，非正式发表 venue
                 venue, is_published = PREPRINT_VENUE, False
-            return _result(venue, is_published, {"Dblp": info.get("key"), "DOI": info.get("doi")}, "Dblp")
+            return _result(venue, is_published, {"Dblp": info.get("key"), "DOI": info.get("doi")}, "Dblp", info.get('url'))
     return None
 
 
@@ -144,22 +168,25 @@ def _fetch_crossref(arxiv_id: str, title: str, timeout: float, ua: str) -> Optio
     for it in items:
         cand_title = (it.get("title") or [""])[0] or ""
         ctype = it.get("type") or ""
-        is_pub = ctype not in CROSSREF_PREPRINT_TYPE
+        is_pub = ctype in {'journal-article', 'proceedings-article', 'book-chapter', 'book', 'monograph', 'edited-book', 'reference-entry'}
         cands.append((it, _title_sim(title, cand_title), is_pub))
     best = _pick_best(cands)
     if best is None:
         return None
     it, is_published = best
     venue = (it.get("container-title") or [""])[0] or (it.get("event") or {}).get("name")
-    return _result(venue, is_published, {"DOI": it.get("DOI")}, "Crossref")
+    if not is_published and it.get('type') == 'posted-content':
+        venue = PREPRINT_VENUE
+    return _result(venue, is_published, {"DOI": it.get("DOI")}, "Crossref", it.get('URL'))
 
 
-def _result(venue: Optional[str], is_published: bool, external_ids: dict, provider: str) -> dict:
+def _result(venue: Optional[str], is_published: bool, external_ids: dict, provider: str, record_url=None) -> dict:
     return {
-        "venue": venue or (PREPRINT_VENUE if not is_published else MISSING_VENUE),
+        "venue": venue or MISSING_VENUE,
         "is_published": is_published,
         "external_ids": external_ids,
         "venue_note": provider,
+        "record_url": record_url,
     }
 
 
@@ -189,7 +216,7 @@ def _fetch_with_retry(provider: str, arxiv_id: str, title: str, timeout: float, 
 # ----------------------------------------------------------------------
 # 主入口
 # ----------------------------------------------------------------------
-def enrich_papers_venues(cfg, sources: list[dict]) -> tuple[list[dict], str]:
+def enrich_papers_venues(cfg, sources: list[dict], *, retry=True, cooldowns=None) -> tuple[list[dict], str]:
     papers = [s for s in sources if s.get("source_type") == "paper"]
     if not papers:
         return sources, "无论文来源，跳过 venue 回填"
@@ -199,7 +226,7 @@ def enrich_papers_venues(cfg, sources: list[dict]) -> tuple[list[dict], str]:
         by_key = {p["dedup_key"]: p for p in all_papers()}
         for s in papers:
             f = by_key.get(s.get("dedup_key"))
-            s["venue"] = (f or {}).get("venue", PREPRINT_VENUE)
+            s["venue"] = (f or {}).get("venue")
             s["is_published"] = bool((f or {}).get("is_published"))
             s["external_ids"] = (f or {}).get("external_ids", {"ArXiv": s.get("dedup_key", "")})
         return sources, f"mock venue 夹具回填 {len(papers)} 篇"
@@ -216,6 +243,7 @@ def enrich_papers_venues(cfg, sources: list[dict]) -> tuple[list[dict], str]:
         return sources, "venue 回填不可用：未配置已实现的 provider"
 
     rate_limited: set = set()
+    cooldowns = cooldowns if cooldowns is not None else {}
     resolved = 0
     degraded = 0
     notes = []
@@ -225,30 +253,53 @@ def enrich_papers_venues(cfg, sources: list[dict]) -> tuple[list[dict], str]:
         arxiv_id = _extract_arxiv_id(s)
         title = s.get("title") or ""
         result = None
+        lookups = []
         for provider in providers:
+            cached = cooldowns.get(provider)
+            if cached and cached['until'] > time.monotonic():
+                lookups.append({'provider': provider, 'status': cached['status'], 'cooldown': True})
+                continue
             if provider in rate_limited:
+                lookups.append({'provider': provider, 'status': 'rate_limited'})
                 continue
             try:
-                fetched = _fetch_with_retry(provider, arxiv_id, title, cfg.tool_timeout_s, ua)
-            except Exception:  # noqa: BLE001 —— 单篇/provider 失败降级
+                if retry:
+                    fetched = _fetch_with_retry(provider, arxiv_id, title, cfg.tool_timeout_s, ua)
+                else:
+                    fetched = _FETCHERS[provider](arxiv_id, title, cfg.tool_timeout_s, ua)
+            except Exception as exc:  # noqa: BLE001 —— 单篇/provider 失败降级
+                lookups.append({'provider': provider, 'status': 'unavailable',
+                    'error_type': type(exc).__name__,
+                    'http_status': getattr(getattr(exc, 'response', None), 'status_code', None)})
                 notes.append(f"{provider} 请求失败")
+                if not retry:
+                    cooldowns[provider] = {'status': 'unavailable', 'until': time.monotonic() + 15}
                 continue
             if fetched is None:
+                lookups.append({'provider': provider, 'status': 'no_matching_record'})
                 continue  # 该 provider 明确未收录，换下一个
             if fetched.get("_rate_limited"):
+                lookups.append({'provider': provider, 'status': 'rate_limited'})
                 rate_limited.add(provider)
+                cooldowns[provider] = {'status': 'rate_limited', 'until': time.monotonic() + 60}
                 notes.append(f"{provider} 429 限流")
                 continue
-            result = fetched
-            break  # 成功即停
+            lookups.append({'provider': provider,
+                'status': 'publication_record' if fetched.get('is_published') and fetched.get('venue') not in (None, PREPRINT_VENUE)
+                          else 'preprint_record' if fetched.get('venue') == PREPRINT_VENUE else 'incomplete_record'})
+            if result is None or fetched.get('is_published'):
+                result = fetched
+            if fetched.get('is_published') and fetched.get('venue') not in (None, PREPRINT_VENUE):
+                break  # A preprint record cannot exclude a later accepted version.
         if result is not None:
             s.update(result)
-            resolved += 1 if (result["venue"] and result["venue"] != PREPRINT_VENUE) else 0
+            resolved += 1 if (result.get('is_published') and result["venue"] and result["venue"] != PREPRINT_VENUE) else 0
         else:
             s.setdefault("venue", MISSING_VENUE)
             s.setdefault("is_published", False)
             s.setdefault("external_ids", {"ArXiv": arxiv_id} if arxiv_id else {})
             degraded += 1
+        s['venue_lookups'] = lookups
         if i < len(batch) - 1:
             time.sleep(cfg.venue_request_interval_s)
 

@@ -1,14 +1,26 @@
+import copy
 import json
 import tempfile
+from datetime import datetime, timezone
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
-
-from lodestar.agent.dialogue import gather
-from lodestar.agent.explanation import explain
+from lodestar.agent.dialogue import gather, tool_definitions
 from lodestar.agent.conversation import ConversationAgent
 from lodestar.config import Config
 from lodestar.context import Workspace
+from lodestar.llm import LLMError
+
+
+def answer(text='A natural answer.'):
+    return {'role': 'assistant', 'content': [{'type': 'text', 'text': text}]}
+
+
+def calls(*operations):
+    return {'role': 'assistant', 'content': [
+        {'type': 'tool_use', 'id': f'call_{i}', 'name': op['action'],
+         'input': {k: v for k, v in op.items() if k != 'action'}}
+        for i, op in enumerate(operations)]}
 
 
 class DialogueTests(unittest.TestCase):
@@ -17,235 +29,292 @@ class DialogueTests(unittest.TestCase):
         self.ws = Workspace(Config(llm_mode='mock', search_mode='mock',
             db_path=Path(self.temp.name) / 'db', workspace_dir=Path(self.temp.name) / 'ws'))
         self.llm = Mock()
+        self.llm.dialogue_step.return_value = answer()
+        self.llm.complete_json.return_value = {'items': []}
 
     def tearDown(self):
         self.ws.close()
         self.temp.cleanup()
 
-    def test_direct_answers_need_no_tools_or_papers(self):
-        for question, text in [
-            ('用一句话解释缓存', '缓存保存可复用结果，减少重复计算。'),
-            ('换个话题，给我一个 Python 求和示例', '```python\nprint(sum([1, 2, 3]))\n```'),
-            ('Translate 缓存 into English', 'Cache.'),
-            ('把刚才的解释缩成十个字', '缓存让重复访问更快。'),
-        ]:
-            with self.subTest(question=question):
-                self.llm.complete_json.side_effect = [
-                    {'action': 'answer'}]
-                self.llm.complete.return_value = text
-                agent = ConversationAgent(self.ws, self.llm)
-                with patch('lodestar.tools.registry.call_tool') as tool:
-                    result = agent.turn(agent.start(), question)
-                self.assertEqual(result['answer'], text)
-                tool.assert_not_called()
-                self.assertEqual(result['grounding']['format'], 'markdown')
+    def run_dialogue(self, **kwargs):
+        return gather(self.ws, self.llm, kwargs.pop('context', {'message': '研究这个方向', 'papers': []}), **kwargs)
 
-    def test_model_selects_relevant_source_not_first_two(self):
-        papers = [{'url': f'https://arxiv.org/abs/2601.0000{i}', 'source_type': 'paper',
-                   'content': 'Existing abstract.'} for i in range(3)]
-        self.llm.complete_json.side_effect = [{'action': 'read_paper', 'url': papers[2]['url']}, {'action': 'answer'}]
-        with patch('lodestar.tools.registry.call_tool', return_value={
-                'text': 'Relevant body evidence.', 'read_depth': 'full'}) as tool:
-            context = gather(self.ws, self.llm, {'message': '比较第三篇的方法', 'papers': papers})
-        self.assertEqual(tool.call_args.args[2]['url'], papers[2]['url'])
-        self.assertEqual(context['papers'][0]['content'], 'Relevant body evidence.')
+    def test_direct_answers_without_json_planner_or_generator(self):
+        for question, text in [('你好', '你好！'), ('Translate 缓存', 'Cache.'),
+                               ('Python 示例', '~~~python\nprint(1)\n~~~')]:
+            self.llm.dialogue_step.return_value = answer(text)
+            agent = ConversationAgent(self.ws, self.llm)
+            with patch('lodestar.tools.registry.call_tool') as tool:
+                result = agent.turn(agent.start(), question)
+            self.assertEqual(result['answer'], text)
+            tool.assert_not_called()
+        self.llm.complete.assert_not_called()
+        self.llm.complete_json.assert_not_called()
 
-    def test_search_read_answer_composes_existing_tools(self):
+    def test_search_read_answer_preserves_native_message_history(self):
         url = 'https://arxiv.org/abs/2601.00001'
-        self.llm.complete_json.side_effect = [
-            {'action': 'search_papers', 'query': 'memory'}, {'action': 'read_paper', 'url': url}, {'action': 'answer'}]
+        responses = iter([calls({'action': 'search_papers', 'query': 'memory'}),
+                          calls({'action': 'read_paper', 'url': url}), answer()])
+        snapshots = []
+        def step(system, messages, tools, on_text):
+            snapshots.append(copy.deepcopy(messages))
+            return next(responses)
+        self.llm.dialogue_step.side_effect = step
         with patch('lodestar.tools.registry.call_tool', side_effect=[
-                {'sources': [{'url': url, 'snippet': 'Search snippet is not body evidence.'}]},
-                {'text': 'The method keeps a bounded memory.', 'read_depth': 'full'}]) as tool:
-            context = gather(self.ws, self.llm, {'message': '找一篇解释记忆管理的论文', 'papers': []})
+                {'sources': [{'url': url, 'abstract': 'Full abstract'}]},
+                {'text': 'Body evidence', 'read_depth': 'full'}]):
+            context = self.run_dialogue()
+        self.assertEqual(context['papers'][0]['content'], 'Body evidence')
+        self.assertEqual(snapshots[1][-2]['content'][0]['type'], 'tool_use')
+        self.assertEqual(snapshots[1][-1]['content'][0]['tool_use_id'], 'call_0')
+        self.assertIn('Full abstract', snapshots[2][-3]['content'][0]['content'])
+        self.assertIn('Body evidence', snapshots[2][-1]['content'][0]['content'])
+        self.llm.complete_json.assert_not_called()
+
+    def test_empty_results_can_be_rewritten(self):
+        self.llm.dialogue_step.side_effect = [
+            calls({'action': 'search_papers', 'query': 'AI4AI'}),
+            calls({'action': 'search_papers', 'query': 'automated research'}), answer()]
+        with patch('lodestar.tools.registry.call_tool', side_effect=[
+                {'sources': []}, {'sources': [{'url': 'https://paper', 'abstract': 'Evidence'}]}]) as tool:
+            result = self.run_dialogue()
         self.assertEqual(tool.call_count, 2)
-        self.assertEqual(len(context['papers']), 1)
-        self.assertEqual(context['papers'][0]['read_depth'], 'full')
+        self.assertEqual(len(result['candidates']), 1)
+        self.assertEqual(result['papers'], [])
 
-    def test_unknown_tools_and_out_of_scope_reads_cannot_trigger_effects(self):
-        for action in [{'action': 'record_learning_evidence'},
-                       {'action': 'read_paper', 'url': ['bad type']},
-                       {'action': 'read_paper', 'url': 'http://localhost/private'}]:
-            with self.subTest(action=action):
-                self.llm.complete_json.side_effect = None
-                self.llm.complete_json.return_value = action
-                with patch('lodestar.tools.registry.call_tool') as tool:
-                    context = gather(self.ws, self.llm, {'message': '不要联网，只用已有知识', 'papers': []})
-                tool.assert_not_called()
-                self.assertLessEqual(len(context['dialogue_events']), 3)
+    def test_unknown_tools_bad_arguments_and_unseen_urls_cannot_execute(self):
+        for operation in [
+                {'action': 'record_learning_evidence'},
+                {'action': 'read_paper', 'url': ['bad type']},
+                {'action': 'read_webpage', 'url': 'http://localhost/private'},
+                {'action': 'search_papers', 'query': 'AI', 'days': True},
+                {'action': 'search_papers', 'query': 'AI', 'days': 999},
+                {'action': 'search_web', 'query': 'AI', 'write': True},
+                {'action': 'project_context', 'query': 'private'}]:
+            self.llm.dialogue_step.side_effect = [calls(operation), answer()]
+            with patch('lodestar.tools.registry.call_tool') as tool:
+                result = self.run_dialogue()
+            tool.assert_not_called()
+            self.assertIn('error', result['dialogue_events'][0]['result'])
 
-    def test_failed_read_preserves_old_evidence_and_reaches_answer(self):
-        paper = {'url': 'https://arxiv.org/abs/2601.00001', 'source_type': 'paper', 'content': 'Original'}
-        self.llm.complete_json.side_effect = [{'action': 'read_paper', 'url': paper['url']}, {'action': 'answer'}]
-        with patch('lodestar.tools.registry.call_tool', return_value={'error': 'timeout'}):
-            context = gather(self.ws, self.llm, {'message': '读一下', 'papers': [paper]})
-        self.assertEqual(context['papers'], [paper])
-        self.assertEqual(context['tool_results'][0]['result']['error'], 'timeout')
-
-    def test_distinct_actions_cannot_exceed_budget(self):
-        self.llm.complete_json.side_effect = [
-            {'action': 'search_papers', 'query': f'query {index}'} for index in range(5)]
-        with patch('lodestar.tools.registry.call_tool', return_value={'sources': []}) as tool:
-            context = gather(self.ws, self.llm, {'message': '找相关论文', 'papers': []}, max_calls=3)
-        self.assertEqual(tool.call_count, 3)
-        self.assertEqual(context['tool_budget_remaining'], 0)
-
-    def test_empty_model_answer_is_rejected_without_repair_loop(self):
-        from lodestar.llm import LLMError
-        self.llm.complete.return_value = ''
-        with self.assertRaises(LLMError): explain(self.llm, {'papers':[]})
-        self.llm.complete.assert_called_once()
-        self.llm.complete_json.assert_not_called()
-
-
-    def test_markdown_answer_is_preserved_including_intro_and_comparison(self):
-        text = '根据摘要，先关注这两篇。\n\n| 论文 | 方向 |\n|---|---|\n| A | 记忆 |\n\n我建议先读 A。'
-        self.llm.complete.return_value = text
-        answer, audit = explain(self.llm, {'papers':[]})
-        self.assertEqual(answer,text)
-        self.assertEqual(audit['format'],'markdown')
-        self.llm.complete_json.assert_not_called()
-
-
-    def test_project_mention_is_not_automatically_a_proposal(self):
-        from lodestar.agent.routing import route
-        self.assertEqual(route('我的项目里，缓存和记忆有什么区别？').intent, 'followup')
-
-    def test_project_context_stays_bound_and_enforces_export_policy(self):
-        self.llm.complete_json.side_effect = [{'action': 'project_context'}, {'action': 'answer'}]
-        self.ws.config.llm_mode = 'live'
-        with patch('lodestar.agent.dialogue.collect', return_value={
-                'status': 'needs_export_scope', 'documents': []}) as collect:
-            context = gather(self.ws, self.llm, {'message': '我的项目如何组织缓存', 'papers': []}, project_id=7)
-        self.assertEqual(collect.call_args.args[3], 7)
-        self.assertTrue(collect.call_args.kwargs['live'])
-        self.assertEqual(context['tool_results'][0]['result']['status'], 'needs_export_scope')
-
-    def test_project_plan_language_stays_in_model_loop(self):
-        from lodestar.memory import repo
-        project_id = repo.upsert_project(self.ws.conn, 'demo')
-        self.llm.complete_json.side_effect = [
-            {'action': 'answer'}]
-        self.llm.complete.return_value = '先比较两种可行方案。'
-        agent = ConversationAgent(self.ws, self.llm)
-        with patch('lodestar.agent.routing.route', side_effect=AssertionError('legacy router')), patch(
-                'lodestar.agent.conversation.generate') as plan:
-            result = agent.turn(agent.start(project_id=project_id), '给项目生成方案，先讨论思路')
-        plan.assert_not_called()
-        self.assertEqual(result['answer'], '先比较两种可行方案。')
-        self.assertEqual(result['route_reason'], 'model-led dialogue')
-
-    def test_quoted_retrieval_prohibition_does_not_override_model(self):
-        self.llm.complete_json.side_effect = [
-            {'action': 'search_papers', 'query': 'retrieval policy'}, {'action': 'answer'}]
-        with patch('lodestar.tools.registry.call_tool', return_value={'sources': []}) as tool:
-            gather(self.ws, self.llm, {'message': '找研究讨论“不要搜索”指令的论文', 'papers': []})
-        tool.assert_called_once()
-
-    def test_model_can_answer_without_search_when_user_requests_it(self):
-        self.llm.complete_json.return_value = {'action': 'answer'}
+    def test_invalid_argument_json_returns_repairable_result(self):
+        response = calls({'action': 'search_web', 'query': 'AI'})
+        response['content'][0]['input'] = '{"query":'
+        self.llm.dialogue_step.side_effect = [response, answer()]
         with patch('lodestar.tools.registry.call_tool') as tool:
-            gather(self.ws, self.llm, {'message': '不要联网，解释缓存', 'papers': []})
+            result = self.run_dialogue()
         tool.assert_not_called()
+        self.assertIn('object', result['dialogue_events'][0]['result']['error'])
 
-    def test_model_marks_current_source_requirement_without_keywords(self):
-        self.llm.complete_json.return_value = {'action': 'answer', 'require_sources': True}
-        context = gather(self.ws, self.llm, {'message': '它刚刚发布的版本改变了什么', 'papers': []})
-        self.assertTrue(context['require_sources'])
-
-    def test_paper_overview_keeps_chinese_explanation(self):
-        url = 'https://arxiv.org/abs/2601.00001'
-        text = f'根据摘要，这篇论文研究记忆检索，值得关注它如何筛选上下文。[论文]({url})'
-        self.llm.complete.return_value = text
-        answer, audit = explain(self.llm, {'papers':[], 'candidates':[
-            {'url':url,'title':'AI research','abstract':'The method selects relevant context.'}]})
-        self.assertEqual(answer,text)
-        self.assertNotIn('未核对正文',answer)
-        self.assertEqual(audit['source_depths'][url],'abstract')
-
-
-    def test_ordinary_overview_does_not_need_json_blocks_or_quotes(self):
-        self.llm.complete.return_value = '可以先看模型记忆和 Agent 评测两个方向。'
-        answer, _ = explain(self.llm, {'papers':[]})
-        self.assertIn('模型记忆',answer)
-        self.llm.complete_json.assert_not_called()
-
-
-    def test_model_controls_actual_paper_search_order(self):
-        self.llm.complete_json.side_effect = [
-            {'action': 'search_papers', 'query': 'agents', 'sort_by': 'submittedDate'}, {'action': 'answer'}]
+    def test_parallel_batch_is_bounded_and_reserved_answer_has_evidence(self):
+        self.llm.dialogue_step.side_effect = [calls(*[
+            {'action': 'search_web', 'query': f'query {i}'} for i in range(4)]), answer()]
         with patch('lodestar.tools.registry.call_tool', return_value={'sources': []}) as tool:
-            gather(self.ws, self.llm, {'message': '看看最近的论文', 'papers': []})
-        self.assertEqual(tool.call_args.args[2]['sort_by'], 'submittedDate')
+            result = self.run_dialogue(max_calls=2)
+        self.assertEqual(tool.call_count, 2)
+        self.assertEqual(len(result['dialogue_events']), 2)
+        final = self.llm.dialogue_step.call_args
+        self.assertEqual(final.args[2], [])
+        self.assertEqual(len(final.args[1]), 1)
+        self.assertIn('operations', final.args[1][0]['content'])
+        self.assertNotIn('dialogue_events', final.args[1][0]['content'])
+        self.assertEqual(result['grounding']['completion_mode'], 'reserved_answer')
 
-    def test_repeated_operation_ignores_incidental_model_flags(self):
-        self.llm.complete_json.side_effect = [
-            {'action': 'search_papers', 'query': 'agents'},
-            {'action': 'search_papers', 'query': 'agents', 'require_sources': True}]
+    def test_no_extra_tool_execution_after_budget(self):
+        self.llm.dialogue_step.return_value = calls({'action': 'search_web', 'query': 'retry'})
         with patch('lodestar.tools.registry.call_tool', return_value={'sources': []}) as tool:
-            context = gather(self.ws, self.llm, {'message': '找论文', 'papers': []})
-        self.assertEqual(tool.call_count, 1)
-        self.assertEqual(context['dialogue_events'][-1]['error'], 'repeated action stopped')
+            result = self.run_dialogue(max_calls=2)
+        self.assertEqual(tool.call_count, 2)
+        self.assertEqual(self.llm.dialogue_step.call_count, 3)
+        self.assertEqual(result['grounding']['completion_mode'], 'evidence_fallback')
+        self.assertIn('未获得可用证据', result['answer'])
 
-    def test_web_candidates_remain_snippets_in_model_context(self):
-        url = 'https://openreview.net/forum?id=example'
-        self.llm.complete.return_value = f'这里有一个相关候选：[论文]({url})'
-        _, audit = explain(self.llm, {'papers':[], 'candidates':[
-            {'url':url,'title':'Agent evaluation paper','snippet':'Search result.'}]})
-        self.assertEqual(audit['source_depths'][url],'search_snippet')
-
-
-    def test_arxiv_timeout_reports_source_failure_not_empty_topic(self):
-        import requests
-        from lodestar.tools.arxiv_search import tool_search_papers
-        self.ws.config.search_mode = 'live'
-        with patch('lodestar.tools.arxiv_search._search_arxiv', side_effect=requests.Timeout('timeout')):
-            result = tool_search_papers(self.ws, 'agents')
-        self.assertEqual(result['failure_kind'], 'provider_unavailable')
-        self.assertIn('search_web', result['recovery'])
-
-    def test_model_selects_independent_trending_discovery(self):
-        self.llm.complete_json.side_effect = [
-            {'action': 'discover_papers', 'kind': 'trending', 'query': ''}, {'action': 'answer'}]
+    def test_independent_queries_count_against_operation_budget(self):
+        self.llm.dialogue_step.side_effect = [
+            calls({'action': 'search_papers', 'queries': ['agent memory', 'agent evaluation', 'automated research']}),
+            answer('已有证据的回答')]
         with patch('lodestar.tools.registry.call_tool', return_value={'sources': []}) as tool:
-            gather(self.ws, self.llm, {'message': '看看热门论文', 'papers': []})
-        self.assertEqual(tool.call_args.args[1], 'discover_papers')
-        self.assertEqual(tool.call_args.args[2]['kind'], 'trending')
+            result = self.run_dialogue(max_calls=2)
+        self.assertEqual(tool.call_args.args[2]['queries'], ['agent memory', 'agent evaluation'])
+        self.assertEqual(result['dialogue_events'][0]['cost'], 2)
+        self.assertEqual(result['dialogue_events'][0]['result']['skipped_queries'], ['automated research'])
+        self.assertEqual(result['grounding']['search_operations'], 2)
+        self.assertEqual(self.llm.dialogue_step.call_count, 2)
 
-    def test_model_can_read_abstract_without_forced_full_text(self):
-        url = 'https://arxiv.org/abs/2601.00001'
-        self.llm.complete_json.side_effect = [{'action': 'read_paper', 'url': url}, {'action':'answer'}]
-        with patch('lodestar.tools.registry.call_tool', return_value={'text':'An abstract.'}) as tool:
-            gather(self.ws, self.llm, {'message':'读摘要', 'papers':[{'url':url}]})
+    def test_broken_final_tool_request_preserves_retrieved_candidates(self):
+        self.llm.dialogue_step.return_value = calls({'action': 'search_papers', 'query': 'agent'})
+        with patch('lodestar.tools.registry.call_tool', return_value={
+                'sources': [{'url': 'https://paper', 'title': 'Candidate'}]}):
+            result = self.run_dialogue(max_calls=1)
+        self.assertIn('[Candidate](https://paper)', result['answer'])
+        self.assertIn('仍需核验', result['answer'])
+        self.assertEqual(result['grounding']['completion_mode'], 'evidence_fallback')
+
+    def test_invalid_batch_arguments_do_not_execute(self):
+        for arguments in [{'queries': []}, {'queries': ['a'] * 4}, {'queries': ['a', 1]},
+                          {'queries': ['a'], 'query': 'b'}]:
+            self.llm.dialogue_step.side_effect = [calls({'action': 'search_papers', **arguments}), answer()]
+            with patch('lodestar.tools.registry.call_tool') as tool:
+                self.run_dialogue()
+            tool.assert_not_called()
+
+    def test_failed_or_unmatched_read_preserves_original_body(self):
+        paper = {'url': 'https://paper', 'content': 'Original', 'read_depth': 'full'}
+        for result in [{'error': 'timeout'}, {'text': 'Unmatched', 'query_matched': False},
+                       {'text': 'Abstract', 'read_depth': 'abstract'}]:
+            self.llm.dialogue_step.side_effect = [calls({'action': 'read_paper', 'url': paper['url']}), answer()]
+            with patch('lodestar.tools.registry.call_tool', return_value=result):
+                context = self.run_dialogue(context={'message': '读论文', 'papers': [paper]})
+            self.assertEqual(context['papers'], [paper])
+
+    def test_model_selects_third_source_and_abstract_by_default(self):
+        papers = [{'url': f'https://paper/{i}'} for i in range(3)]
+        self.llm.dialogue_step.side_effect = [calls({'action': 'read_paper', 'url': papers[2]['url']}), answer()]
+        with patch('lodestar.tools.registry.call_tool', return_value={'text': 'Abstract'}) as tool:
+            self.run_dialogue(context={'message': '第三篇', 'papers': papers})
+        self.assertEqual(tool.call_args.args[2]['url'], papers[2]['url'])
         self.assertFalse(tool.call_args.args[2]['full_text'])
 
-    def test_current_discovery_does_not_strip_natural_intro(self):
-        self.llm.complete.return_value = '下面是本周的论文，我先按研究方向介绍。'
-        answer, _ = explain(self.llm, {'require_sources':True,'papers':[]})
-        self.assertEqual(answer,self.llm.complete.return_value)
+    def test_project_context_enforces_bound_export_scope(self):
+        self.llm.dialogue_step.side_effect = [calls({'action': 'project_context', 'query': '缓存'}), answer()]
+        self.ws.config.llm_mode = 'live'
+        with patch('lodestar.agent.dialogue.collect', return_value={'status': 'needs_export_scope'}) as collect:
+            result = self.run_dialogue(project_id=7)
+        self.assertEqual(collect.call_args.args[3], 7)
+        self.assertTrue(collect.call_args.kwargs['live'])
+        self.assertEqual(result['dialogue_events'][0]['result']['status'], 'needs_export_scope')
+        self.assertNotIn('project_context', [t['name'] for t in tool_definitions(None)])
 
+    def test_project_plan_words_do_not_trigger_legacy_workflow(self):
+        agent = ConversationAgent(self.ws, self.llm)
+        with patch('lodestar.agent.conversation.generate') as plan, patch(
+                'lodestar.agent.conversation.ResearchAgent') as research:
+            result = agent.turn(agent.start(), '先讨论我的项目方案，不要实现')
+        plan.assert_not_called()
+        research.assert_not_called()
+        self.assertEqual(result['route_reason'], 'model-led dialogue')
 
-    def test_candidate_list_survives_restart_and_can_be_read_on_followup(self):
+    def test_empty_answer_is_error_not_false_success(self):
+        self.llm.dialogue_step.return_value = answer(' ')
+        with self.assertRaises(LLMError):
+            self.run_dialogue()
+        self.llm.dialogue_step.assert_called_once()
+
+    def test_model_controls_search_order_and_discovery(self):
+        self.llm.dialogue_step.side_effect = [
+            calls({'action': 'search_papers', 'query': 'agent', 'sort_by': 'submittedDate'}),
+            calls({'action': 'discover_papers', 'kind': 'trending'}), answer()]
+        with patch('lodestar.tools.registry.call_tool', return_value={'sources': []}) as tool:
+            self.run_dialogue()
+        self.assertEqual(tool.call_args_list[0].args[2]['sort_by'], 'submittedDate')
+        self.assertNotIn('days', tool.call_args_list[0].args[2])
+        self.assertEqual(tool.call_args_list[1].args[2]['kind'], 'trending')
+
+    def test_candidates_survive_new_agent_and_followup_can_read_them(self):
         url = 'https://arxiv.org/abs/2601.00001'
-        self.llm.complete_json.side_effect = [
-            {'action':'search_papers','query':'agent'}, {'action':'answer'}]
+        self.llm.dialogue_step.side_effect = [calls({'action': 'search_papers', 'query': 'agent'}), answer()]
         agent = ConversationAgent(self.ws, self.llm)
         session = agent.start()
-        self.llm.complete.return_value = f'这是一篇 Agent 论文：[论文]({url})'
-        with patch('lodestar.tools.registry.call_tool', return_value={'sources':[{'url':url,'title':'Agent','source_type':'paper'}]}):
-            first = agent.turn(session,'找论文')
-        self.assertEqual(first['evidence_reused'],0)
-        self.llm.complete_json.side_effect = [
-            {'action':'read_paper','url':url}, {'action':'answer'},
-            {'items':[]}]
-        # New agent instance restores candidate links from persisted message metadata.
-        with patch('lodestar.tools.registry.call_tool', return_value={'text':'Abstract evidence.'}) as tool:
-            second = ConversationAgent(self.ws,self.llm).turn(session,'读一下第一篇摘要')
-        self.assertEqual(tool.call_args.args[2]['url'],url)
-        self.assertEqual(second['evidence_reused'],1)
+        with patch('lodestar.tools.registry.call_tool', return_value={'sources': [{'url': url}]}):
+            agent.turn(session, '找论文')
+        self.llm.dialogue_step.side_effect = [calls({'action': 'read_paper', 'url': url}), answer()]
+        with patch('lodestar.tools.registry.call_tool', return_value={'text': 'Evidence'}) as tool:
+            result = ConversationAgent(self.ws, self.llm).turn(session, '第一篇呢')
+        self.assertEqual(tool.call_args.args[2]['url'], url)
+        self.assertEqual(result['evidence_reused'], 1)
 
-    def test_model_can_return_code_without_host_prefixes(self):
-        text = '```python\nprint("hello")\n```'
-        self.llm.complete.return_value = text
-        answer, _ = explain(self.llm, {'papers':[]})
-        self.assertEqual(answer,text)
+    def test_failure_keeps_evidence_and_partial_text(self):
+        def fail(system, messages, tools, on_text):
+            on_text('部分回答')
+            raise LLMError('network', role='conversation')
+        self.llm.dialogue_step.side_effect = fail
+        with self.assertRaises(LLMError) as raised:
+            self.run_dialogue(context={'message': '继续', 'papers': [{'url': 'https://paper'}]})
+        self.assertEqual(raised.exception.partial_answer, '部分回答')
+        self.assertEqual(len(raised.exception.dialogue_context['papers']), 1)
+
+    def test_configurable_budget_can_finish_search_read_and_verification(self):
+        self.ws.config.dialogue_max_operations = 7
+        self.llm.dialogue_step.side_effect = [calls({'action': 'search_web', 'query': str(i)}) for i in range(7)] + [answer()]
+        with patch('lodestar.tools.registry.call_tool', return_value={'sources': []}) as tool:
+            result = self.run_dialogue()
+        self.assertEqual(tool.call_count, 7)
+        self.assertEqual(result['grounding']['search_operations'], 7)
+
+    def test_current_evidence_follows_history_without_fake_assistant_ack(self):
+        history = [{'role': 'user', 'content': 'Earlier request'},
+                   {'role': 'assistant', 'content': 'OLD UNSUPPORTED CLAIM'}]
+        self.run_dialogue(context={'message': 'Current request', 'papers': [], 'history': history})
+        messages = self.llm.dialogue_step.call_args.args[1]
+        self.assertEqual(messages[:2], history)
+        current = messages[len(history)]['content']
+        self.assertIn('Current source context', current)
+        self.assertEqual(sum('OLD UNSUPPORTED CLAIM' in str(m['content']) for m in messages), 1)
+        self.assertTrue(current.endswith('Current request'))
+
+    def test_read_returns_metadata_without_an_extra_model_verification_turn(self):
+        url = 'https://arxiv.org/abs/2601.00001'
+        publication = {'url': url, 'publication_status': 'publication_record_found',
+                       'venue': 'Journal', 'verified_at': '2026-10-10', 'record_url': 'https://publisher/paper'}
+        self.llm.dialogue_step.side_effect = [calls({'action': 'read_paper', 'url': url,
+                                                  'full_text': True, 'query': 'optimizer experiment'}), answer()]
+        with patch('lodestar.tools.registry.call_tool', return_value={'text': 'Body', 'read_depth': 'full'} ) as tool, patch(
+                'lodestar.agent.dialogue.verify_publication', return_value=publication) as verify:
+            result = self.run_dialogue(context={'message': '这篇有什么进展', 'papers': [], 'candidates': [
+                {'url': url, 'source_type': 'paper', 'date': '2026-01-01', 'title': 'Title'}]})
+        verify.assert_called_once()
+        self.assertEqual(tool.call_args.args[2]['query'], 'optimizer experiment')
+        self.assertEqual(result['papers'][0]['date'], '2026-01-01')
+        self.assertEqual(result['papers'][0]['publication_status'], 'publication_record_found')
+        self.assertEqual(result['dialogue_events'][0]['result']['publication']['venue'], 'Journal')
+
+    def test_read_does_not_repeat_existing_publication_lookup(self):
+        url = 'https://arxiv.org/abs/2601.00001'
+        self.llm.dialogue_step.side_effect = [calls({'action': 'read_paper', 'url': url}), answer()]
+        with patch('lodestar.tools.registry.call_tool', return_value={'text': 'Abstract'}), patch(
+                'lodestar.agent.dialogue.verify_publication') as verify:
+            result = self.run_dialogue(context={'message': '读一下', 'papers': [], 'candidates': [
+                {'url': url, 'verified_at': datetime.now(timezone.utc).isoformat(), 'publication_status': 'publication_record_found', 'venue': 'Journal'}]})
+        verify.assert_not_called()
+        self.assertEqual(result['papers'][0]['venue'], 'Journal')
+
+    def test_publisher_url_can_be_read_on_followup(self):
+        self.llm.dialogue_step.side_effect = [calls({'action': 'read_webpage', 'url': 'https://publisher/paper'}), answer()]
+        with patch('lodestar.tools.registry.call_tool', return_value={'text': 'Publisher record'}) as tool:
+            self.run_dialogue(context={'message': '核对出版页', 'papers': [
+                {'url': 'https://arxiv.org/abs/2601.00001', 'record_url': 'https://publisher/paper'}]})
+        self.assertEqual(tool.call_args.args[2]['url'], 'https://publisher/paper')
+
+    def test_repeat_search_does_not_erase_confirmed_publication(self):
+        url = 'https://arxiv.org/abs/2601.00001'
+        self.llm.dialogue_step.side_effect = [calls({'action': 'search_papers', 'query': 'agent'}), answer()]
+        with patch('lodestar.tools.registry.call_tool', return_value={
+                'sources': [{'url': url, 'publication_status': 'not_checked', 'venue': None}]}):
+            result = self.run_dialogue(context={'message': '查新进展', 'papers': [], 'candidates': [
+                {'url': url, 'publication_status': 'publication_record_found', 'venue': 'Journal'}]})
+        self.assertEqual(result['candidates'][0]['venue'], 'Journal')
+        self.assertEqual(result['candidates'][0]['publication_status'], 'publication_record_found')
+
+    def test_unversioned_citation_resolves_only_a_known_arxiv_paper(self):
+        known = 'https://arxiv.org/abs/2601.00001v2'
+        self.ws.config.enrich_venues = False
+        self.llm.dialogue_step.side_effect = [calls({'action': 'read_paper', 'url': known[:-2]}), answer()]
+        with patch('lodestar.tools.registry.call_tool', return_value={'text': 'Evidence'}) as tool:
+            self.run_dialogue(context={'message': '读论文', 'papers': [], 'candidates': [{'url': known}]})
+        self.assertEqual(tool.call_args.args[2]['url'], known)
+
+    def test_unseen_publication_lookup_is_blocked(self):
+        self.llm.dialogue_step.side_effect = [calls({'action': 'verify_paper', 'url': 'https://arxiv.org/abs/2601.00002'}), answer()]
+        with patch('lodestar.agent.dialogue.verify_publication') as lookup:
+            result = self.run_dialogue()
+        lookup.assert_not_called()
+        self.assertIn('error', result['dialogue_events'][0]['result'])
+
+    def test_later_broad_queries_do_not_evict_first_search_within_default_budget(self):
+        self.llm.dialogue_step.side_effect = [calls({'action': 'search_papers', 'query': str(i)}) for i in range(7)] + [answer()]
+        results = [{'sources': [{'url': f'https://paper/{query}/{rank}', 'title': f'Paper {query}-{rank}'}
+                               for rank in range(4)]} for query in range(7)]
+        with patch('lodestar.tools.registry.call_tool', side_effect=results):
+            result = self.run_dialogue()
+        self.assertEqual(len(result['candidates']), 28)
+        self.assertEqual(result['candidates'][0]['url'], 'https://paper/0/0')

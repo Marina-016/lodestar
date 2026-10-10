@@ -7,8 +7,24 @@ import uuid
 from lodestar.agent.loop import ResearchAgent
 from lodestar.agent.project_plan import generate
 from lodestar.memory import learning, repo
+from lodestar.chat_settings import snapshot
 
 
+def _history_context(history, char_budget=24000):
+    """Bound total history while preserving recent complete answers for follow-ups."""
+    kept = []
+    marker = '\n[Earlier message excerpt omitted to fit context budget]\n'
+    for message in reversed(history):
+        if char_budget <= len(marker):
+            break
+        content = message['content']
+        if len(content) > char_budget:
+            available = char_budget - len(marker)
+            head = available * 2 // 3
+            content = content[:head] + marker + content[-(available - head):]
+        kept.append({'role': message['role'], 'content': content})
+        char_budget -= len(content)
+    return list(reversed(kept))
 
 
 class ConversationAgent:
@@ -45,13 +61,45 @@ class ConversationAgent:
         self._session(conversation_id, kwargs.get('user_id', 'default'))
         try:
             return self._turn(conversation_id, message, **kwargs)
-        except LLMError:
-            answer = '模型调用失败，已保留会话与原始证据，可以重试。'
-            repo.add_message(self.ws.conn, conversation_id, 'assistant', answer, kind='error')
-            return {'status': 'error', 'conversation_id': conversation_id, 'answer': answer}
+        except LLMError as error:
+            from lodestar.llm import error_details
+            diagnostic = error_details(error)
+            context = getattr(error, 'dialogue_context', {})
+            metadata = {'model_error': diagnostic, 'model_configuration': snapshot(self.ws.config)}
+            if context:
+                metadata.update(candidates=context.get('candidates', []),
+                                dialogue_events=context.get('dialogue_events', []))
+                with self.ws.conn:
+                    self.ws.conn.execute('UPDATE agent_sessions SET evidence=? WHERE conversation_id=?',
+                        (json.dumps(context.get('papers', []), ensure_ascii=False), conversation_id))
+            reason = {'invalid_json': '模型返回的结构化数据格式无效，自动修复后仍未成功',
+                      'timeout': '模型服务响应超时', 'connection': '无法连接模型服务',
+                      'stream_interrupted': '流式连接中断，回答尚未完成',
+                      'truncated': '达到输出长度限制，回答尚未完成',
+                      'tool_budget': '工具调用预算已耗尽，模型未完成回答',
+                      'authentication': '模型服务鉴权失败', 'rate_limit': '模型服务限流',
+                      'configuration': '模型或思考预算配置不兼容，请检查 /settings 后切换模式重试',
+                      'http_error': '模型服务返回 HTTP 错误'}.get(diagnostic['code'], '模型调用失败')
+            if diagnostic['http_status'] is not None:
+                reason += f"（HTTP {diagnostic['http_status']}）"
+            if diagnostic['http_status'] in (400, 404, 422):
+                reason += '，请核对模型ID及其思考模式支持情况；不会自动换模型或关闭思考'
+            stage = '对话'
+            answer = f'{stage}阶段：{reason}。已保存会话和错误记录，可以重试。'
+            error_message = answer
+            partial = getattr(error, 'partial_answer', '')
+            if partial:
+                answer = partial + '\n\n[回答未完成] ' + answer
+                metadata['partial_answer'] = partial
+            repo.add_message(self.ws.conn, conversation_id, 'assistant', answer, kind='error', metadata=metadata)
+            return {'status': 'error', 'conversation_id': conversation_id, 'answer': answer,
+                    'model_error': diagnostic, 'error_message': error_message,
+                    'model_configuration': snapshot(self.ws.config),
+                    'dialogue_events': context.get('dialogue_events', []),
+                    'candidates': context.get('candidates', [])}
 
     def _turn(self, conversation_id, message, *, user_id='default', intent='auto',
-             technology=None, method='', feedback='discussed', days=7):
+             technology=None, method='', feedback='discussed', days=7, on_text=None, on_progress=None):
         session = self._session(conversation_id, user_id)
         if not message.strip():
             raise ValueError('message is required')
@@ -126,7 +174,7 @@ class ConversationAgent:
                 result = generate(self.ws, self.llm, message, sources, session['project_id'])
                 answer = result['plan']
             else:
-                history = self.history(conversation_id, user_id, 8)
+                history = self.history(conversation_id, user_id, 8)[:-1]  # Current user turn is sent separately, untruncated.
                 candidates = []
                 for previous in reversed(history):
                     metadata = json.loads(previous.get('metadata') or '{}')
@@ -134,12 +182,13 @@ class ConversationAgent:
                         candidates = metadata['candidates']
                         break
                 context = {'message': message, 'candidates': candidates,
-                    'history': [{'role': m['role'], 'content': m['content'][:3000]} for m in history],
+                    'history': _history_context(history),
                     'learning': learning.recall(self.ws.conn, message + ' ' + (technology or ''), user_id),
                     'papers': [{**s, 'content': s.get('content', '')[:12000]} for s in sources[:5]],
                     'supplement_reads': supplements}
                 from lodestar.agent.dialogue import gather
-                context = gather(self.ws, self.llm, context, session['project_id'])
+                context = gather(self.ws, self.llm, context, session['project_id'],
+                                 on_progress=on_progress, on_text=on_text)
                 events = context.pop('dialogue_events')
                 sources = context['papers']
                 supplements = [{'url': event['params']['url'],
@@ -159,27 +208,25 @@ class ConversationAgent:
                             trace.tool_call(event['action'], event['params'])
                             trace.tool_result(event['action'], event['result'])
                     trace.dump_jsonl()
-                from lodestar.agent.explanation import explain
-                answer, grounding = explain(self.llm, context)
+                answer, grounding = context['answer'], context['grounding']
                 result = {'status': 'answered', 'evidence_reused': len(sources), 'supplement_reads': supplements,
                           'grounding': grounding, 'dialogue_events': events, 'candidates': context['candidates']}
+        model_configuration = snapshot(self.ws.config)
+        result['model_configuration'] = model_configuration
         assistant_message = repo.add_message(self.ws.conn, conversation_id, 'assistant', answer,
-                         task_id=result.get('task_id') or session['task_id'], metadata={'intent': intent, 'grounding': result.get('grounding'), 'dialogue_events': result.get('dialogue_events'), 'candidates': result.get('candidates', [])})
+                         task_id=result.get('task_id') or session['task_id'], metadata={'intent': intent, 'grounding': result.get('grounding'), 'dialogue_events': result.get('dialogue_events'), 'candidates': result.get('candidates', []), 'model_configuration': model_configuration})
         if intent == 'followup':
             from lodestar.agent.exposure import record_exposure
             from lodestar.llm import LLMError
             try:
-                grounding = result.get('grounding') or {}
-                exposure_text = ('\n\n'.join(claim['text'] for claim in grounding['validated_claims'])
-                    if 'validated_claims' in grounding else answer)
                 result['learning_exposure'] = record_exposure(self.ws, self.llm, session['task_id'],
-                    user_id, exposure_text, sources, technology=technology, goal=message)
+                    user_id, answer, sources, technology=technology, goal=message)
                 result['learning_exposure_status'] = 'recorded' if result['learning_exposure'] else 'no_supported_methods'
             except (LLMError, ValueError, TypeError, AttributeError) as error:
                 result['learning_exposure_status'] = 'error'
                 result['learning_exposure_error'] = type(error).__name__
                 result['warning'] = '讲解已保留，方法接触记录更新未完成；未提升掌握程度。'
-            metadata = {'intent': intent, 'grounding': result.get('grounding'), 'dialogue_events': result.get('dialogue_events'), 'candidates': result.get('candidates', []), **{k: v for k, v in result.items()
+            metadata = {'intent': intent, 'grounding': result.get('grounding'), 'dialogue_events': result.get('dialogue_events'), 'candidates': result.get('candidates', []), 'model_configuration': model_configuration, **{k: v for k, v in result.items()
                 if k.startswith('learning_exposure')}}
             with self.ws.conn:
                 self.ws.conn.execute('UPDATE messages SET metadata=? WHERE id=?',

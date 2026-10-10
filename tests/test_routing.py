@@ -10,6 +10,7 @@ from lodestar.config import Config
 from lodestar.context import Workspace
 from lodestar.llm import LLMClient
 from lodestar.memory import learning, repo
+from tests.test_dialogue import calls, answer
 
 
 class RoutingTests(unittest.TestCase):
@@ -45,7 +46,9 @@ class RoutingTests(unittest.TestCase):
                 source={'source_type':'paper','url':'https://arxiv.org/abs/2609.33439','content':'original body','read_depth':'full'}
                 with ws.conn:
                     ws.conn.execute('UPDATE agent_sessions SET task_id=?, evidence=? WHERE conversation_id=?',('task',json.dumps([source]),session))
-                with patch('lodestar.tools.registry.call_tool',return_value={'error':'network failed'}):
+                with patch.object(agent.llm, 'dialogue_step', side_effect=[
+                        calls({'action': 'read_paper', 'url': source['url']}), answer()]), patch(
+                        'lodestar.tools.registry.call_tool',return_value={'error':'network failed'}):
                     result=agent.turn(session,'方法具体怎么做')
                 self.assertEqual(result['supplement_reads'][0]['error'],'network failed')
                 self.assertIn('original body',agent._session(session,'default')['evidence'])

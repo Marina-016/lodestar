@@ -22,7 +22,30 @@ SYSTEM_ROLE_MARKER = "# ROLE: {role}"
 
 
 class LLMError(Exception):
-    pass
+    def __init__(self, message, *, code='model_error', role=None):
+        super().__init__(message)
+        self.code, self.role = code, role
+
+
+def error_details(error):
+    """Persist diagnostics without provider bodies, credentials or prompt excerpts."""
+    cause = error.__cause__
+    status = getattr(cause, 'status_code', None)
+    if status is None and getattr(cause, 'response', None) is not None:
+        status = cause.response.status_code
+    cause_type = type(cause).__name__ if cause else None
+    code = error.code
+    if status in (401, 403):
+        code = 'authentication'
+    elif status == 429:
+        code = 'rate_limit'
+    elif status is not None:
+        code = 'http_error'
+    elif cause_type and 'timeout' in cause_type.lower():
+        code = 'timeout'
+    elif cause_type and 'connection' in cause_type.lower():
+        code = 'connection'
+    return {'code': code, 'role': error.role, 'http_status': status, 'cause_type': cause_type}
 
 
 def _extract_json(text: str) -> Any:
@@ -44,7 +67,7 @@ def _extract_json(text: str) -> Any:
             return data
         except json.JSONDecodeError:
             continue
-    raise LLMError(f"无法从 LLM 输出解析 JSON。输出前 300 字符：{text[:300]!r}")
+    raise LLMError('模型未返回有效 JSON', code='invalid_json')
 
 
 class LLMClient:
@@ -57,6 +80,7 @@ class LLMClient:
             raise LLMError("Model calls are disabled by LODESTAR_MODEL_CALLS_DISABLED")
         self._client = None
         self._dashscope = None
+        self.last_dialogue_observation = None
         if self.mode == "live" and config.llm_provider == "dashscope":
             from lodestar.providers.dashscope import DashScopeClient
             try:
@@ -68,60 +92,117 @@ class LLMClient:
                 raise LLMError("anthropic SDK 未安装，无法使用 live 模式。")
             if not (os.getenv('ANTHROPIC_API_KEY') or os.getenv('ANTHROPIC_AUTH_TOKEN')):
                 raise LLMError('Missing ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN; live mode cannot use mock credentials.')
-            self._client = anthropic.Anthropic(timeout=config.llm_timeout_s)
+            self._client = anthropic.Anthropic(timeout=config.llm_timeout_s,
+                **({'base_url': config.llm_base_url} if config.llm_base_url else {}))
 
     # ---------- 对外接口 ----------
+    def close(self):
+        if self._client is not None:
+            self._client.close()
+
+    def list_models(self):
+        """Optional read-only catalog. A listed ID is not an inference guarantee."""
+        if self.mode == 'mock':
+            return [self.model]
+        if self._client is None:
+            raise LLMError('Model catalog is unavailable on this provider', code='configuration')
+        try:
+            page = self._client.with_options(max_retries=0).models.list(
+                limit=100, timeout=min(10, self.config.llm_timeout_s))
+            return [item.id for item in page.data if isinstance(item.id, str)][:100]
+        except Exception as error:
+            raise LLMError('Model catalog request failed') from error
+
+    def dialogue_step(self, system, messages, tools, on_text=None):
+        """One native assistant turn, preserving tool calls and result identifiers."""
+        if self.mode == 'mock':
+            text = '这是离线对话夹具；实时检索和自主工具调用请使用 live 模式。'
+            if on_text:
+                on_text(text)
+            return {'role': 'assistant', 'content': [{'type': 'text', 'text': text}]}
+        from lodestar.providers.dialogue import step
+        return step(self, system, messages, tools, on_text)
+
     def complete(self, role: str, system: str, user: str, max_tokens: int | None = None) -> str:
         if self.mode == "mock":
             return MockLLM.complete(role, system, user)
-        return self._complete_live(role, system, user, max_tokens)
+        try:
+            return self._complete_live(role, system, user, max_tokens)
+        except LLMError as error:
+            error.role = role
+            raise
 
     def complete_json(self, role: str, system: str, user: str, max_tokens: int | None = None, *, allow_list: bool = False) -> Dict | list:
-        if self.mode == "mock":
-            text = MockLLM.complete(role, system, user)
-        else:
-            if not allow_list and 'json' not in system.lower():
-                system += '\nReturn a JSON object.'
-            text = self._complete_live(role, system, user, max_tokens, json_mode=not allow_list)
-        data = _extract_json(text)
-        if allow_list and isinstance(data, list):
-            return data
-        if not isinstance(data, dict):
-            raise LLMError(f"期望 JSON 对象，实际得到 {type(data).__name__}：{str(data)[:200]}")
-        return data
+        for attempt in range(2):
+            try:
+                if self.mode == 'mock':
+                    text = MockLLM.complete(role, system, user)
+                else:
+                    if not allow_list and 'json' not in system.lower():
+                        system += '\nReturn a JSON object.'
+                    text = self._complete_live(role, system, user, max_tokens, json_mode=not allow_list)
+                data = _extract_json(text)
+                if isinstance(data, dict) or (allow_list and isinstance(data, list)):
+                    return data
+                raise LLMError('模型返回的 JSON 类型不符合要求', code='invalid_json')
+            except LLMError as error:
+                error.role = role
+                if error.code != 'invalid_json' or attempt or self.mode == 'mock':
+                    raise
+                system += '\nThe previous response did not satisfy the requested JSON schema. Return a valid object with all required fields, with no prose or Markdown fences.'
 
     # ---------- 内部 ----------
+
     def _complete_live(self, role: str, system: str, user: str, max_tokens: int | None, *, json_mode=False) -> str:
-        """默认关 thinking（省 token、防空输出）；空文本重试一次（预算×2）；
-        thinking 参数不被模型支持时自动去掉重试。"""
+        """Plain answers honor reasoning; forced JSON extraction uses non-thinking.
+
+        Never silently turn off an explicitly requested reasoning mode on failure.
+        """
         mt = max_tokens or (self.config.judge_max_tokens if self.judge else self.config.max_tokens)
         if self._dashscope is not None:
             try:
                 return self._dashscope.complete(role, self.model, system, user, mt, json_mode=json_mode)
             except (ValueError, KeyError, IndexError, requests.RequestException) as error:
                 raise LLMError(f"DashScope request failed: {type(error).__name__}") from error
-        kw: dict = {}
-        if not self.config.llm_thinking:
-            kw["thinking"] = {"type": "disabled"}
+        from lodestar.providers.reasoning import anthropic_options
+        kw = anthropic_options(self.config, structured=json_mode, max_tokens=mt)
+        if json_mode:
+            # The Anthropic-compatible path previously ignored json_mode entirely.
+            # Use a provider tool argument object, not prose that happens to contain JSON.
+            schema = {'type': 'object', 'additionalProperties': True}
+            kw.update(tools=[{'name': 'submit_result', 'description': 'Return the requested structured result.',
+                              'input_schema': schema}],
+                      tool_choice={'type': 'tool', 'name': 'submit_result'},
+                      thinking={'type': 'disabled'})
         for attempt in (1, 2):
             try:
                 resp = self._client.messages.create(
                     model=self.model, max_tokens=mt,
-                    extra_body={'temperature': self.config.temperature},
                     system=system, messages=[{"role": "user", "content": user}], **kw,
                 )
+                if json_mode:
+                    blocks = [b for b in resp.content if getattr(b, 'type', '') == 'tool_use'
+                              and getattr(b, 'name', '') == 'submit_result']
+                    if len(blocks) == 1 and isinstance(blocks[0].input, dict):
+                        return json.dumps(blocks[0].input, ensure_ascii=False)
+                    # Some compatible gateways return text despite forced tool_choice;
+                    # retain the bounded parser/repair for that compatibility case.
                 text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
                 if text.strip():
                     return text
+                if self.config.llm_thinking and not json_mode:
+                    raise LLMError('Thinking request returned no answer text', code='empty_response')
                 if attempt == 1:  # 空文本：可能是思考块吃光预算 → 加大预算并关 thinking 重试
                     mt *= 2
                     kw.pop("thinking", None)
                     continue
                 raise LLMError(f"LLM 返回空文本（model={self.model}）")
+            except LLMError:
+                raise
             except anthropic.AuthenticationError as e:  # type: ignore[union-attr]
                 raise LLMError(f"LLM 鉴权失败，请检查 token/base_url：{e}") from e
             except anthropic.APIStatusError as e:  # type: ignore[union-attr]
-                if attempt == 1 and kw.get("thinking"):  # thinking 参数不被支持 → 去掉重试
+                if attempt == 1 and kw.get("thinking") and not self.config.llm_thinking:
                     kw.pop("thinking", None)
                     continue
                 raise LLMError(f"LLM API 错误（{e.status_code}）：{e}") from e
@@ -159,15 +240,6 @@ class MockLLM:
                     'candidate':'候选流程占位','metrics':['来源元数据保留诊断'],
                     'constraints':['离线夹具，不能证明语义适用或实验收益']},
                 'risks':['未评估真实语义适用性'],'missing_evidence':['真实模型评估与实际实验尚缺']},ensure_ascii=False)
-        if role == "dialogue_step":
-            context = json.loads(user)
-            from lodestar.agent.routing import route
-            papers = context.get('papers', [])
-            if route(context['message']).supplement and papers and not context.get('tool_results'):
-                return json.dumps({'action': 'read_paper', 'url': papers[0]['url']})
-            return json.dumps({'action': 'answer'})
-        if role == "conversation_grounded":
-            return json.dumps({"claims": [], "hypotheses": [], "gaps": ["离线会话夹具：复用已保存证据；不代表真实模型推理结果。"]}, ensure_ascii=False)
         if role == "conversation":
             return "离线会话夹具：复用已保存证据；不代表真实模型推理结果。"
         if role == "learning_exposure":

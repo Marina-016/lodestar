@@ -2,6 +2,7 @@
 import os
 import requests
 from urllib.parse import urlsplit
+from lodestar.providers.reasoning import dashscope_options
 
 class DashScopeClient:
     def __init__(self, config):
@@ -18,7 +19,8 @@ class DashScopeClient:
     def complete(self, role, model, system, user, max_tokens, *, json_mode=False):
         payload = {'model': model, 'messages': [{'role': 'system', 'content': system},
                     {'role': 'user', 'content': user}], 'max_tokens': max_tokens,
-                    'temperature': self.config.temperature, 'enable_thinking': False}
+                    'temperature': self.config.temperature,
+                    **dashscope_options(self.config, structured=json_mode)}
         if json_mode:
             payload['response_format'] = {'type': 'json_object'}
         response = requests.post(self.base_url + '/chat/completions',

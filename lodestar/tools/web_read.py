@@ -38,12 +38,17 @@ def tool_read_webpage(ws, url: str, char_budget: int | None = None):
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
         title = re.sub(r"\s+", " ", soup.title.get_text(" ", strip=True)) if soup.title else url
+        published = soup.select_one('meta[property="article:published_time"], meta[name="date"], meta[itemprop="datePublished"]')
+        published_at = published.get('content', '') if published else ''
         body = _pick_container(soup)
         text = _clean_text(body)
         truncated = len(text) > char_budget
         if truncated:
-            text = text[:char_budget] + "\n…[已截断，预算={char_budget}字符]"
+            text = text[:char_budget] + f"\n…[已截断，预算={char_budget}字符]"
         return {"title": title[:300], "url": url, "text": text, "truncated": truncated,
+                'published_at': published_at,
+                'date': published_at[:10] if re.match(r'^\d{4}-\d{2}-\d{2}', published_at) else '',
+                'date_basis': 'page_declared_publication_time',
                 "note": f"读取成功（{len(text)} 字符，含截断）"}
     except Exception as e:  # noqa: BLE001
         return {"error": f"网页读取失败: {e}", "url": url}

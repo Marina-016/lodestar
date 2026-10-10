@@ -27,13 +27,19 @@ class Config:
     llm_base_url: str = ""
     model: str = "claude-sonnet-5"
     judge_model: str = "claude-haiku-4-5-20251001"
-    max_tokens: int = 4000
+    max_tokens: int = 8192
     judge_max_tokens: int = 1200
     temperature: float = 0.2
     llm_timeout_s: int = 120
     conversation_timeout_s: int = 60  # UI must return or degrade promptly; Codex-only path
     demo_replay: bool = False  # curated replay; the UI always labels it as a replay, never live output
-    llm_thinking: bool = False   # True=允许思考块；False=传 thinking disabled（更便宜、防空输出）
+    llm_thinking: bool = False   # Explicit provider request; unsupported models must fail visibly.
+    llm_thinking_mode: str = "enabled"  # enabled (budget) | effort (compatible backends) | adaptive
+    llm_thinking_budget: int = 4096
+    llm_reasoning_effort: str = "high"  # effort/adaptive only; model support varies
+    model_profiles: dict[str, str] = field(default_factory=dict)  # optional fast/balanced/deep model IDs
+    dialogue_profile: str = "custom"
+    dialogue_max_operations: int = 8  # Shared search/read/verification budget; not a prescribed workflow
     conversation_harness: str = "loop"  # loop | codex（codex 需显式开启）
     # --- Agent Loop 预算（PRD §17，Eval 后续调）---
     max_agent_steps: int = 15
@@ -52,7 +58,7 @@ class Config:
     web_search_backend: str = "duckduckgo"
     # --- V1-R1：venue 元数据回填（免费无 Key；provider 顺序回退）---
     enrich_venues: bool = True       # 检索去重后回填 journal/venue
-    venue_providers: tuple = ("semanticscholar", "openalex", "dblp", "crossref")  # 按序尝试，前一个成功即停
+    venue_providers: tuple = ("semanticscholar", "openalex", "dblp", "crossref")  # 按序查找正式发表记录
     venue_enrich_limit: int = 10     # 单次任务最多回填篇数（防限流）
     venue_request_interval_s: float = 1.2   # 无 Key 约 1 QPS，节流间隔
     venue_user_agent: str = "Lodestar/0.1 (research workspace; mailto:lodestar.research.dev@example.com)"
@@ -101,6 +107,17 @@ def load_config() -> Config:
     c.demo_replay = os.getenv("LODESTAR_DEMO_REPLAY", str(c.demo_replay)).lower() in {"1", "true", "yes", "on"}
     c.judge_model = os.getenv("LODESTAR_JUDGE_MODEL", c.judge_model)
     c.llm_thinking = os.getenv("LODESTAR_LLM_THINKING", str(c.llm_thinking)).lower() in {"1", "true", "yes", "on"}
+    c.llm_thinking_mode = os.getenv("LODESTAR_LLM_THINKING_MODE", c.llm_thinking_mode).lower()
+    c.llm_reasoning_effort = os.getenv("LODESTAR_LLM_REASONING_EFFORT", c.llm_reasoning_effort).lower()
+    for env, attr in (("LODESTAR_MAX_TOKENS", "max_tokens"),
+                      ("LODESTAR_LLM_THINKING_BUDGET", "llm_thinking_budget")):
+        if os.getenv(env):
+            setattr(c, attr, int(os.environ[env]))
+    c.model_profiles = {name: os.environ[f"LODESTAR_MODEL_{name.upper()}"].strip()
+                        for name in ("fast", "balanced", "deep")
+                        if os.getenv(f"LODESTAR_MODEL_{name.upper()}", "").strip()}
+    if os.getenv("LODESTAR_DIALOGUE_MAX_OPERATIONS"):
+        c.dialogue_max_operations = max(1, min(int(os.environ["LODESTAR_DIALOGUE_MAX_OPERATIONS"]), 20))
     c.conversation_harness = os.getenv("LODESTAR_CONVERSATION_HARNESS", c.conversation_harness).lower()
     c.brief_language = os.getenv("LODESTAR_BRIEF_LANGUAGE", c.brief_language)
     c.web_search_backend = os.getenv("LODESTAR_WEB_SEARCH_BACKEND", c.web_search_backend)

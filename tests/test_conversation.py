@@ -7,6 +7,7 @@ from lodestar.config import Config
 from lodestar.context import Workspace
 from lodestar.llm import LLMClient
 from lodestar.memory import learning
+from tests.test_dialogue import answer
 
 
 class ConversationTests(unittest.TestCase):
@@ -74,7 +75,7 @@ class ConversationTests(unittest.TestCase):
         from unittest.mock import patch
         from lodestar.llm import LLMError
         session = self.agent.start('alice')
-        with patch('lodestar.agent.explanation.explain', return_value=('A delivered explanation', {})), patch(
+        with patch.object(self.agent.llm, 'dialogue_step', return_value=answer('A delivered explanation')), patch(
                 'lodestar.agent.exposure.record_exposure', side_effect=LLMError('timeout')):
             result = self.agent.turn(session, 'Explain', user_id='alice', intent='followup')
         self.assertEqual(result['answer'], 'A delivered explanation')
@@ -100,7 +101,7 @@ class ConversationTests(unittest.TestCase):
                  {'technology': 'Context', 'method': 'unsupported',
                   'paper_url': sources[0]['url'], 'paper_quote': 'missing quote',
                   'explanation_quote': 'temporary context editing'}]
-        with patch('lodestar.agent.explanation.explain', return_value=('Explain temporary context editing.', {})), patch.object(
+        with patch.object(self.agent.llm, 'dialogue_step', return_value=answer('Explain temporary context editing.')), patch.object(
                 self.agent.llm, 'complete_json', return_value={'items': items}):
             result = self.agent.turn(session, 'Explain', user_id='alice', intent='followup', technology='Agent context')
         self.assertEqual(len(result['learning_exposure']), 1)
@@ -112,9 +113,7 @@ class ConversationTests(unittest.TestCase):
     def test_general_background_and_hypotheses_are_not_exposure_input(self):
         from unittest.mock import patch
         session = self.agent.start('alice')
-        grounding = {'validated_claims': [], 'background':['concept definition'], 'hypotheses':['speculation']}
-        with patch('lodestar.agent.explanation.explain', return_value=('concept definition and speculation', grounding)), patch(
-                'lodestar.agent.exposure.record_exposure', return_value=[]) as exposure:
-            self.agent.turn(session, 'Explain', user_id='alice', intent='followup')
-        self.assertEqual(exposure.call_args.args[4], '')
+        with patch.object(self.agent.llm, 'dialogue_step', return_value=answer('concept definition and speculation')):
+            result = self.agent.turn(session, 'Explain', user_id='alice', intent='followup')
+        self.assertEqual(result['learning_exposure'], [])
         self.assertEqual(learning.profile(self.ws.conn, 'alice'), [])

@@ -43,7 +43,13 @@ def _fetch_abstract(arxiv_id: str, timeout: int) -> dict:
         "title": re.sub(r"\s+", " ", entry.findtext(f"{ATOM}title", "")).strip(),
         "authors": authors[:5],
         "date": (entry.findtext(f"{ATOM}published", "") or "")[:10],
+        "date_basis": "first_submission",
         "abstract": re.sub(r"\s+", " ", entry.findtext(f"{ATOM}summary", "")).strip(),
+        "journal_reference": entry.findtext('{http://arxiv.org/schemas/atom}journal_ref'),
+        "author_reported_doi": entry.findtext('{http://arxiv.org/schemas/atom}doi'),
+        "author_comment": entry.findtext('{http://arxiv.org/schemas/atom}comment'),
+        "published_at": entry.findtext(f"{ATOM}published", ""),
+        "updated_at": entry.findtext(f"{ATOM}updated", ""),
     }
 
 
@@ -208,9 +214,11 @@ def tool_read_paper(ws, url: str, char_budget: int | None = None, full_text: boo
         base = (f"# {meta['title']}\nauthors: {', '.join(meta['authors'])}\n"
                 f"published: {meta['date']}\n\n## Abstract\n{meta['abstract']}")
         if full_text and cfg.full_text_enabled:
-            return _read_arxiv_full(cfg, arxiv_id, meta, base, url, char_budget, query=query)
-        return _result(base, meta["title"], url, "abstract", False, char_budget,
-                       "abstract 级读取", [])
+            result = _read_arxiv_full(cfg, arxiv_id, meta, base, url, char_budget, query=query)
+        else:
+            result = _result(base, meta["title"], url, "abstract", False, char_budget,
+                             "abstract 级读取", [])
+        return {**meta, **result}
 
     if re.search(r"\.pdf(\?|$)", (url or "").lower()):
         if full_text and cfg.full_text_enabled:

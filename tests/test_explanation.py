@@ -1,45 +1,41 @@
+"""Evidence survives the native conversation; no separate answer-generation stage."""
 import json
 import unittest
-from unittest.mock import Mock
-
-from lodestar.agent.explanation import explain
-from lodestar.llm import LLMError
+from unittest.mock import patch
+from tests import test_dialogue as fixtures
+from lodestar.agent.dialogue import gather
 
 
 class ExplanationTests(unittest.TestCase):
-    def test_full_abstract_reaches_model_and_chinese_intro_reaches_user(self):
-        abstract = 'Opening sentence. ' * 90 + 'IMPORTANT END OF ABSTRACT'
-        url = 'https://arxiv.org/abs/2601.00001'
-        llm = Mock()
-        llm.complete.return_value = f'根据摘要，这篇工作讨论长期记忆。结尾强调实际约束。[论文]({url})'
-        answer, audit = explain(llm, {'papers':[], 'candidates':[
-            {'url':url,'abstract':abstract,'snippet':abstract[:600]}]})
-        payload = json.loads(llm.complete.call_args.args[2])
-        self.assertEqual(payload['sources'][0]['content'],abstract)
-        self.assertIn('结尾强调实际约束',answer)
-        self.assertEqual(answer,llm.complete.return_value)
-        self.assertEqual(audit['source_depths'][url],'abstract')
+    setUp = fixtures.DialogueTests.setUp
+    tearDown = fixtures.DialogueTests.tearDown
 
-    def test_body_overrides_abstract_without_losing_publication_date(self):
-        url = 'https://paper'
-        llm = Mock();llm.complete.return_value = '正文提供了更多细节。'
-        explain(llm, {'candidates':[{'url':url,'date':'2026-01-01','abstract':'Abstract'}],
-            'papers':[{'url':url,'content':'Method details','read_depth':'full'}]})
-        source = json.loads(llm.complete.call_args.args[2])['sources'][0]
-        self.assertEqual(source['content'],'Method details')
-        self.assertEqual(source['read_depth'],'full')
-        self.assertEqual(source['date'],'2026-01-01')
+    def test_full_abstract_and_publication_date_reach_model(self):
+        abstract = 'Opening. ' * 90 + 'IMPORTANT END'
+        context = {'message': '解释一下', 'papers': [], 'candidates': [
+            {'url': 'https://paper', 'date': '2026-01-01', 'abstract': abstract}]}
+        result = gather(self.ws, self.llm, context)
+        saved = json.loads(self.llm.dialogue_step.call_args.args[1][0]['content'].split('\n', 1)[1].split('\n\nUser request:', 1)[0])
+        self.assertEqual(saved['sources'][0]['abstract'], abstract)
+        self.assertEqual(saved['sources'][0]['date'], '2026-01-01')
+        self.assertEqual(result['grounding']['source_depths']['https://paper'], 'abstract')
 
-    def test_tool_failure_and_project_context_are_available_to_model(self):
-        llm = Mock();llm.complete.return_value = '来源暂不可用。'
-        events = [{'action':'search_papers','result':{'error':'timeout','sources':[]}},
-                  {'action':'project_context','result':{'documents':[{'path':'a.py','content':'approved'}]}}]
-        explain(llm, {'papers':[], 'tool_results':events})
-        payload = json.loads(llm.complete.call_args.args[2])
-        self.assertEqual(payload['tool_results'][0]['result']['error'],'timeout')
-        self.assertEqual(payload['tool_results'][1]['result']['documents'][0]['content'],'approved')
+    def test_body_and_candidate_metadata_remain_available(self):
+        context = {'message': '解释', 'papers': [{'url': 'https://paper', 'content': 'Method', 'read_depth': 'full'}],
+                   'candidates': [{'url': 'https://paper', 'date': '2026-01-01', 'abstract': 'Abstract'}]}
+        result = gather(self.ws, self.llm, context)
+        self.assertEqual(result['grounding']['source_depths']['https://paper'], 'full')
+        self.assertEqual(result['candidates'][0]['date'], '2026-01-01')
 
-    def test_empty_answer_does_not_claim_task_success(self):
-        llm = Mock();llm.complete.return_value = '   '
-        with self.assertRaises(LLMError): explain(llm, {'papers':[]})
-        llm.complete.assert_called_once()
+    def test_snippets_never_claim_body_or_abstract_depth(self):
+        result = gather(self.ws, self.llm, {'message': '介绍', 'papers': [],
+            'candidates': [{'url': 'https://web', 'snippet': 'Search snippet'}]})
+        self.assertEqual(result['grounding']['source_depths']['https://web'], 'search_snippet')
+
+    def test_markdown_is_not_reformatted(self):
+        text = '先比较。\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n结论。'
+        self.llm.dialogue_step.return_value = fixtures.answer(text)
+        result = gather(self.ws, self.llm, {'message': '比较', 'papers': []})
+        self.assertEqual(result['answer'], text)
+        self.llm.complete.assert_not_called()
+        self.llm.complete_json.assert_not_called()

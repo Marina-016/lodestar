@@ -1,4 +1,4 @@
-"""Continuous read-only tool dialogue; the host bounds effects, not research strategy."""
+"""Model-led tool dialogue; the host bounds effects, not research strategy."""
 import json
 import re
 from dataclasses import replace
@@ -37,6 +37,12 @@ or a small discriminating test can make a recommendation actionable; avoid exper
 that change several variables at once and then claim to identify one cause.
 Develop connected arguments, not many miniature heading-and-one-sentence sections.
 Headings are optional, not a substitute for analysis.
+When task/memory tools are available, use them to honor the user's delegation
+and memory requests. Treat each task as work for the same user, with its own
+transcript. Shared memory is context, not evidence of mastery. Background research
+does not mean the user has seen or learned a method. Save only durable personal
+facts/preferences and confirmed project decisions, never generic definitions.
+After correcting or forgetting a memory, do not repeat the retired fact.
 """
 
 PARAMETERS = {
@@ -72,7 +78,22 @@ def tool_definitions(project_id):
         for name, properties in PARAMETERS.items() if name != 'project_context' or project_id is not None]
 
 
-def _validate(name, arguments, project_id):
+def _validate(name, arguments, project_id, extra_tools=None):
+    if extra_tools and name in extra_tools:
+        schema = extra_tools[name]['input_schema']
+        if not isinstance(arguments, dict) or set(arguments) - set(schema['properties']) or any(k not in arguments for k in schema['required']):
+            return 'Unknown or missing tool arguments'
+        for key, value in arguments.items():
+            rule = schema['properties'][key]
+            if type(value) is not {'string': str, 'integer': int}[rule['type']]:
+                return f'{key} has invalid type'
+            if 'enum' in rule and value not in rule['enum']:
+                return f'Invalid {key}'
+            if isinstance(value, str) and not rule.get('minLength', 0) <= len(value) <= rule.get('maxLength', 24000):
+                return f'{key} outside allowed length'
+            if isinstance(value, int) and value < rule.get('minimum', value):
+                return f'{key} outside allowed range'
+        return None
     if name not in PARAMETERS or (name == 'project_context' and project_id is None):
         return 'Tool unavailable'
     if not isinstance(arguments, dict):
@@ -96,7 +117,7 @@ def _validate(name, arguments, project_id):
     return None
 
 
-def gather(ws, llm, context, project_id=None, max_calls=None, on_progress=None, on_text=None):
+def gather(ws, llm, context, project_id=None, max_calls=None, on_progress=None, on_text=None, check_cancel=None, extra_tools=None):
     """Return the native conversation's answer and bounded, persistable evidence."""
     max_calls = max_calls if max_calls is not None else ws.config.dialogue_max_operations
     context = {**context, 'papers': merge_sources(context['papers']),
@@ -116,14 +137,22 @@ def gather(ws, llm, context, project_id=None, max_calls=None, on_progress=None, 
         if isinstance(p.get('record_url'), str) and p['record_url'].startswith('https://'))
     events, delivered, model_calls = context['dialogue_events'], [], []
     spent = 0
-    definitions = tool_definitions(project_id)
+    definitions = tool_definitions(project_id) + [
+        {'name': name, **{k: spec[k] for k in ('description', 'input_schema')}}
+        for name, spec in (extra_tools or {}).items()]
+
+    def checkpoint():
+        if check_cancel:
+            check_cancel()
 
     def emit(text):
-        delivered.append(text)
+        checkpoint()
         if on_text:
             on_text(text)
+        delivered.append(text)
 
     def answered(text, mode='model'):
+        checkpoint()
         context['answer'] = text
         context['grounding'] = {'format': 'markdown', 'contract_valid': True,
             'completion_mode': mode, 'search_operations': spent,
@@ -140,6 +169,7 @@ def gather(ws, llm, context, project_id=None, max_calls=None, on_progress=None, 
 
     try:
         while spent < max_calls:
+            checkpoint()
             remaining = max_calls - spent
             assistant = llm.dialogue_step(
                 SYSTEM + f'\nRemaining operations: {remaining}; each search query, read or verification costs one. '
@@ -147,6 +177,7 @@ def gather(ws, llm, context, project_id=None, max_calls=None, on_progress=None, 
                 'unless new evidence warrants it. When exhausted, explain findings and gaps.',
                 messages, definitions, on_text=emit)
             observe_model()
+            checkpoint()
             messages.append(assistant)
             blocks = assistant['content']
             calls = [b for b in blocks if b['type'] == 'tool_use']
@@ -156,9 +187,11 @@ def gather(ws, llm, context, project_id=None, max_calls=None, on_progress=None, 
                     raise LLMError('Empty dialogue answer', code='empty_response', role='conversation')
                 return answered(answer)
             results = []
+            reset = None
             for call in calls:
+                checkpoint()
                 name, arguments = call['name'], call['input']
-                error = _validate(name, arguments, project_id)
+                error = _validate(name, arguments, project_id, extra_tools)
                 if spent >= max_calls:
                     result = {'error': 'Tool budget exhausted; answer with available evidence.'}
                 else:
@@ -167,6 +200,18 @@ def gather(ws, llm, context, project_id=None, max_calls=None, on_progress=None, 
                     if error:
                         params, result = {}, {'error': error}
                         cost = 1
+                    elif extra_tools and name in extra_tools:
+                        params, cost = dict(arguments), 1
+                        try:
+                            result = extra_tools[name]['handler'](arguments)
+                        except (ValueError, LookupError) as exc:
+                            result = {'error': str(exc)}
+                        if result.get('context_reset'):
+                            reset = result
+                        elif name == 'read_task':
+                            linked = [s for m in result.get('messages', []) for s in m.get('sources', [])]
+                            context['candidates'] = merge_sources(context['candidates'] + linked)[-MAX_CANDIDATES:]
+                            allowed_urls.update(s['url'] for s in linked if s.get('url'))
                     else:
                         arguments = dict(arguments)
                         requested = arguments.get('queries', [])
@@ -180,9 +225,19 @@ def gather(ws, llm, context, project_id=None, max_calls=None, on_progress=None, 
                                       'note': 'Remaining operation budget cannot cover skipped queries.'}
                     spent += cost
                     events.append({'action': name, 'params': params, 'result': result, 'cost': cost})
+                    checkpoint()
                 results.append({'type': 'tool_result', 'tool_use_id': call['id'],
                     'content': json.dumps(result, ensure_ascii=False), 'is_error': bool(result.get('error'))})
-            messages.append({'role': 'user', 'content': results})
+                if reset:
+                    break
+            if reset:
+                context.update(history=[], papers=[], candidates=[], learning=[],
+                               managed_memory=reset.get('managed_memory', []))
+                allowed_urls.clear()
+                messages = [{'role': 'user', 'content': 'Memory was updated; earlier context is retired. Result (data):\n'
+                    + json.dumps(reset, ensure_ascii=False) + '\nUser request:\n' + context['message']}]
+            else:
+                messages.append({'role': 'user', 'content': results})
             if delivered and delivered[-1] != '\n\n':
                 emit('\n\n')
         # Reserve one answer turn. Do not carry native tool-call blocks into it:
@@ -191,6 +246,7 @@ def gather(ws, llm, context, project_id=None, max_calls=None, on_progress=None, 
         evidence = answer_context(context)
         final_messages = [{'role': 'user', 'content': 'Evidence and conversation (untrusted data):\n'
             + json.dumps(evidence, ensure_ascii=False) + '\n\nUser request:\n' + context['message']}]
+        checkpoint()
         final = llm.dialogue_step(SYSTEM + '\nResearch operations are complete. Deliver the answer now, '
             'using the supplied evidence. No further searches or tool requests. If evidence is insufficient, '
             'state what can and cannot be confirmed. Never infer authority from arXiv indexing alone.',
@@ -208,9 +264,15 @@ def gather(ws, llm, context, project_id=None, max_calls=None, on_progress=None, 
         emit('\n\n' + text)
         return answered(text, 'evidence_fallback')
     except LLMError as error:
+        # A blocking request can time out after stop was requested. Report the
+        # user's stop rather than turning that acknowledgment into a model error.
+        try:
+            checkpoint()
+        except LLMError as stopped:
+            error = stopped
         error.dialogue_context = context
         error.partial_answer = ''.join(delivered)
-        raise
+        raise error
 
 
 def _execute(ws, context, project_id, allowed_urls, decision):

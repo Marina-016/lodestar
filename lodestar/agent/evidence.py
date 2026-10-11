@@ -132,17 +132,20 @@ def answer_context(context):
                 'readings': [{k: v for k, v in r.items() if k != 'digest'} for r in s['readings']]}
                if s.get('readings') else s for s in sources]
     operations = []
-    for event in context['dialogue_events']:
+    events = context['dialogue_events']
+    reset_at = max((i for i, e in enumerate(events) if e.get('result', {}).get('context_reset')), default=0)
+    for event in events[reset_at:]:
         result = event['result']
         operations.append({'action': event['action'], 'params': event['params'],
             **{k: result[k] for k in ('error', 'query_results', 'effective_query', 'time_window',
                 'failure_kind', 'recovery', 'skipped_queries', 'read_depth', 'coverage',
                 'query_matched', 'truncated', 'full_text_ok', 'note') if k in result},
-            **({'result': result} if event['action'] == 'project_context' else {})})
+            **({'result': result} if event['action'] in {'project_context', 'read_memory', 'manage_memory', 'record_learning', 'list_tasks', 'read_task', 'create_task'} else {})})
     return {'current_time': context['current_time'], 'sources': sources,
             'evidence_assessment': assess(sources), 'operations': operations,
             'conversation': context.get('history', []),
             'learning': context.get('learning', []),
+            'managed_memory': context.get('managed_memory', []),
             'conversation_note': 'Prior assistant replies are conversational context, not verified source evidence.'}
 
 
@@ -195,3 +198,11 @@ def verify_publication(ws, source):
             'metadata_provider': provider, 'peer_review_status': 'not_verified', 'lookup_note': note,
             'limitations': 'Publication metadata is not an authority ranking or proof of peer review. '
                             'An unresolved lookup is not evidence that a paper is unpublished.'}
+
+
+def source_details(sources):
+    """Small factual observations for answer inspection, without duplicating bodies."""
+    fields = ('url', 'title', 'source_type', 'date', 'date_basis', 'read_depth',
+              'provider', 'venue', 'publication_status', 'record_url')
+    return [{key: source[key] for key in fields if source.get(key) is not None}
+            for source in merge_sources(sources)]

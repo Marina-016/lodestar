@@ -43,15 +43,19 @@ def configure(config, *, profile=None, model=None, thinking=None,
         raise ValueError('输出上限应在 256–65536 tokens 之间')
     if not 1 <= cfg.dialogue_max_operations <= 20:
         raise ValueError('工具预算应在 1–20 次之间')
-    if cfg.llm_thinking_mode not in ('enabled', 'effort', 'adaptive'):
-        raise ValueError('LODESTAR_LLM_THINKING_MODE 应为 enabled / effort / adaptive')
-    if cfg.llm_reasoning_effort not in ('low', 'medium', 'high', 'max'):
-        raise ValueError('思考强度应为 low / medium / high / max')
+    if cfg.llm_thinking_mode not in ('enabled', 'effort', 'adaptive', 'default'):
+        raise ValueError('LODESTAR_LLM_THINKING_MODE 应为 enabled / effort / adaptive / default')
+    if cfg.llm_reasoning_effort not in ('low', 'medium', 'high', 'max', 'xhigh'):
+        raise ValueError('思考强度应为 low / medium / high / max / xhigh')
+    if cfg.llm_reasoning_effort == 'xhigh' and cfg.llm_provider != 'dashscope':
+        raise ValueError('xhigh 仅适用于已确认支持它的 DashScope 模型')
     if effort is not None and cfg.llm_thinking_mode == 'enabled':
         raise ValueError('强度参数请搭配 --thinking effort/adaptive；固定模式请使用思考预算')
     if cfg.llm_thinking:
         if cfg.llm_provider == 'dashscope' and cfg.llm_thinking_mode != 'enabled':
-            raise ValueError('DashScope 请用 /thinking on；effort/adaptive 仅用于支持它的 Anthropic 兼容服务')
+            from lodestar.providers.capabilities import reasoning_choices
+            if cfg.llm_thinking_mode != 'effort' or cfg.llm_reasoning_effort not in reasoning_choices(cfg)['efforts']:
+                raise ValueError('此 DashScope 模型未确认支持所选思考强度')
         if cfg.llm_thinking_mode == 'enabled' and cfg.max_tokens < cfg.llm_thinking_budget + 1024:
             if max_tokens is not None:
                 raise ValueError('输出上限必须为思考预算之外至少留出 1024 tokens 的回答空间')
@@ -62,16 +66,20 @@ def configure(config, *, profile=None, model=None, thinking=None,
 def describe(config):
     thinking = (config.llm_thinking_mode + '/' + config.llm_reasoning_effort
                 if config.llm_thinking_mode in ('effort', 'adaptive') else f'on/{config.llm_thinking_budget}')
+    if config.llm_thinking_mode == 'default':
+        thinking = '服务默认'
+    elif not config.llm_thinking:
+        thinking = 'off'
     return (f'模型={config.model} | 档位={config.dialogue_profile} | '
-            f'请求思考={thinking if config.llm_thinking else "off"} | '
+            f'请求思考={thinking} | '
             f'输出上限={config.max_tokens} | 工具预算={config.dialogue_max_operations}')
 
 
 def snapshot(config):
     """Persist effective request settings, not credentials or unused controls."""
-    mode = config.llm_thinking_mode if config.llm_thinking else 'disabled'
+    mode = config.llm_thinking_mode if config.llm_thinking or config.llm_thinking_mode == 'default' else 'disabled'
     return {'model': config.model, 'provider': config.llm_provider,
-            'profile': config.dialogue_profile, 'thinking_requested': config.llm_thinking,
+            'profile': config.dialogue_profile, 'thinking_requested': None if mode == 'default' else config.llm_thinking,
             'thinking_mode': mode,
             'thinking_budget': config.llm_thinking_budget if mode == 'enabled' else None,
             'reasoning_effort': config.llm_reasoning_effort if mode in ('effort', 'adaptive') else None,

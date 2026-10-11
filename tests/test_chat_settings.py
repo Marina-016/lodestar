@@ -94,6 +94,24 @@ class ChatSettingsTests(unittest.TestCase):
         self.assertEqual(anthropic_options(cfg, structured=True)['thinking'], {'type': 'disabled'})
         self.assertEqual(dashscope_options(cfg, structured=True), {'enable_thinking': False})
 
+    def test_qwen_native_effort_never_sends_fixed_budget(self):
+        cfg = Config(llm_provider='dashscope', model='qwen3.8-flash')
+        for level in ('low', 'medium', 'xhigh'):
+            changed = configure(cfg, thinking='effort', effort=level)
+            self.assertEqual(dashscope_options(changed), {'enable_thinking': True, 'reasoning_effort': level})
+            self.assertIsNone(snapshot(changed)['thinking_budget'])
+        with self.assertRaises(ValueError):
+            configure(cfg, thinking='effort', effort='max')
+
+    def test_unknown_model_defaults_do_not_inject_provider_parameters(self):
+        from lodestar.providers.capabilities import apply_reasoning
+        cfg = apply_reasoning(Config(llm_provider='dashscope', model='unknown-future-model'), 'default')
+        self.assertEqual(dashscope_options(cfg), {})
+        self.assertEqual(snapshot(cfg)['thinking_mode'], 'default')
+        self.assertIsNone(snapshot(cfg)['thinking_requested'])
+        with self.assertRaises(ValueError):
+            apply_reasoning(cfg, 'high')
+
     def test_switch_replaces_client_and_workspace_config_without_new_session(self):
         previous, replacement = Mock(), Mock()
         agent = SimpleNamespace(llm=previous, ws=SimpleNamespace(config=Config()))

@@ -1,292 +1,88 @@
 # Lodestar · Agent Research Lab
 
-<p align="center">
-  <strong>一个把 AI 前沿研究，转化为项目决策与可验证实验的 Agent 产品原型。</strong>
-</p>
+面向 AI 从业者的个人论文研究工作台：发现论文、连续讲解、维护技术与方法的学习证据，并结合项目形成技术方案与实验草案。
 
-<p align="center">
-  <a href="https://lodestar-beige.vercel.app">在线 Demo</a> ·
-  <a href="https://github.com/Marina-016/lodestar">GitHub</a> ·
-  <a href="#产品定位">产品定位</a> ·
-  <a href="#产品思考">产品思考</a> ·
-  <a href="#技术架构">技术架构</a>
-</p>
+当前版本：**V0 / 0.5.0**。主入口是极简白色本地 Web 工作空间。模型自主理解问题和选择工具，宿主负责数据范围、运行状态、来源记录和费用边界。
 
-<p align="center">
-  <img alt="Python 3.10+" src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white">
-  <img alt="Demo replay" src="https://img.shields.io/badge/Demo-Curated%20Replay-F28C28">
-  <img alt="Last verified tests" src="https://img.shields.io/badge/Tests-263%20offline%20checks-2EA44F">
-  <img alt="License" src="https://img.shields.io/badge/License-Apache--2.0-4A5568">
-</p>
+## 现在能做什么
 
-> Lodestar 面向 AI 从业者，用于探索和落地最新 Agent 技术。它探索的不是“如何让模型回答更长”，而是：**Agent 如何形成有证据的判断，理解它和当前项目的关系，在用户确认后沉淀为记忆，并把洞察推进成可验证实验。**
+- **主对话**：持续交流，用自然语言委派多个研究任务。
+- **任务**：各自保存聊天、来源、运行进度和模型设置；可以同时推进、单独停止、完成和归档。
+- **共享记忆**：同一个用户身份，个人偏好跨任务共享；项目事实仅在绑定项目内使用；任务备注保持局部。
+- **记忆管理**：查看、搜索、编辑、停用、恢复、遗忘；查看学习证据、纠正自评或撤销证据。
+- **论文研究**：arXiv 检索、HF 热门信号、论文阅读、连续追问，以及已存在的项目适用性与实验后端。
+- **模型设置**：同服务模型目录与随模型变化的推理选项；运行开始时冻结配置。
 
+可以输入：
 
-## 当前后端与产品计划 · 2026-10-10
+> 分别建两个任务，研究 Harness 和 RAG 的近期论文。结合当前项目给出值得验证的方法，先不要改代码。
 
-`chat send` 普通对话使用连续原生工具循环，支持直接解释、比较、改写和代码示例；
-模型自主组合论文/Web 检索、补读、发表核验和已授权项目上下文，共享默认 8 次操作预算，
-另保留一次回答调用。交互入口支持流式输出、同服务模型/档位/思考切换。
-普通回答直接输出 Markdown，不再强制结构化分块；工具、来源范围和配置保存在元数据中。
-最近记录 263 项离线回归通过，但事实性、相关性和深入分析仍有已知缺口，
-详见 [harness 验证与限制](docs/dialogue-harness.md)。旧 UI / 在线 Demo 仍是独立入口。
+后台任务共享相关记忆，但不会自动读取其他任务的全部对话。主对话可按需读取任务结果。**后台读过论文，不代表用户接触或掌握了论文方法。** 学习围绕技术、知识点和方法记录，论文只作为关联来源；概念定义由模型组织，不保存成个人学习事实。
 
-当前交付是本地 CLI 与 Agent 服务层。前端尚未重做，在线 Demo 展示的是历史 UI 回放，不代表本分支的实时后端能力。
+## 快速开始
 
-下一阶段定义已更新为“默认连续单入口 + 用户显式独立任务 + 可管理记忆”，不是个人助理人设。
-白色简洁 UI、任务隔离、记忆范围/版本/删除和验收均写入 [当前 PRD](docs/agent-prd.md)，尚未实现。
+Python 3.10+，在仓库根目录执行：
 
-```text
-项目登记/索引 → 论文订阅 → 近期 arXiv / HF 平台热门 → 去重候选
-                                                    ↓
-用户研究/追问 ← 持久化证据/会话 ← 有界正文或摘要 ← 选定候选
-       ↓                                            ↓
-技术/方法接触记录                         项目适用性评估 → 结构化草案
-                                                   ├─ propose_change → 显式 A/B
-                                                   ├─ investigate → 诊断与结果登记
-                                                   └─ no_change → 保存有据理由
-```
-
-- 来源带阅读范围、字符跨度与版本，无法读取时保留失败或明确降级为摘要。HF 热度仅是平台信号。
-- 研究知识与用户学习事件分开。接触按技术/方法及论文关系维护；概念定义不作为个人学习事实，讲解或“懂了”不提升掌握。
-- 追问区分有原文引用的论文陈述、推测、证据缺口和一般知识；字面引用匹配仍不能代替语义审核。
-- 方案保留阅读/评估和项目证据快照，过期要求重评；实验显式执行，记录协议、实现、原始输出、评分、环境版本及关联。
-
-验收：147 项回归测试通过，12 个 CLI 命令包含实际实验执行与结果查回；公开检索、正文、模型评估/方案和受限上下文诊断有真实运行记录。两个已知合成案例及字段传递实验不证明项目收益，采用状态和掌握状态独立。
-
-文档：[统一 PRD](docs/agent-prd.md) · [系统架构](docs/agent-architecture.md) · [启动手册](docs/agent-mvp-runbook.md) · [订阅与候选](docs/proactive-paper-discovery.md) · [实验协议](docs/paired-experiments.md) · [验收证据及限制](docs/agent-goal-audit-20261008.md) · [Changelog](CHANGELOG.md)
-
-## 产品定位
-
-**Lodestar 是一个项目感知、证据可追溯、记忆受治理的研究 Agent。**
-
-它把“本周 AI 有什么新进展”转化为一条完整的产品链路：
-
-    研究问题
-       ↓
-    扫描前沿信号，拆解研究任务
-       ↓
-    检索论文、PDF、Web，并记录工具调用
-       ↓
-    计算项目关联度，定位代码证据与实现缺口
-       ↓
-    生成 Research Brief 与 Knowledge Delta
-       ↓
-    用户确认记忆更新
-       ↓
-    生成实验假设与代码骨架
-
-在线 Demo 默认使用 Curated Demo Replay：无需 Token、无需联网、输出稳定，适合稳定展示和录制产品演示。
-打开 [lodestar-beige.vercel.app](https://lodestar-beige.vercel.app)，直接发送预置问题即可体验。
-
-## 产品思考
-
-### 核心产品命题：Agent 的价值不是回答，而是完成一次可信的状态转移
-
-传统 Research Chat 的终点是生成一段文字。Lodestar 把终点向后推进：
-
-    外部信息
-       ↓
-    可解释判断
-       ↓
-    项目决策
-       ↓
-    用户确认的长期记忆
-       ↓
-    可执行、可评估的实验
-
-因此，一个 Agent 是否有价值，不只看回答是否流畅，还要看它是否让使用者更快、更有依据地做出下一步决策。
-
-### 面向 AI 从业者的使用场景
-
-Lodestar 面向需要持续吸收最新 AI 技术、并将其转化为实际产品或工程动作的从业者：
-
-- 研究 Agent、Memory、Tool-use 等方向的最新论文和实践；
-- 判断一个新技术是否与当前产品或代码库真正相关；
-- 将“值得关注”转化为“值得验证”的具体假设；
-- 在多次任务之间保留经过确认的知识，而不是堆积未经筛选的上下文；
-- 用统一的 Trace、来源和评估指标复盘 Agent 行为。
-
-### 我做出的关键产品判断
-
-| 产品命题 | 关键风险 | 设计回应 |
-| --- | --- | --- |
-| 新颖性不等于优先级 | 热点很多，但大多数无法落到当前项目 | 用项目语境、技术栈、代码证据和进行中状态计算关联度 |
-| 检索不等于记忆 | 把所有检索结果写入上下文会放大噪声和错误 | 将记忆设计成需要用户确认的 Knowledge Delta |
-| 自主不等于无限授权 | Agent 可以执行动作，不代表可以修改长期状态 | 将搜索、判断、写入、实验生成拆成不同权限层 |
-| 结论不等于可信 | 没有来源和轨迹，使用者无法复核 | 将 Evidence Trace 做成产品界面，而不是后台日志 |
-| Demo 不等于真实产品 | 过度依赖实时模型会让展示不可重复 | 线上使用 Curated Replay，本地保留真实 Research Loop |
-
-### Agent 的自主边界
-
-Agent 可以自主完成：
-
-- 研究任务拆解；
-- 来源检索与去重；
-- 论文和项目证据整理；
-- 形成研究判断和实验建议。
-
-Agent 不能静默完成：
-
-- 修改长期 Knowledge State；
-- 将不确定内容伪装成确定结论；
-- 用单一相似度分数替代项目判断；
-- 在没有成功标准的情况下生成“看起来合理”的实验。
-
-这条边界的本质是：**让 Agent 自主处理信息，让使用者控制不可逆的状态变化。**
-
-### 评估不只看答案质量
-
-Lodestar 将评估拆成多个产品指标，而不是只做最终文本打分：
-
-| 指标方向 | 关注问题 |
-| --- | --- |
-| 证据覆盖率 | 结论是否都有可追溯来源 |
-| 来源独立性 | 多个来源是否真的提供了独立证据 |
-| 项目关联一致性 | 人与 Agent 对“是否值得验证”的判断是否一致 |
-| 记忆精确率 | 写入的内容有多少是真正值得长期保留的 |
-| 记忆风险率 | 错误、冲突或过时信息是否进入后续上下文 |
-| 实验转化率 | 研究洞察能否形成有成功标准的实验 |
-| 资源成本 | Token、工具调用次数和端到端延迟是否可接受 |
-
-### 产品演进的优先级
-
-当前优先保证研究链路的可信和可复盘，再逐步增加更强的实时能力：
-
-1. 证据和项目关联可解释；
-2. 记忆写入可控制；
-3. 研究结果可以进入实验；
-4. 用离线评估验证行为；
-5. 再扩展实时检索、多项目记忆和成本优化。
-
-这是一种“先建立信任，再扩大自主性”的 Agent 产品策略。
-
-## Demo 里能看到什么
-
-### 推荐演示路径
-
-1. 输入：“本周 Agent 研究有哪些值得 Lodestar 优先验证的新进展？”
-2. Agent 输出三个信号：概念、论文发现、与 Lodestar 的具体关联；
-3. 查看原始论文标题和 PDF；
-4. 展开项目关联度、命中的代码文件和实现缺口；
-5. 确认 Knowledge State 更新；
-6. 查看关联代码；
-7. 生成实验骨架，进入实验项目页查看 baseline.py、candidate.py、eval.py。
-
-### 一个 Research Brief 必须回答
-
-    发生了什么？
-    论文具体证明或观察到了什么？
-    它和当前项目的关联在哪里？
-    证据质量和不确定性如何？
-    哪些内容值得记忆？
-    下一步怎样用一个小实验验证？
-## 技术实现与能力地图
-
-| 能力 | 产品层表现 | 对应实现 |
-| --- | --- | --- |
-| 研究规划 | 把一个开放问题拆成前沿扫描、证据展开和项目判断 | lodestar/agent、lodestar/frontier.py |
-| 工具调用 | 按任务选择搜索、论文、项目索引和知识工具 | lodestar/tools、lodestar/mcp_server.py |
-| 证据追踪 | 每个结论都能回到来源和读取深度 | lodestar/trace、research_tasks.trace_events |
-| 项目关联 | 解释关联度分数，并展示命中的代码文件 | lodestar/relevance.py、lodestar/project_index.py |
-| 记忆治理 | 先提出 Knowledge Delta，再由使用者确认是否写入 | lodestar/memory/repo.py |
-| 流式反馈 | 研究过程逐步反馈，而不是等待黑盒答案 | lodestar/ui.py、/api/task/:id/stream |
-| 离线评估 | 检查来源覆盖、忠实性、任务成功和记忆行为 | tests、lodestar/eval |
-| 实验闭环 | 将研究判断转成可执行的实验项目 | lodestar/experiment.py、workspace/experiments |
-
-## 工作方式
-
-每次研究都同时产生一条对话和一组可复用状态：
-
-    Conversation
-      ├── Research Task
-      │     ├── Plan
-      │     ├── Sources
-      │     ├── Trace Events
-      │     ├── Project Relevance
-      │     └── Research Brief
-      ├── Knowledge Delta
-      └── Experiment Opportunity
-
-研究结果不会停留在聊天气泡中。使用者可以回到来源、检查证据、确认记忆，并继续生成实验。
-
-## 技术架构
-
-    使用者问题
-       ↓
-    Lodestar UI
-       ↓
-    HTTP API / SSE
-       ↓
-    研究编排器
-       ├── 任务拆解
-       ├── Tool Registry
-       ├── 论文 / PDF / Web
-       ├── 项目索引
-       ├── Knowledge State
-       ├── Research Trace
-       └── Research Brief
-                  ↓
-             使用者确认
-               ├── 记忆更新
-               └── 实验骨架 → 离线评估
-
-## 快速运行
-
-Python 3.10+。在仓库根目录建立并激活虚拟环境，再安装本地包：
-
-```shell
+~~~powershell
 python -m venv .venv
-# Windows PowerShell：.\.venv\Scripts\Activate.ps1
-# macOS / Linux：source .venv/bin/activate
-python -m pip install -e .
-python -m lodestar agent-demo --out workspace/my-agent-demo
-python -m lodestar agent-pipeline-demo --out workspace/my-pipeline-demo
-python -m lodestar ab-check workspace/my-pipeline-demo/ab
-```
+.\.venv\Scripts\python.exe -m pip install -e .
+Copy-Item .env.example .env
+.\.venv\Scripts\python.exe -m lodestar ui --port 8124 --no-browser
+~~~
 
-输出目录必须不存在。两种演示使用独立数据库、离线夹具，零模型调用；第二种实际运行六个固定样本的本地成对代码实验。它们不提供实时论文或模型质量证明。
+打开 http://127.0.0.1:8124/ 。在本地 .env 配置服务地址、模型与密钥。示例显式暂停真实模型调用；需要离线体验时设置 LODESTAR_LLM_MODE=mock、LODESTAR_SEARCH_MODE=mock。真实调用前核实账户与所选模型的免费额度，首页加载和刷新不会调用模型。
 
-```shell
-python -m unittest discover -s tests -q
-python -m lodestar --help
-```
+其他系统激活虚拟环境后使用 python -m lodestar ui。旧橙色回放入口仍可使用 python -m lodestar ui --legacy；旧代码完整保留在 [codex/legacy-orange-v0](https://github.com/Marina-016/lodestar/tree/codex/legacy-orange-v0)。[旧线上演示](https://lodestar-beige.vercel.app) 是固定回放，不是新版真实后端。
 
-真实研究和项目订阅使用 [运行手册](docs/agent-mvp-runbook.md)，当前对话使用 [交互用法](docs/chat-usage.md)。密钥仅放本地被忽略的 `.env`；示例环境显式关闭模型调用，但代码默认未禁用，须检查实际配置与费用授权。历史免费额度不代表当前余额，不自动付费回退。项目代码外发需精确仓库/文件授权，登记项目不等于授权发送整个仓库。仓库不包含本机数据库、PDF、真实录制和实验输出，运行证据的范围和结果已写入验收文档。
+## 简洁的 Harness
 
-历史 UI 回放可选使用 `python -m lodestar ui --port 8123 --no-browser`；其配置见原演示文档，不是本次前端开发成果。
+~~~text
+用户消息
+   ↓
+当前任务的近期对话 + 有界共享记忆 + 项目范围
+   ↓
+模型自主决策 ←→ 搜论文 / 读论文 / 读网页 / 查任务 / 管记忆
+   │                  └─ 主对话可派发子任务，各自运行
+   ↓
+流式回答 + 引用来源 + 运行记录
+~~~
 
-## Vercel 部署
+没有固定对话阶段或关键词意图分类器。只有必要的运行生命周期、操作预算、取消与数据范围检查。论文分析、项目方案和实际代码实验使用独立接口；网页聊天不会自动执行代码或采用方案。
 
-线上版本强制使用演示回放，并将临时状态写入 /tmp。Vercel 是稳定的展示面，本地模式是开发与真实研究面。
+相关实现：lodestar/agent/dialogue.py、lodestar/web/server.py、lodestar/web/tools.py、lodestar/web/memory.py。
 
-    npm install -g vercel
-    vercel login
-    vercel link
-    vercel --prod
+## 数据和边界
 
-## 评估与路线图
+Web 数据保存在被 Git 忽略的 workspace/web/web.db，与 CLI 研究数据库分开。旧 Web 任务会保留会话和消息，迁移为共享用户身份；旧任务备注仍是任务范围，不会自动变成个人事实。升级前应通过 SQLite backup API 备份数据库。
 
-当前验证覆盖来源及模式隔离、版本与去重、失败恢复、用户/项目边界、引文与方案契约、实验独立评分/篡改检查、环境记录及 CLI。详细证明范围见 [验收台账](docs/agent-goal-audit-20261008.md)。精确引文和绿色测试不保证模型的每个结论正确；诊断原型不是完整论文复现，也没有自动接入生产策略。
+修改、停用或遗忘记忆，会重新建立受影响任务的后续上下文边界，避免旧回答重新带回失效事实。这会暂时减少模型可用的历史上下文；用户可见聊天保留。遗忘会清理该记忆的修订正文，但不会撤回云端已收到的信息，也不清理备份或聊天中原本的文字。
 
-下一阶段按 PRD 实施单入口实时前端、显式独立任务和可管理记忆；同时保留研究质量的独立审核。来源语义标注、代表性项目重复实验、永久后台/通知、学习表现判卷、语义召回和多用户服务另行验收。详见 [当前计划](docs/agent-long-term-plan.md)。
+当前服务仅监听 127.0.0.1，针对本地单用户。**本版不是已验收的公网多用户服务。** 公网发布仍需认证、用户数据隔离、HTTPS、持久化备份、限流与真实模型/搜索验收。现有 Vercel 配置服务于旧回放，不应直接作为新版后端部署方案。
 
-## 安全与公开仓库策略
+公共网页搜索可能被引擎验证拦截，错误会明确返回。阿里官方联网搜索 MCP 已有可选适配与本地免费次数预约机制；必须核实并登记剩余额度后启用，无额度不自动付费回退。模型调用开关及本地预算本身不保证云端零费用。
 
-公开前运行：
+项目登记和绑定只建立名称、描述及范围，不代表读取或外发整仓库的授权。项目代码外发须匹配明确文件白名单。密钥、数据库、缓存和真实运行日志不进入 Git。
 
-    python scripts/preflight_public_release.py
+## 验证与文档
 
-不会提交 .env、API Key、Access Token、Cookie、Private Key、SQLite 数据库、PDF 缓存和机器特定路径。
+~~~powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -q
+node --test tests/web_sources.test.mjs
+node --check lodestar/web/static/app.mjs
+.\.venv\Scripts\python.exe scripts/preflight_public_release.py
+~~~
 
-真实 Provider 凭据只放在本地环境或 Vercel Environment Variables 中，绝不写入代码。
+最新证据和未通过项见 [V0 发布验收](docs/v0-release-check.md)。离线回归覆盖任务并发/取消/恢复、共享记忆、范围隔离、旧数据迁移、遗忘后的实际模型载荷、模型参数、来源与 HTTP 边界；绿色测试不代表模型事实质量已普遍通过。
 
-## 许可证
+- [产品逻辑与系统架构](docs/agent-prd.md)
+- [Web 使用与数据说明](docs/web-ui.md)
+- [后端运行手册](docs/agent-mvp-runbook.md)
+- [对话用法](docs/chat-usage.md)
+- [阿里官方搜索接入](docs/aliyun-web-search.md)
+- [Changelog](CHANGELOG.md)
 
-Apache-2.0，详见 LICENSE。
+## 后续重点
 
----
+真实模型与论文质量回归、可用的通用搜索、长期历史检索、后台服务与通知，以及带认证的公开服务。当前不自动采用技术方案，不自动判定用户掌握，不宣称固定样本实验等于论文复现。
 
-<p align="center">
-  <strong>把问题带到证据，把理解留在记忆里，把洞察推进成实验。</strong>
-</p>
+Apache-2.0，详见 [LICENSE](LICENSE)。

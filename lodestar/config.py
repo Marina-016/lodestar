@@ -55,7 +55,7 @@ class Config:
     tool_timeout_s: int = 30
     # --- 产品 ---
     brief_language: str = "zh"      # zh | en
-    web_search_backend: str = "duckduckgo"
+    web_search_backend: str = "duckduckgo"  # duckduckgo | aliyun_mcp
     # --- V1-R1：venue 元数据回填（免费无 Key；provider 顺序回退）---
     enrich_venues: bool = True       # 检索去重后回填 journal/venue
     venue_providers: tuple = ("semanticscholar", "openalex", "dblp", "crossref")  # 按序查找正式发表记录

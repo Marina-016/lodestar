@@ -1,6 +1,45 @@
 # Changelog
 
-## [Unreleased] - 2026-10-09
+## [0.5.0] - 2026-10-11 · V0 local release candidate
+
+### Added
+
+- Persistent main conversation, task center and model-led background task delegation. Tasks retain separate chats, progress, sources and model settings while sharing one user identity.
+- Personal/project/task memory scopes; project registration and binding; editable, disableable and forgettable facts with revisions and provenance.
+- Technology/method learning evidence inspection, correction and revocation. Foreground learning tools attach actual user-message evidence; background work cannot write personal facts or user learning events.
+- One-time migration of existing Web sessions and notes, preserving IDs and transcripts. Old task notes remain task-scoped.
+- Minimal white monochrome Web UI, streaming, run events, idempotent submission, cancellation and interrupted-run recovery.
+- Optional official Alibaba WebSearch MCP adapter and persistent reservations against operator-verified free allowance. Unverified allowance never enables automatic paid fallback.
+- GitHub regression workflow and V0 readiness documentation.
+
+### Changed
+
+- Kept dialogue model-led with a shared operation budget and a reserved final answer; added scoped host tools without a fixed intent classifier or conversation state machine.
+- Bounded automatic fact recall to 20 records / 8000 characters, with query-aware selection and on-demand memory reads.
+- Memory correction/disable/forget retires affected old model history and cached evidence while preserving visible transcripts. This conservative cutoff reduces available prior context.
+- Per-model reasoning controls replace the Web runtime preset selector; saved legacy profiles remain readable.
+- Alibaba model discovery uses the official paginated directory. In-flight configuration stays frozen, while saved choices immediately update the UI.
+
+### Fixed
+
+- Removed forgotten content from both live tool dialogue and the reserved answer context.
+- Prevented background tasks from bypassing personal-memory restrictions by supplying another scope.
+- Separated answer citations from unused retrieval records, preserved distinct arXiv versions and bounded historical provenance to earlier messages.
+- Preserved safe terminal errors after refresh without exposing provider exception bodies.
+- Avoided unchanged task-list rebuilds and removed hidden mobile navigation from keyboard/accessibility navigation.
+- Reported public search challenge/transport failures explicitly and removed an irrelevant Bing RSS fallback.
+
+### Validation and release scope
+
+- 311 offline Python regressions and 11 frontend source tests passed; JavaScript syntax and dependency checks passed.
+- Browser acceptance covered two delegated tasks, separate results, shared memory edits, learning correction and desktop/mobile layouts. These tests used a synthetic offline model.
+- Database backup-copy migration preserved 3 spaces, 8 messages and the original note; SQLite integrity check passed.
+- A 0.5.0 wheel was built successfully. Public arXiv retrieval returned 2 papers with complete abstracts.
+- Public web search still reports provider_unavailable. Real-model/free-quota acceptance and public multi-user deployment remain unverified.
+- The previous orange version is retained in codex/legacy-orange-v0. Current V0 is promoted to master without rewriting history.
+- Details, remaining launch blockers and rollback instructions: docs/v0-release-check.md.
+
+## Harness update - 2026-10-09
 
 ### Changed
 

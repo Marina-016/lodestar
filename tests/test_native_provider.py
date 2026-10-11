@@ -127,6 +127,25 @@ class NativeProviderTests(unittest.TestCase):
         self.assertEqual(delivered, ['查找中'])
         self.assertEqual(client._dashscope.usage[0]['total_tokens'], 12)
 
+    def test_qwen_native_effort_reaches_stream_request_without_budget(self):
+        from lodestar.chat_settings import configure
+        client = self.client()
+        client.config = configure(Config(llm_provider='dashscope', model='qwen3.8-flash'), thinking='effort', effort='medium')
+        client.model = client.config.model
+        client._dashscope = SimpleNamespace(base_url='https://dashscope.aliyuncs.com', key='fixture', usage=[])
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.iter_lines.return_value = iter([
+            'data: ' + json.dumps({'choices': [{'delta': {'content': 'answer'}, 'finish_reason': 'stop'}]}),
+            'data: [DONE]'])
+        with patch('lodestar.providers.dialogue.requests.post', return_value=response) as request:
+            client.dialogue_step('system', [], [])
+        payload = request.call_args.kwargs['json']
+        self.assertEqual(payload['model'], 'qwen3.8-flash')
+        self.assertEqual(payload['reasoning_effort'], 'medium')
+        self.assertTrue(payload['enable_thinking'])
+        self.assertNotIn('thinking_budget', payload)
+
     def test_openai_reasoning_is_preserved_for_tools_but_not_streamed_as_answer(self):
         client = self.client()
         client._dashscope = SimpleNamespace(base_url='https://dashscope.aliyuncs.com', key='fixture', usage=[])

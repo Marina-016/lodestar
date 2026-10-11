@@ -30,7 +30,7 @@ def step(client, system, messages, tools, on_text=None):
         client.last_dialogue_observation = {
             'requested_model': client.model,
             'returned_model': getattr(response, 'model', None),
-            'thinking_requested': client.config.llm_thinking,
+            'thinking_requested': None if client.config.llm_thinking_mode == 'default' else client.config.llm_thinking,
             'thinking_observed': any(b.get('type') in ('thinking', 'redacted_thinking') for b in content),
             'usage': usage.model_dump(exclude_none=True) if usage is not None else {},
         }
@@ -134,7 +134,7 @@ def _openai_step(client, system, messages, tools, on_text):
         blocks.append({'type': 'tool_use', 'id': call['id'], 'name': call['name'], 'input': arguments})
     client.last_dialogue_observation = {
         'requested_model': client.model, 'returned_model': returned_model,
-        'thinking_requested': client.config.llm_thinking,
+        'thinking_requested': None if client.config.llm_thinking_mode == 'default' else client.config.llm_thinking,
         'thinking_observed': bool(reasoning), 'usage': usage,
     }
     return {'role': 'assistant', 'content': blocks}

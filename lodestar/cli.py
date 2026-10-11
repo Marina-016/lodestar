@@ -342,7 +342,10 @@ def cmd_build(args, cfg):
 
 
 def _cmd_ui(args, cfg):
-    from lodestar.ui import serve
+    if args.legacy:
+        from lodestar.ui import serve
+    else:
+        from lodestar.web.server import serve
     serve(port=args.port, open_browser=not args.no_browser)
 
 def cmd_demo(args, cfg):
@@ -646,6 +649,7 @@ def main(argv=None):
     pf.set_defaults(fn=cmd_frontier)
 
     pui = sub.add_parser("ui", help="本地 Web UI（零依赖，默认 http://127.0.0.1:8123）")
+    pui.add_argument("--legacy", action="store_true", help="打开历史回放界面")
     pui.add_argument("--port", type=int, default=8123)
     pui.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
     pui.set_defaults(fn=lambda a, c: _cmd_ui(a, c))

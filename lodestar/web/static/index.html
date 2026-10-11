@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="lodestar-token" content="__TOKEN__" />
+    <meta name="theme-color" content="#ffffff" />
+    <title>Lodestar · 研究工作空间</title>
+    <link rel="icon" href="/icon.svg" />
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <svg class="symbols" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <defs>
+        <symbol id="i-star" viewBox="0 0 24 24">
+          <path d="m12 2 2.6 7.4L22 12l-7.4 2.6L12 22l-2.6-7.4L2 12l7.4-2.6Z" />
+        </symbol>
+        <symbol id="i-home" viewBox="0 0 24 24">
+          <path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z" />
+        </symbol>
+        <symbol id="i-plus" viewBox="0 0 24 24">
+          <path d="M12 5v14M5 12h14" />
+        </symbol>
+        <symbol id="i-task" viewBox="0 0 24 24">
+          <rect x="5" y="3" width="14" height="18" rx="2" />
+          <path d="M9 8h6M9 12h6M9 16h3" />
+        </symbol>
+        <symbol id="i-book" viewBox="0 0 24 24">
+          <path
+            d="M12 5C9 3 5 3 3 4v15c3-1 6-1 9 1 3-2 6-2 9-1V4c-2-1-6-1-9 1Zm0 0v15"
+          />
+        </symbol>
+        <symbol id="i-project" viewBox="0 0 24 24">
+          <rect x="3" y="4" width="7" height="7" rx="1" />
+          <rect x="14" y="4" width="7" height="7" rx="1" />
+          <rect x="3" y="15" width="7" height="6" rx="1" />
+          <rect x="14" y="15" width="7" height="6" rx="1" />
+        </symbol>
+        <symbol id="i-context" viewBox="0 0 24 24">
+          <path d="M4 5h16M4 12h16M4 19h16" />
+          <circle cx="9" cy="5" r="2" />
+          <circle cx="15" cy="12" r="2" />
+          <circle cx="9" cy="19" r="2" />
+        </symbol>
+        <symbol id="i-stop" viewBox="0 0 24 24">
+          <rect x="7" y="7" width="10" height="10" rx="1" fill="currentColor" stroke="none" />
+        </symbol>
+        <symbol id="i-arrow" viewBox="0 0 24 24">
+          <path d="M12 19V5m-6 6 6-6 6 6" />
+        </symbol>
+        <symbol id="i-chevron" viewBox="0 0 24 24">
+          <path d="m8 10 4 4 4-4" />
+        </symbol>
+        <symbol id="i-close" viewBox="0 0 24 24">
+          <path d="m6 6 12 12M6 18 18 6" />
+        </symbol>
+        <symbol id="i-think" viewBox="0 0 24 24">
+          <path d="M9 18h6m-5 3h4M8 14a6 6 0 1 1 8 0c-1 1-1 2-1 2H9s0-1-1-2Z" />
+        </symbol>
+        <symbol id="i-menu" viewBox="0 0 24 24">
+          <path d="M4 6h16M4 12h16M4 18h16" />
+        </symbol>
+        <symbol id="i-out" viewBox="0 0 24 24">
+          <path
+            d="M14 3h7v7m0-7L10 14M10 3H4a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1v-6"
+          />
+        </symbol>
+        <symbol id="i-paper" viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></symbol>
+        <symbol id="i-lab" viewBox="0 0 24 24"><path d="M9 3h6M10 3v6l-6 10a1.3 1.3 0 0 0 1 2h14a1.3 1.3 0 0 0 1-2L14 9V3M7 15h10"/></symbol>
+        <symbol id="i-diagonal" viewBox="0 0 24 24"><path d="M6 18 18 6M7 6h11v11"/></symbol>
+        <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V4H4v12h4"/></symbol>
+        <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+      </defs>
+    </svg>
+    <div class="app">
+      <aside class="sidebar" id="sidebar" aria-label="工作空间导航">
+        <a class="brand" href="/"
+          ><span class="brand-mark"
+            ><svg><use href="#i-star" /></svg></span
+          ><span
+            >Lodestar<span class="brand-caption">个人研究工作台</span></span
+          ></a
+        >
+        <nav>
+          <button class="nav-item active" id="home">
+            <svg><use href="#i-home" /></svg><span>主对话</span
+            ><kbd class="shortcut" id="home-shortcut">Ctrl 1</kbd>
+          </button>
+          <button class="new-task-button" id="new-task" title="新建任务" aria-label="新建任务">
+            <svg><use href="#i-plus" /></svg><span>新建任务</span>
+          </button>
+          <div class="nav-section"><button class="subtle" id="task-center">任务</button><span class="section-count" id="task-count">0</span></div>
+          <div id="task-list" class="task-list"></div>
+          <p id="tasks-empty" class="sidebar-empty">
+            在主对话派发任务，或新建一个课题。
+          </p>
+          <button class="subtle archived-toggle" id="archived-toggle" hidden>
+            查看已归档任务
+          </button>
+        </nav>
+        <div class="sidebar-bottom">
+          <button class="nav-item" id="memory">
+            <svg><use href="#i-book" /></svg><span>记忆</span></button
+          >
+          <div class="account">
+            <span class="avatar">L</span
+            ><span>我的工作空间<small>本地 · 私人</small></span
+            ><span class="local-dot" title="本地服务"></span>
+          </div>
+        </div>
+      </aside>
+      <main id="main">
+        <header class="topbar">
+          <button
+            class="icon-button mobile-menu"
+            id="menu"
+            aria-expanded="false"
+            aria-controls="sidebar"
+            aria-label="打开导航"
+          >
+            <svg><use href="#i-menu" /></svg>
+          </button>
+          <div class="breadcrumb">
+            <span id="space-name">主对话</span><span class="divider">/</span
+            ><span id="space-subtitle">持续研究</span>
+          </div>
+          <div class="header-actions">
+            <button id="task-options" class="subtle" hidden>管理任务</button
+            ><button class="context-button" id="context">
+              <svg aria-hidden="true"><use href="#i-context" /></svg>
+              <span>当前上下文</span>
+            </button>
+          </div>
+        </header>
+        <div class="scroll-area" id="scroll-area">
+          <section class="welcome" id="welcome">
+            <div class="welcome-mark">
+              <svg><use href="#i-star" /></svg>
+            </div>
+            <div class="eyebrow">Lodestar · Research</div>
+            <h1>今天，想研究什么？</h1>
+            <p>
+              发现值得读的论文，理解新方法，<br class="mobile-break" />把想法带到正在做的项目中。
+            </p>
+            <div class="suggestions" aria-label="研究灵感">
+              <button data-prompt="最近 AI Agent 有哪些值得关注的新论文？先介绍三篇。" title="填入论文发现问题">
+                <span class="suggest-icon"><svg><use href="#i-paper" /></svg></span>
+                <span class="suggestion-copy"><strong>发现新论文</strong><span>看看最近值得读的研究</span></span>
+                <svg class="suggestion-arrow"><use href="#i-diagonal" /></svg>
+              </button>
+              <button data-prompt="用一个简单例子解释 Agent harness，并说明何时需要它。" title="填入技术讲解问题">
+                <span class="suggest-icon"><svg><use href="#i-think" /></svg></span>
+                <span class="suggestion-copy"><strong>理解一项技术</strong><span>从一个具体的例子开始</span></span>
+                <svg class="suggestion-arrow"><use href="#i-diagonal" /></svg>
+              </button>
+              <button data-prompt="我想把一项新技术用在项目中，帮我梳理需要提供的信息和最小验证思路。" title="填入项目探索问题">
+                <span class="suggest-icon"><svg><use href="#i-lab" /></svg></span>
+                <span class="suggestion-copy"><strong>探索项目思路</strong><span>让一个想法可以被验证</span></span>
+                <svg class="suggestion-arrow"><use href="#i-diagonal" /></svg>
+              </button>
+            </div>
+          </section>
+          <section
+            class="messages"
+            id="messages"
+            aria-label="对话记录"
+          ></section>
+        </div>
+        <div class="composer-area">
+          <button class="latest-button" id="scroll-latest" hidden aria-label="回到最新消息"><svg><use href="#i-arrow" /></svg>回到最新</button>
+          <div
+            class="run-status"
+            id="run-status"
+            role="status"
+            aria-live="polite"
+          ></div>
+          <form class="composer" id="composer">
+            <label class="sr-only" for="prompt">输入研究问题</label
+            ><textarea
+              id="prompt"
+              rows="2"
+              placeholder="从一篇论文、一个问题，或一个想法开始…"
+            ></textarea>
+            <div class="composer-toolbar">
+              <div class="model-controls">
+                <button type="button" class="model-button" id="model-settings" aria-haspopup="dialog" title="模型与推理设置">
+                  <span class="model-indicator"></span
+                  ><span id="model-label">加载模型…</span
+                  ><svg><use href="#i-chevron" /></svg></button
+                ><span class="toolbar-divider"></span
+                ><button
+                  type="button"
+                  class="thinking-button"
+                  id="thinking" aria-haspopup="dialog" title="推理强度设置"
+                >
+                  <svg><use href="#i-think" /></svg><span>推理强度</span>
+                </button>
+              </div>
+              <button
+                type="submit"
+                class="send-button" disabled
+                aria-label="发送问题"
+                id="send"
+              >
+                <svg><use href="#i-arrow" /></svg>
+              </button>
+            </div>
+          </form>
+          <div class="composer-footer">
+            <span id="scope-label">仅使用当前空间的上下文</span
+            ><span
+              ><kbd>Enter</kbd> 发送 <span class="footer-dot">·</span><kbd>Shift Enter</kbd> 换行</span
+            >
+          </div>
+        </div>
+      </main>
+    </div>
+    <div class="nav-backdrop" id="nav-backdrop" hidden></div>
+    <div class="drawer-backdrop" id="drawer-backdrop" hidden></div>
+    <aside
+      class="drawer"
+      id="drawer"
+      hidden
+      tabindex="-1"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="drawer-title"
+    >
+      <header>
+        <div>
+          <span class="eyebrow" id="drawer-eyebrow">WORKSPACE</span>
+          <h2 id="drawer-title">当前上下文</h2>
+        </div>
+        <button class="icon-button" id="close-drawer" aria-label="关闭面板">
+          <svg><use href="#i-close" /></svg>
+        </button>
+      </header>
+      <div class="drawer-content" id="drawer-content"></div>
+    </aside>
+    <dialog id="task-dialog" aria-labelledby="task-title">
+      <form id="task-form">
+        <div class="dialog-heading">
+          <h2 id="task-title">新建任务</h2>
+          <button
+            type="button"
+            class="icon-button"
+            data-close="task-dialog"
+            aria-label="取消"
+          >
+            <svg><use href="#i-close" /></svg>
+          </button>
+        </div>
+        <p>给一个课题留出专注的空间，分别查看进度与结果。</p>
+        <label for="task-name">任务名称</label
+        ><input
+          id="task-name"
+          autofocus
+          maxlength="80"
+          placeholder="例如：Agent 记忆机制研究"
+          required
+        />
+        <label for="task-project">所属项目</label><select id="task-project"></select>
+        <div class="scope-note">
+          <svg><use href="#i-task" /></svg
+          ><span
+            >共享你的个人记忆和所属项目记忆。<br />每个任务保留自己的对话、来源与模型设置。</span
+          >
+        </div>
+        <div class="dialog-actions">
+          <button type="button" class="secondary" data-close="task-dialog">
+            取消</button
+          ><button class="primary" type="submit">
+            创建任务
+          </button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="settings-dialog" aria-labelledby="settings-title">
+      <form id="settings-form">
+        <div class="dialog-heading">
+          <h2 id="settings-title">模型设置</h2>
+          <button
+            type="button"
+            class="icon-button"
+            data-close="settings-dialog"
+            aria-label="关闭设置"
+          >
+            <svg><use href="#i-close" /></svg>
+          </button>
+        </div>
+        <p>仅修改当前空间，下一轮生效。</p>
+        <label for="model-select">模型</label>
+        <select id="model-select" autofocus aria-describedby="catalog-status"></select>
+        <input id="model-id" aria-label="自定义模型 ID" maxlength="200" placeholder="输入模型 ID" hidden />
+        <p class="fineprint" id="catalog-status" role="status"></p>
+        <label for="reasoning-setting">推理强度</label>
+        <select id="reasoning-setting" aria-describedby="reasoning-note"></select>
+        <p class="fineprint" id="reasoning-note"></p>
+        <label class="check-row" for="enabled-setting"><span><strong>启用模型调用</strong><small>仅作用于当前空间</small></span><input type="checkbox" id="enabled-setting" /></label>
+        <p class="fineprint">
+          可用能力与费用以模型服务为准。
+        </p>
+        <div class="dialog-actions">
+          <button type="button" class="secondary" data-close="settings-dialog">
+            取消</button
+          ><button class="primary" type="submit">保存设置</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="manage-dialog" aria-labelledby="manage-title">
+      <form id="manage-form">
+        <div class="dialog-heading">
+          <h2 id="manage-title">管理任务</h2>
+          <button
+            type="button"
+            class="icon-button"
+            data-close="manage-dialog"
+            aria-label="关闭管理"
+          >
+            <svg><use href="#i-close" /></svg>
+          </button>
+        </div>
+        <label for="manage-name">任务名称</label
+        ><input id="manage-name" autofocus maxlength="80" required /><label
+          for="manage-status"
+          >状态</label
+        ><select id="manage-status">
+          <option value="active">进行中</option>
+          <option value="completed">已完成</option>
+          <option value="archived">已归档</option>
+        </select>
+        <label for="manage-project">所属项目</label><select id="manage-project"></select>
+        <p>归档保留历史与记忆，可随时恢复。</p>
+        <div class="dialog-actions">
+          <button type="button" class="secondary" data-close="manage-dialog">
+            取消</button
+          ><button type="submit" class="primary">保存</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="note-dialog" aria-labelledby="note-title">
+      <form id="note-form">
+        <div class="dialog-heading">
+          <h2 id="note-title">添加记忆</h2>
+          <button
+            type="button"
+            class="icon-button"
+            data-close="note-dialog"
+            aria-label="取消记忆编辑"
+          >
+            <svg><use href="#i-close" /></svg>
+          </button>
+        </div>
+        <p id="note-scope"></p>
+        <label for="note-range">使用范围</label><select id="note-range"><option value="personal">个人 · 所有任务可用</option><option value="project">项目 · 同项目任务可用</option><option value="task">仅当前任务</option></select>
+        <label for="note-project" id="note-project-label" hidden>所属项目</label><select id="note-project" hidden></select>
+        <label for="note-content">希望保留的偏好或事实</label
+        ><textarea
+          id="note-content"
+          autofocus
+          rows="5"
+          maxlength="2000"
+          required
+          placeholder="例如：解释新方法时，先给一个具体例子。"
+        ></textarea>
+        <p class="fineprint">修改、停用或删除会重新建立受影响任务的后续上下文；历史聊天保留。普通备注不会成为掌握证据。</p>
+        <div class="dialog-actions">
+          <button type="button" class="secondary" data-close="note-dialog">
+            取消</button
+          ><button class="primary" type="submit">保存记忆</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="project-dialog" aria-labelledby="project-title">
+      <form id="project-form">
+        <div class="dialog-heading"><h2 id="project-title">登记项目</h2><button type="button" class="icon-button" data-close="project-dialog" aria-label="取消"><svg><use href="#i-close" /></svg></button></div>
+        <p>保存项目名称与说明，供任务归属和记忆使用。</p>
+        <label for="project-name">项目名称</label><input id="project-name" maxlength="80" required autofocus />
+        <label for="project-description">项目说明</label><textarea id="project-description" maxlength="4000" rows="4"></textarea>
+        <p class="fineprint">填写的说明可用于对话。登记项目不会自动读取本地代码。</p>
+        <div class="dialog-actions"><button type="button" class="secondary" data-close="project-dialog">取消</button><button type="submit" class="primary">登记并绑定</button></div>
+      </form>
+    </dialog>
+    <dialog id="learning-dialog" aria-labelledby="learning-title">
+      <form id="learning-form">
+        <div class="dialog-heading"><h2 id="learning-title">纠正学习记录</h2><button type="button" class="icon-button" data-close="learning-dialog" aria-label="取消"><svg><use href="#i-close" /></svg></button></div>
+        <label for="learning-technology">技术或知识点</label><input id="learning-technology" maxlength="200" required autofocus />
+        <label for="learning-method">具体方法</label><input id="learning-method" maxlength="300" />
+        <label for="learning-evidence">你的纠正说明</label><textarea id="learning-evidence" maxlength="2000" rows="4" required></textarea>
+        <p class="fineprint">原证据会撤销，纠正保存为自评，不会自动提升掌握程度。</p>
+        <div class="dialog-actions"><button type="button" class="secondary" data-close="learning-dialog">取消</button><button type="submit" class="primary">保存纠正</button></div>
+      </form>
+    </dialog>
+    <div class="toast" id="toast" role="alert" hidden></div>
+    <script type="module" src="/app.mjs"></script>
+  </body>
+</html>

@@ -104,6 +104,11 @@ class LLMClient:
         """Optional read-only catalog. A listed ID is not an inference guarantee."""
         if self.mode == 'mock':
             return [self.model]
+        if self._dashscope is not None:
+            try:
+                return self._dashscope.list_models()
+            except Exception as error:
+                raise LLMError('Model catalog request failed') from error
         if self._client is None:
             raise LLMError('Model catalog is unavailable on this provider', code='configuration')
         try:

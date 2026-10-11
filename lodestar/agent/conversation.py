@@ -6,7 +6,7 @@ import uuid
 
 from lodestar.agent.loop import ResearchAgent
 from lodestar.agent.project_plan import generate
-from lodestar.agent.evidence import merge_sources
+from lodestar.agent.evidence import merge_sources, source_details
 from lodestar.memory import learning, repo
 from lodestar.chat_settings import snapshot
 
@@ -68,11 +68,18 @@ class ConversationAgent:
             context = getattr(error, 'dialogue_context', {})
             metadata = {'model_error': diagnostic, 'model_configuration': snapshot(self.ws.config)}
             if context:
-                metadata.update(candidates=context.get('candidates', []),
+                metadata.update(source_details=source_details(context.get('candidates', []) + context.get('papers', [])),
+                                candidates=context.get('candidates', []),
                                 dialogue_events=context.get('dialogue_events', []))
                 with self.ws.conn:
                     self.ws.conn.execute('UPDATE agent_sessions SET evidence=? WHERE conversation_id=?',
                         (json.dumps(context.get('papers', []), ensure_ascii=False), conversation_id))
+            if diagnostic['code'] == 'cancelled':
+                partial = getattr(error, 'partial_answer', '')
+                answer = (partial + '\n\n' if partial else '') + '[已停止] 本轮已停止，已生成内容和检索记录已保留。'
+                metadata['partial_answer'] = partial
+                repo.add_message(self.ws.conn, conversation_id, 'assistant', answer, kind='cancelled', metadata=metadata)
+                return {'status': 'cancelled', 'answer': answer, 'conversation_id': conversation_id}
             reason = {'invalid_json': '模型返回的结构化数据格式无效，自动修复后仍未成功',
                       'timeout': '模型服务响应超时', 'connection': '无法连接模型服务',
                       'stream_interrupted': '流式连接中断，回答尚未完成',
@@ -100,7 +107,8 @@ class ConversationAgent:
                     'candidates': context.get('candidates', [])}
 
     def _turn(self, conversation_id, message, *, user_id='default', intent='auto',
-             technology=None, method='', feedback='discussed', days=7, on_text=None, on_progress=None):
+             technology=None, method='', feedback='discussed', days=7, on_text=None, on_progress=None, memory_notes=None, check_cancel=None,
+             assistant_tools=None, history_after=0, track_exposure=True):
         session = self._session(conversation_id, user_id)
         if not message.strip():
             raise ValueError('message is required')
@@ -177,7 +185,8 @@ class ConversationAgent:
                 result = generate(self.ws, self.llm, message, sources, session['project_id'])
                 answer = result['plan']
             else:
-                history = self.history(conversation_id, user_id, 8)[:-1]  # Current user turn is sent separately, untruncated.
+                history = [m for m in self.history(conversation_id, user_id, 8)[:-1]
+                           if m['id'] > history_after]
                 candidates = []
                 for previous in reversed(history):
                     metadata = json.loads(previous.get('metadata') or '{}')
@@ -185,13 +194,15 @@ class ConversationAgent:
                         candidates = metadata['candidates']
                         break
                 context = {'message': message, 'candidates': candidates,
+                    'managed_memory': memory_notes or [],
                     'history': _history_context(history),
                     'learning': learning.recall(self.ws.conn, message + ' ' + (technology or ''), user_id),
                     'papers': [{**s, 'content': s.get('content', '')[:12000]} for s in sources[:5]],
                     'supplement_reads': supplements}
                 from lodestar.agent.dialogue import gather
                 context = gather(self.ws, self.llm, context, session['project_id'],
-                                 on_progress=on_progress, on_text=on_text)
+                                 on_progress=on_progress, on_text=on_text, check_cancel=check_cancel,
+                                 **({'extra_tools': assistant_tools} if assistant_tools else {}))
                 events = context.pop('dialogue_events')
                 sources = context['papers']
                 supplements = [{'url': event['params']['url'],
@@ -213,23 +224,26 @@ class ConversationAgent:
                     trace.dump_jsonl()
                 answer, grounding = context['answer'], context['grounding']
                 result = {'status': 'answered', 'evidence_reused': len(sources), 'supplement_reads': supplements,
-                          'grounding': grounding, 'dialogue_events': events, 'candidates': context['candidates']}
+                          'grounding': grounding, 'dialogue_events': events, 'candidates': context['candidates'],
+                          'source_details': source_details(context['candidates'] + context['papers'])}
         model_configuration = snapshot(self.ws.config)
         result['model_configuration'] = model_configuration
         assistant_message = repo.add_message(self.ws.conn, conversation_id, 'assistant', answer,
-                         task_id=result.get('task_id') or session['task_id'], metadata={'intent': intent, 'grounding': result.get('grounding'), 'dialogue_events': result.get('dialogue_events'), 'candidates': result.get('candidates', []), 'model_configuration': model_configuration})
-        if intent == 'followup':
+                         task_id=result.get('task_id') or session['task_id'], metadata={'intent': intent, 'grounding': result.get('grounding'), 'dialogue_events': result.get('dialogue_events'), 'candidates': result.get('candidates', []), 'source_details': result.get('source_details', []), 'model_configuration': model_configuration})
+        if intent == 'followup' and track_exposure:
             from lodestar.agent.exposure import record_exposure
             from lodestar.llm import LLMError
             try:
+                if check_cancel:
+                    check_cancel()
                 result['learning_exposure'] = record_exposure(self.ws, self.llm, session['task_id'],
                     user_id, answer, sources, technology=technology, goal=message)
                 result['learning_exposure_status'] = 'recorded' if result['learning_exposure'] else 'no_supported_methods'
             except (LLMError, ValueError, TypeError, AttributeError) as error:
-                result['learning_exposure_status'] = 'error'
+                result['learning_exposure_status'] = 'cancelled' if getattr(error, 'code', None) == 'cancelled' else 'error'
                 result['learning_exposure_error'] = type(error).__name__
                 result['warning'] = '讲解已保留，方法接触记录更新未完成；未提升掌握程度。'
-            metadata = {'intent': intent, 'grounding': result.get('grounding'), 'dialogue_events': result.get('dialogue_events'), 'candidates': result.get('candidates', []), 'model_configuration': model_configuration, **{k: v for k, v in result.items()
+            metadata = {'intent': intent, 'grounding': result.get('grounding'), 'dialogue_events': result.get('dialogue_events'), 'candidates': result.get('candidates', []), 'source_details': result.get('source_details', []), 'model_configuration': model_configuration, **{k: v for k, v in result.items()
                 if k.startswith('learning_exposure')}}
             with self.ws.conn:
                 self.ws.conn.execute('UPDATE messages SET metadata=? WHERE id=?',

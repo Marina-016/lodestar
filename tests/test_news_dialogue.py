@@ -53,14 +53,13 @@ class NewsDialogueTests(unittest.TestCase):
         self.assertEqual(tool.call_count, 2)
         self.assertEqual(context['papers'], [])  # snippets never become read evidence
 
-    def test_empty_primary_web_search_uses_independent_web_fallback(self):
+    def test_empty_web_search_stays_empty_without_unverified_fallback(self):
         self.ws.config.search_mode = 'live'
-        with patch('lodestar.tools.web_search._search_duckduckgo', return_value=([], 'empty')), patch(
-                'lodestar.tools.web_search._search_bing', return_value=[{'url': 'https://example.com'}]) as fallback:
+        with patch('lodestar.tools.web_search._search_duckduckgo', return_value=([], 'empty')):
             result = tool_search_web(self.ws, 'AI news')
-        fallback.assert_called_once()
-        self.assertEqual(result['fallback'], 'bing')
-        self.assertEqual(len(result['sources']), 1)
+        self.assertEqual(result['sources'], [])
+        self.assertNotIn('fallback', result)
+        self.assertNotIn('error', result)
 
     def test_news_answer_receives_clock_and_actual_source_errors(self):
         text = '当前来源请求失败，无法确认今天的消息。'

@@ -3,6 +3,8 @@
 
 def anthropic_options(config, *, structured=False, max_tokens=None):
     from lodestar.llm import LLMError
+    if not structured and config.llm_thinking_mode == 'default':
+        return {}
     if structured or not config.llm_thinking:
         return {'thinking': {'type': 'disabled'}, 'extra_body': {'temperature': config.temperature}}
     if config.llm_thinking_mode == 'adaptive':
@@ -24,8 +26,15 @@ def anthropic_options(config, *, structured=False, max_tokens=None):
 
 def dashscope_options(config, *, structured=False):
     from lodestar.llm import LLMError
+    if not structured and config.llm_thinking_mode == 'default':
+        return {}
     if structured or not config.llm_thinking:
         return {'enable_thinking': False}
+    if config.llm_thinking_mode == 'effort':
+        from lodestar.providers.capabilities import reasoning_choices
+        if config.llm_reasoning_effort not in reasoning_choices(config)['efforts']:
+            raise LLMError('Unsupported reasoning effort for this model', code='configuration')
+        return {'enable_thinking': True, 'reasoning_effort': config.llm_reasoning_effort}
     if config.llm_thinking_mode != 'enabled':
-        raise LLMError('DashScope requires enable_thinking with a thinking budget', code='configuration')
+        raise LLMError('Unsupported DashScope thinking mode', code='configuration')
     return {'enable_thinking': True, 'thinking_budget': config.llm_thinking_budget}

@@ -16,6 +16,29 @@ class DashScopeClient:
             raise ValueError('DashScope requires an official HTTPS endpoint')
         self.usage = []
 
+    def list_models(self):
+        """Read the official catalog, without inference or search charges."""
+        parts = urlsplit(self.base_url)
+        url = parts.scheme + '://' + parts.netloc + '/api/v1/models'
+        models = []
+        for page in (1, 2, 3):
+            response = requests.get(url, headers={'Authorization': 'Bearer ' + self.key},
+                params={'capabilities': 'TG', 'page_size': 100, 'page_no': page},
+                timeout=min(10, self.config.llm_timeout_s))
+            if not response.ok:
+                raise ValueError(f'Model catalog HTTP {response.status_code}')
+            data = response.json()
+            if data.get('success') is False or not isinstance(data.get('output'), dict):
+                raise ValueError('Invalid model catalog response')
+            output = data['output']
+            batch = output.get('models', [])
+            models.extend(m['model'] for m in batch if isinstance(m, dict) and isinstance(m.get('model'), str))
+            if not batch or page * 100 >= output.get('total', page * 100):
+                break
+        if not models:
+            raise ValueError('Model catalog returned no valid model IDs')
+        return list(dict.fromkeys(models))
+
     def complete(self, role, model, system, user, max_tokens, *, json_mode=False):
         payload = {'model': model, 'messages': [{'role': 'system', 'content': system},
                     {'role': 'user', 'content': user}], 'max_tokens': max_tokens,

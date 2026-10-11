@@ -170,7 +170,7 @@ class SmokeTestCase(unittest.TestCase):
         self.assertEqual(get_executor("codex").name, "codex")
         with patch('lodestar.build.executor.shutil.which', return_value='synthetic-cli'):
             self.assertEqual(get_executor("auto").name, 'claude')
-        with patch('lodestar.build.executor.shutil.which', side_effect=lambda binary: 'synthetic-cli' if binary == 'codex' else None):
+        with patch('lodestar.build.executor.shutil.which', side_effect=lambda binary, **kwargs: 'synthetic-cli' if binary == 'codex' else None):
             self.assertEqual(get_executor("auto").name, 'codex')
         with patch('lodestar.build.executor.shutil.which', return_value=None):
             with self.assertRaises(RuntimeError):

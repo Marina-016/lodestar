@@ -9,6 +9,7 @@ import json
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -167,7 +168,13 @@ class SmokeTestCase(unittest.TestCase):
         from lodestar.build import get_executor
         self.assertEqual(get_executor("claude").name, "claude")
         self.assertEqual(get_executor("codex").name, "codex")
-        self.assertEqual(get_executor("auto").name, get_executor("auto").name)
+        with patch('lodestar.build.executor.shutil.which', return_value='synthetic-cli'):
+            self.assertEqual(get_executor("auto").name, 'claude')
+        with patch('lodestar.build.executor.shutil.which', side_effect=lambda binary: 'synthetic-cli' if binary == 'codex' else None):
+            self.assertEqual(get_executor("auto").name, 'codex')
+        with patch('lodestar.build.executor.shutil.which', return_value=None):
+            with self.assertRaises(RuntimeError):
+                get_executor('auto')
         with self.assertRaises(ValueError):
             get_executor("bogus")
 

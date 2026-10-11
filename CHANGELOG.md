@@ -26,6 +26,7 @@
 - Prevented background tasks from bypassing personal-memory restrictions by supplying another scope.
 - Separated answer citations from unused retrieval records, preserved distinct arXiv versions and bounded historical provenance to earlier messages.
 - Preserved safe terminal errors after refresh without exposing provider exception bodies.
+- Made the executor-resolution smoke test independent of locally installed coding CLIs; it now covers both available choices and the missing-CLI error.
 - Avoided unchanged task-list rebuilds and removed hidden mobile navigation from keyboard/accessibility navigation.
 - Reported public search challenge/transport failures explicitly and removed an irrelevant Bing RSS fallback.
 

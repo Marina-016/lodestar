@@ -1,5 +1,6 @@
 import { escape as esc, markdown, safeUrl } from "./markdown.mjs";
 import { sourceGroups } from "./sources.mjs";
+import { actionHTML } from "./actions.mjs";
 const $ = (s) => document.querySelector(s),
   icon = (name) => `<svg aria-hidden="true"><use href="#i-${name}"/></svg>`;
 const token = $('meta[name="lodestar-token"]').content;
@@ -110,6 +111,7 @@ function renderMessages() {
             m.metadata?.model_configuration,
             m.kind === "error",
             m.id,
+            m.metadata?.action_receipts,
           ),
     )
     .join("");
@@ -123,11 +125,11 @@ function renderMessages() {
       ? "发现值得读的论文，理解新方法，<br class=\"mobile-break\">把想法带到正在做的项目中。"
       : "从第一个问题开始，围绕这个课题积累资料、讨论和记忆。";
 }
-function assistant(text, config, error = false, id = "draft") {
+function assistant(text, config, error = false, id = "draft", receipts) {
   const count = id === "draft" ? 0 : sourcesFor(id).references.length;
   const answer = text ? markdown(text) : '<div class="typing-dots" aria-hidden="true"><span></span><span></span><span></span></div>';
   const actions = id === "draft" ? "" : `<div class="message-actions"><button class="subtle copy-answer" data-id="${id}" title="复制完整回答">${icon("copy")}<span>复制</span></button><button class="subtle inspect-answer" data-id="${id}" title="查看本轮来源与上下文">${icon("paper")}<span>来源与上下文</span>${count ? `<span class="source-count">${count}</span>` : ""}</button></div>`;
-  return `<article class="message message-assistant ${error ? "message-error" : ""}" data-message="${id}"><div class="assistant-meta"><span class="assistant-mark">${icon("star")}</span><span>Lodestar</span><small>${esc(config?.model || state.configuration.model)}</small></div><div class="answer">${answer}</div>${actions}</article>`;
+  return `<article class="message message-assistant ${error ? "message-error" : ""}" data-message="${id}"><div class="assistant-meta"><span class="assistant-mark">${icon("star")}</span><span>Lodestar</span><small>${esc(config?.model || state.configuration.model)}</small></div><div class="answer">${answer}</div><div class="execution">${actionHTML(receipts, { pending: id === "draft" })}</div>${actions}</article>`;
 }
 function render() {
   $("#space-name").textContent = state.item.name;
@@ -200,10 +202,11 @@ function startPoll(run) {
   $("#messages").hidden = false;
   let after = 0,
     text = "",
+    receipts = [],
     epoch = generation;
   $("#messages").insertAdjacentHTML(
     "beforeend",
-    assistant("", JSON.parse(run.config), false),
+    assistant("", JSON.parse(run.config), false, "draft", []),
   );
   setStatus(run.status === "cancelling" ? "正在停止，等待当前请求返回…" : "正在理解问题…", true);
   scrollBottom(true);
@@ -224,6 +227,10 @@ function startPoll(run) {
           const el = $('[data-message="draft"] .answer');
           if (el) el.innerHTML = markdown(text);
           setStatus("正在回答…", true);
+        } else if (event.kind === "action") {
+          receipts.push(event.data);
+          const el = $('[data-message="draft"] .execution');
+          if (el) el.innerHTML = actionHTML(receipts, { pending: true });
         } else if (event.kind === "progress")
           setStatus((labels[event.data] || "正在准备资料") + "…", true);
       }
@@ -636,6 +643,7 @@ $("#drawer-content").onclick = async (e) => {
 $("#messages").onclick = async (e) => {
   const b = e.target.closest("button");
   if (!b) return;
+  if (b.dataset.receiptItem) return load(b.dataset.receiptItem);
   const message = state.messages.find((m) => String(m.id) === b.dataset.id);
   if (b.classList.contains("copy-answer")) {
     try {

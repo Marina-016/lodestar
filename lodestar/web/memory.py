@@ -22,6 +22,9 @@ def initialize(ws):
         if name not in columns:
             ws.conn.execute(f'ALTER TABLE web_items ADD COLUMN {name} {declaration}')
     ws.conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS web_dispatch_key ON web_items(dispatch_key) WHERE dispatch_key IS NOT NULL')
+    run_columns = {r['name'] for r in ws.conn.execute('PRAGMA table_info(web_runs)')}
+    if 'policy' not in run_columns:
+        ws.conn.execute("ALTER TABLE web_runs ADD COLUMN policy TEXT NOT NULL DEFAULT '{}'")
     ws.conn.execute('CREATE TABLE IF NOT EXISTS web_migrations(name TEXT PRIMARY KEY)')
     ws.conn.execute("UPDATE web_items SET name='主对话' WHERE id='main' AND name='主空间'")
     if ws.conn.execute("SELECT 1 FROM web_migrations WHERE name='shared_memory_v1'").fetchone():

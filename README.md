@@ -67,12 +67,12 @@ Web 数据保存在被 Git 忽略的 workspace/web/web.db，与 CLI 研究数据
 
 ~~~powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -q
-node --test tests/web_sources.test.mjs
+node --test tests/web_sources.test.mjs tests/web_actions.test.mjs
 node --check lodestar/web/static/app.mjs
 .\.venv\Scripts\python.exe scripts/preflight_public_release.py
 ~~~
 
-最新证据和未通过项见 [V0 发布验收](docs/v0-release-check.md)。离线回归覆盖任务并发/取消/恢复、共享记忆、范围隔离、旧数据迁移、遗忘后的实际模型载荷、模型参数、来源与 HTTP 边界；绿色测试不代表模型事实质量已普遍通过。
+最新证据和未通过项见 [10-15 续检](docs/v0-live-review-20261015.md)，历史功能验收见 [V0 发布验收](docs/v0-release-check.md)。本轮完整 334 项离线、14 项前端通过；本机测试使用进程内 WMI 系统信息降级及项目临时目录，环境失败另行保留。新增约束交接、真实动作回执及流内错误识别；绿色测试不代表模型语义或服务可靠性已全部通过。
 
 - [产品逻辑与系统架构](docs/agent-prd.md)
 - [Web 使用与数据说明](docs/web-ui.md)

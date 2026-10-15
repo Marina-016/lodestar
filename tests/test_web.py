@@ -197,6 +197,9 @@ class WebTest(unittest.TestCase):
             good=client.post(url+'/api/items',json={'name':'A'},headers={'X-Lodestar-Token':self.app.token},timeout=3)
             self.assertEqual(good.status_code,201)
             self.assertEqual(client.get(url+'/style.css',timeout=3).status_code,200)
+            actions = client.get(url+'/actions.mjs',timeout=3)
+            self.assertEqual(actions.status_code,200)
+            self.assertIn('javascript',actions.headers['Content-Type'])
         finally:
             client.close();server.shutdown();server.server_close();worker.join()
 

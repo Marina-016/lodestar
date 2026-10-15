@@ -1,9 +1,63 @@
 """Native tool dialogue transport. Messages use Anthropic's block representation."""
+import importlib
 import json
 
 import requests
 
 from lodestar.providers.reasoning import anthropic_options, dashscope_options
+
+
+def _guard_sse_errors(response):
+    """Surface data-only error envelopes that event-name-based SDKs ignore.
+
+    Inspect bounded SSE event data, not model text; never change successful
+    bytes, retain upstream bodies, retry, or infer a specific service cause.
+    """
+    content_type = response.headers.get('content-type', '') if response is not None else ''
+    if not isinstance(content_type, str) or content_type.split(';')[0].strip() != 'text/event-stream':
+        return
+    from lodestar.llm import LLMError
+    http = importlib.import_module(type(response).__module__.split('.')[0])
+    original = response.stream
+
+    class GuardedStream(http.SyncByteStream):
+        def __iter__(self):
+            pending, data, size, oversized = b'', [], 0, False
+
+            def line(value):
+                nonlocal data, size, oversized
+                if not value.strip():
+                    if data and not oversized:
+                        try:
+                            event = json.loads(b'\n'.join(data))
+                        except (ValueError, UnicodeError):
+                            event = None
+                        if isinstance(event, dict) and event.get('type') == 'error':
+                            raise LLMError('Provider returned an error in its response stream', code='upstream_stream_error')
+                    data, size, oversized = [], 0, False
+                elif value.startswith(b'data:') and not oversized:
+                    size += len(value)
+                    if size > 65536:
+                        data, oversized = [], True
+                    else:
+                        data.append(value[5:].lstrip(b' '))
+
+            for chunk in original:
+                # Let the SDK deliver preceding text from this same chunk first.
+                yield chunk
+                pending += chunk
+                while b'\n' in pending:
+                    value, pending = pending.split(b'\n', 1)
+                    line(value.rstrip(b'\r'))
+                if len(pending) > 65536:
+                    pending, data, oversized = b'', [], True
+            if pending:
+                line(pending.rstrip(b'\r'))
+            line(b'')  # Also handle a final valid error envelope without a blank line.
+
+        def close(self):
+            original.close()
+    response.stream = GuardedStream()
 
 
 def step(client, system, messages, tools, on_text=None):
@@ -17,10 +71,17 @@ def step(client, system, messages, tools, on_text=None):
                 model=client.model, max_tokens=client.config.max_tokens,
                 system=system, messages=messages,
                 **options) as stream:
+            _guard_sse_errors(getattr(stream, 'response', None))
             for text in stream.text_stream:
                 if on_text:
                     on_text(text)
-            response = stream.get_final_message()
+            try:
+                response = stream.get_final_message()
+            except AssertionError as error:
+                # The SDK asserts when a compatible endpoint closes without any
+                # recognized message. This is an incomplete transport, not a
+                # successful answer or a generic harness decision failure.
+                raise LLMError('Dialogue stream ended without a final message', code='stream_interrupted') from error
         if response.stop_reason == 'max_tokens':
             raise LLMError('Dialogue output truncated', code='truncated')
         if response.stop_reason not in ('end_turn', 'tool_use', 'stop_sequence'):

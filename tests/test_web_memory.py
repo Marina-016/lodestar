@@ -133,7 +133,7 @@ class SharedMemoryTest(unittest.TestCase):
                 with lock:
                     calls.append(text)
                 if 'DISPATCH_TWO' in text and self.steps == 1:
-                    return {'role': 'assistant', 'content': [{'type': 'tool_use', 'id': name, 'name': 'create_task', 'input': {'name': name, 'instruction': 'Research ' + name}} for name in ('Harness', 'RAG')]}
+                    return {'role': 'assistant', 'content': [{'type': 'tool_use', 'id': name, 'name': 'create_task', 'input': {'name': name, 'instruction': 'Research ' + name, 'constraints': [], 'external_retrieval': 'allowed'}} for name in ('Harness', 'RAG')]}
                 answer = 'Research complete' if 'DISPATCH_TWO' not in text else 'Two tasks started'
                 if on_text: on_text(answer)
                 return {'role': 'assistant', 'content': [{'type': 'text', 'text': answer}]}
@@ -149,6 +149,124 @@ class SharedMemoryTest(unittest.TestCase):
             self.assertEqual(task['parent_id'], 'main')
         self.assertTrue(all('SHARED_RESEARCH_PREFERENCE' in c for c in calls))
         self.assertEqual(self.app.state()['learning'], [])
+
+    def test_constraint_handoff_is_source_bound_without_parent_transcript_or_unselected_text(self):
+        self.context('main', 'PRIVATE_PARENT_HISTORY')
+        captured = []
+        class Scripted(FakeLLM):
+            def __init__(self, cfg):
+                super().__init__(cfg)
+                self.steps = 0
+            def dialogue_step(self, system, messages, tools, on_text=None):
+                self.steps += 1
+                captured.append((system, json.dumps(messages, ensure_ascii=False)))
+                if any(t['name'] == 'create_task' for t in tools) and self.steps == 1:
+                    return {'role': 'assistant', 'content': [{'type': 'tool_use', 'id': 'dispatch', 'name': 'create_task', 'input': {
+                        'name': 'Harness', 'instruction': 'Explain agent harness mechanisms from existing knowledge.',
+                        'constraints': ['本轮不要联网', '不要记成已学会'], 'external_retrieval': 'blocked'}}]}
+                if 'Host execution policy' in system and self.steps == 1:
+                    return {'role': 'assistant', 'content': [{'type': 'tool_use', 'id': 'forbidden', 'name': 'search_web', 'input': {'query': 'agent harness'}}]}
+                return {'role': 'assistant', 'content': [{'type': 'text', 'text': 'Explanation; unverified details remain open.'}]}
+        self.app.llm_factory = Scripted
+        with patch('lodestar.tools.registry.call_tool') as external:
+            parent = self.wait(self.app.submit('main', '派发 Harness。本轮不要联网，不要记成已学会。PRIVATE_UNSELECTED_CURRENT', 'handoff'))
+            task = next(t for t in self.app.state()['items'] if t['id'] != 'main')
+            child = self.wait(self.app.state(task['id'])['run']['id'])
+        external.assert_not_called()
+        policy = json.loads(child['run']['policy'])
+        self.assertEqual(policy['external_retrieval'], 'blocked')
+        self.assertEqual(policy['parent_run_id'], parent['run']['id'])
+        with self.app.workspace() as ws:
+            source = ws.conn.execute('SELECT content FROM messages WHERE id=?', (policy['source_message_id'],)).fetchone()
+        self.assertIn('本轮不要联网', source['content'])
+        children = [packet for system, packet in captured if 'Host execution policy' in system]
+        self.assertTrue(children)
+        self.assertTrue(all('本轮不要联网' in p and '不要记成已学会' in p for p in children))
+        self.assertTrue(all('PRIVATE_PARENT_HISTORY' not in p and 'PRIVATE_UNSELECTED_CURRENT' not in p for p in children))
+        self.assertEqual(self.app.state()['learning'], [])
+        receipts = self.app.state()['messages'][-1]['metadata']['action_receipts']
+        self.assertEqual(len(receipts), 1)
+        self.assertEqual(receipts[0]['run_id'], child['run']['id'])
+        with self.app.workspace() as ws:
+            tools = assistant_tools(self.app, self.app.item(ws, 'main'), 'not-a-run', '新的派发请求', lambda: None)
+        with self.assertRaises(ValueError):
+            tools['create_task']['handler']({'name': 'Wrong', 'instruction': 'Read', 'constraints': ['PRIVATE_PARENT_HISTORY'], 'external_retrieval': 'blocked'})
+        self.assertEqual(len(self.app.state()['items']), 2)
+
+    def test_prose_only_claim_never_creates_a_host_receipt(self):
+        class Prose(FakeLLM):
+            def dialogue_step(self, *args, **kwargs):
+                return {'role': 'assistant', 'content': [{'type': 'text', 'text': '任务已派发，记忆已保存。'}]}
+        self.app.llm_factory = Prose
+        result = self.wait(self.app.submit('main', '派发研究并记住偏好', 'prose-only'))
+        self.assertEqual(json.loads(result['run']['result'])['action_receipts'], [])
+        self.assertEqual(self.app.state()['messages'][-1]['metadata']['action_receipts'], [])
+        self.assertEqual(len(self.app.state()['items']), 1)
+        self.assertEqual(self.app.state()['notes'], [])
+        self.assertEqual(self.app.state()['messages'][-1]['content'], '任务已派发，记忆已保存。')
+
+    def test_partial_dispatch_receipt_survives_failure_and_exact_receipts_deduplicate(self):
+        with self.app.workspace() as ws, ws.conn:
+            ws.conn.execute("INSERT INTO web_runs(id,item_id,request_key,status,message,config) VALUES('parent','main','parent','running','Delegate','{}')")
+            tools = assistant_tools(self.app, self.app.item(ws, 'main'), 'parent', 'Delegate', lambda: None)
+        with patch.object(self.app, 'submit', side_effect=ValueError('Submit failed')):
+            with self.assertRaises(ValueError):
+                tools['create_task']['handler']({'name': 'Harness', 'instruction': 'Research', 'constraints': [], 'external_retrieval': 'allowed'})
+        with self.app.workspace() as ws, ws.conn:
+            receipts = self.app.action_receipts(ws, 'parent')
+            self.assertEqual(receipts[0]['status'], 'created_not_submitted')
+            self.assertNotIn('run_id', receipts[0])
+            self.app.record_action(ws, 'parent', receipts[0])
+            self.assertEqual(len(self.app.action_receipts(ws, 'parent')), 1)
+        task = next(t for t in self.app.state()['items'] if t['id'] != 'main')
+        self.assertIsNone(self.app.state(task['id'])['run'])
+
+    def test_receipts_survive_parent_stream_error_after_dispatch(self):
+        class Interrupted(FakeLLM):
+            def __init__(self, cfg):
+                super().__init__(cfg)
+                self.steps = 0
+            def dialogue_step(self, system, messages, tools, on_text=None):
+                from lodestar.llm import LLMError
+                self.steps += 1
+                if any(t['name'] == 'create_task' for t in tools):
+                    if self.steps == 1:
+                        return {'role': 'assistant', 'content': [{'type': 'tool_use', 'id': 'dispatch', 'name': 'create_task', 'input': {
+                            'name': 'Harness', 'instruction': 'Explain agent harness', 'constraints': [], 'external_retrieval': 'blocked'}}]}
+                    raise LLMError('Empty stream', code='stream_interrupted')
+                return {'role': 'assistant', 'content': [{'type': 'text', 'text': 'Research output'}]}
+        self.app.llm_factory = Interrupted
+        result = self.wait(self.app.submit('main', 'Delegate harness', 'dispatch-stream-error'))
+        self.assertEqual(result['run']['status'], 'error')
+        receipts = self.app.state()['messages'][-1]['metadata']['action_receipts']
+        self.assertEqual(len(receipts), 1)
+        child = self.wait(receipts[0]['run_id'])
+        self.assertEqual(child['run']['status'], 'completed')
+        reopened = WebApp(self.config, llm_factory=FakeLLM)
+        self.assertEqual(reopened.state()['messages'][-1]['metadata']['action_receipts'], receipts)
+
+    def test_memory_receipts_contain_ids_and_revisions_not_forgotten_content(self):
+        class Memory(FakeLLM):
+            def __init__(self, cfg):
+                self.steps = 0
+            def dialogue_step(self, system, messages, tools, on_text=None):
+                self.steps += 1
+                if self.steps == 1:
+                    args = {'action': 'save', 'content': 'PRIVATE_MEMORY_CANARY'}
+                elif self.steps == 2:
+                    saved = json.loads(messages[-1]['content'][0]['content'])
+                    args = {'action': 'forget', 'id': saved['id']}
+                else:
+                    return {'role': 'assistant', 'content': [{'type': 'text', 'text': 'Saved then forgotten.'}]}
+                return {'role': 'assistant', 'content': [{'type': 'tool_use', 'id': str(self.steps), 'name': 'manage_memory', 'input': args}]}
+        self.app.llm_factory = Memory
+        result = self.wait(self.app.submit('main', 'Remember then forget a synthetic preference', 'memory-receipts'))
+        self.assertEqual(result['run']['status'], 'completed')
+        receipts = self.app.state()['messages'][-1]['metadata']['action_receipts']
+        self.assertEqual([r['operation'] for r in receipts], ['save', 'forget'])
+        self.assertEqual(receipts[0]['id'], receipts[1]['id'])
+        self.assertNotIn('PRIVATE_MEMORY_CANARY', json.dumps(receipts))
+        self.assertEqual(self.app.state()['notes'], [])
 
     def test_forget_tool_clears_live_and_reserved_answer_context(self):
         self.app.note('main', {'content': 'FORGOTTEN_CANARY'})

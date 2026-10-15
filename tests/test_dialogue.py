@@ -39,6 +39,29 @@ class DialogueTests(unittest.TestCase):
     def run_dialogue(self, **kwargs):
         return gather(self.ws, self.llm, kwargs.pop('context', {'message': '研究这个方向', 'papers': []}), **kwargs)
 
+    def test_blocked_retrieval_is_hidden_and_rejected_even_if_gateway_requests_it(self):
+        from lodestar.agent.dialogue import EXTERNAL_RETRIEVAL_TOOLS
+        self.llm.dialogue_step.side_effect = [calls(*[
+            {'action': name, **({'url': 'https://example.test/paper'} if name.startswith(('read_', 'verify_')) else {'query': 'agents'})}
+            for name in sorted(EXTERNAL_RETRIEVAL_TOOLS)]), answer('Existing knowledge; needs verification.')]
+        with patch('lodestar.tools.registry.call_tool') as tool, patch('lodestar.agent.dialogue.verify_publication') as verify:
+            result = self.run_dialogue(max_calls=6, execution_policy={'external_retrieval': 'blocked'})
+        tool.assert_not_called()
+        verify.assert_not_called()
+        self.assertEqual(result['grounding']['tool_dispatches'], 0)
+        self.assertTrue(all(not e['executed'] and 'blocked' in e['result']['error'] for e in result['dialogue_events']))
+        for call in self.llm.dialogue_step.call_args_list:
+            self.assertIn('external retrieval is blocked', call.args[0])
+            self.assertFalse(EXTERNAL_RETRIEVAL_TOOLS & {d['name'] for d in call.args[2]})
+        self.assertEqual(result['execution_policy']['external_retrieval'], 'blocked')
+
+    def test_blocked_policy_cannot_bypass_dialogue_via_explicit_research_or_plan(self):
+        agent = ConversationAgent(self.ws, self.llm)
+        for intent in ('research', 'plan'):
+            with self.assertRaises(ValueError):
+                agent.turn(agent.start(), 'Research', intent=intent, execution_policy={'external_retrieval': 'blocked'})
+        self.llm.dialogue_step.assert_not_called()
+
     def test_direct_answers_without_json_planner_or_generator(self):
         for question, text in [('你好', '你好！'), ('Translate 缓存', 'Cache.'),
                                ('Python 示例', '~~~python\nprint(1)\n~~~')]:
@@ -202,10 +225,72 @@ class DialogueTests(unittest.TestCase):
         self.llm.dialogue_step.return_value = calls({'action': 'search_web', 'query': 'retry'})
         with patch('lodestar.tools.registry.call_tool', return_value={'sources': []}) as tool:
             result = self.run_dialogue(max_calls=2)
-        self.assertEqual(tool.call_count, 2)
+        self.assertEqual(tool.call_count, 1)
         self.assertEqual(self.llm.dialogue_step.call_count, 3)
         self.assertEqual(result['grounding']['completion_mode'], 'evidence_fallback')
         self.assertIn('未获得可用证据', result['answer'])
+
+    def test_duplicate_empty_search_reports_no_new_evidence_and_keeps_budget_bounded(self):
+        self.llm.dialogue_step.side_effect = [calls({'action': 'search_papers', 'query': 'literal'}),
+            calls({'action': 'search_papers', 'query': 'literal'}), answer()]
+        progress = []
+        with patch('lodestar.tools.registry.call_tool', return_value={'sources': []}) as tool:
+            result = self.run_dialogue(max_calls=2, on_progress=progress.append)
+        tool.assert_called_once()
+        self.assertEqual(progress, ['search_papers'])
+        self.assertEqual(result['grounding']['search_operations'], 2)
+        self.assertEqual(result['grounding']['tool_dispatches'], 1)
+        self.assertEqual(result['grounding']['duplicate_requests'], 1)
+        repeated = result['dialogue_events'][1]
+        self.assertFalse(repeated['executed'])
+        self.assertEqual(repeated['result']['repeat_of'], 0)
+        final_packet = self.llm.dialogue_step.call_args.args[1][0]['content']
+        self.assertIn('repeat_of', final_packet)
+        self.assertIn('not another independent search', final_packet)
+
+    def test_different_queries_and_failed_or_partial_results_are_not_suppressed(self):
+        for first in ({'sources': [], 'error': 'transient'}, {'sources': [], 'partial': True}):
+            self.llm.dialogue_step.side_effect = [calls({'action': 'search_papers', 'query': 'first'}),
+                calls({'action': 'search_papers', 'query': 'first'}),
+                calls({'action': 'search_papers', 'query': 'different'}), answer()]
+            with patch('lodestar.tools.registry.call_tool', side_effect=[first, {'sources': []}, {'sources': []}]) as tool:
+                result = self.run_dialogue()
+            self.assertEqual(tool.call_count, 3)
+            self.assertEqual(result['grounding']['duplicate_requests'], 0)
+
+    def test_duplicate_batch_charges_attempt_budget_without_executing_again(self):
+        operation = {'action': 'search_papers', 'queries': ['first', 'second']}
+        self.llm.dialogue_step.side_effect = [calls(operation), calls(operation), answer()]
+        with patch('lodestar.tools.registry.call_tool', return_value={'sources': []}) as tool:
+            result = self.run_dialogue(max_calls=4)
+        tool.assert_called_once()
+        self.assertEqual(result['grounding']['search_operations'], 4)
+        self.assertEqual(result['dialogue_events'][1]['cost'], 2)
+
+    def test_full_text_downgrade_can_retry_instead_of_being_cached_as_success(self):
+        url = 'https://paper'
+        operation = {'action': 'read_paper', 'url': url, 'full_text': True}
+        self.llm.dialogue_step.side_effect = [calls(operation), calls(operation), answer()]
+        with patch('lodestar.tools.registry.call_tool', side_effect=[
+                {'text': 'Fallback abstract', 'read_depth': 'abstract', 'full_text_ok': False},
+                {'text': 'Retrieved body', 'read_depth': 'full'}]) as tool:
+            result = self.run_dialogue(context={'message': '读正文', 'papers': [{'url': url}]})
+        self.assertEqual(tool.call_count, 2)
+        self.assertEqual(result['papers'][0]['content'], 'Retrieved body')
+        self.assertEqual(result['grounding']['duplicate_requests'], 0)
+
+    def test_memory_reset_retires_retrieval_cache(self):
+        self.llm.dialogue_step.side_effect = [calls({'action': 'search_web', 'query': 'topic'}),
+            calls({'action': 'manage_memory', 'action_name': 'forget'}),
+            calls({'action': 'search_web', 'query': 'topic'}), answer()]
+        extra = {'manage_memory': {'description': 'Update memory', 'input_schema': {
+            'type': 'object', 'properties': {'action_name': {'type': 'string'}},
+            'required': ['action_name'], 'additionalProperties': False},
+            'handler': lambda _: {'context_reset': True, 'managed_memory': []}}}
+        with patch('lodestar.tools.registry.call_tool', return_value={'sources': []}) as tool:
+            result = self.run_dialogue(extra_tools=extra)
+        self.assertEqual(tool.call_count, 2)
+        self.assertEqual(result['grounding']['duplicate_requests'], 0)
 
     def test_independent_queries_count_against_operation_budget(self):
         self.llm.dialogue_step.side_effect = [

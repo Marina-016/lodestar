@@ -83,6 +83,7 @@ class ConversationAgent:
             reason = {'invalid_json': '模型返回的结构化数据格式无效，自动修复后仍未成功',
                       'timeout': '模型服务响应超时', 'connection': '无法连接模型服务',
                       'stream_interrupted': '流式连接中断，回答尚未完成',
+                      'upstream_stream_error': '模型服务在响应流内返回错误，回答尚未完成',
                       'truncated': '达到输出长度限制，回答尚未完成',
                       'tool_budget': '工具调用预算已耗尽，模型未完成回答',
                       'authentication': '模型服务鉴权失败', 'rate_limit': '模型服务限流',
@@ -108,7 +109,7 @@ class ConversationAgent:
 
     def _turn(self, conversation_id, message, *, user_id='default', intent='auto',
              technology=None, method='', feedback='discussed', days=7, on_text=None, on_progress=None, memory_notes=None, check_cancel=None,
-             assistant_tools=None, history_after=0, track_exposure=True):
+             assistant_tools=None, history_after=0, track_exposure=True, execution_policy=None):
         session = self._session(conversation_id, user_id)
         if not message.strip():
             raise ValueError('message is required')
@@ -119,6 +120,8 @@ class ConversationAgent:
             intent = 'followup'
         if intent not in {'research', 'followup', 'plan', 'feedback'}:
             raise ValueError('unsupported intent')
+        if (execution_policy or {}).get('external_retrieval') == 'blocked' and intent in {'research', 'plan'}:
+            raise ValueError('Use model-led dialogue for runs with blocked external retrieval')
         if intent == 'feedback' and (not technology or feedback not in {'discussed', 'self_report', 'attempted'}):
             raise ValueError('feedback requires a technology and a non-mastery observation')
         if intent == 'plan' and session['project_id'] is None:
@@ -202,6 +205,7 @@ class ConversationAgent:
                 from lodestar.agent.dialogue import gather
                 context = gather(self.ws, self.llm, context, session['project_id'],
                                  on_progress=on_progress, on_text=on_text, check_cancel=check_cancel,
+                                 **({'execution_policy': execution_policy} if execution_policy else {}),
                                  **({'extra_tools': assistant_tools} if assistant_tools else {}))
                 events = context.pop('dialogue_events')
                 sources = context['papers']

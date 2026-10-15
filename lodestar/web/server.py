@@ -213,7 +213,7 @@ class WebApp:
         with self.lock, self.workspace() as ws, ws.conn:
             memory.edit_learning(ws, data)
 
-    def submit(self, item_id, message, key, *, background=False):
+    def submit(self, item_id, message, key, *, background=False, policy=None):
         if not isinstance(message, str) or not message.strip() or len(message) > 24000:
             raise ValueError('请输入 1–24000 字的问题')
         if not isinstance(key, str) or not 1 <= len(key) <= 100:
@@ -231,8 +231,8 @@ class WebApp:
             if cfg.model_calls_disabled and cfg.llm_mode != 'mock':
                 raise Conflict('模型调用已暂停，请在模型设置中启用后发送')
             run_id = uuid.uuid4().hex
-            ws.conn.execute('INSERT INTO web_runs(id,item_id,request_key,status,message,config) VALUES(?,?,?,?,?,?)',
-                            (run_id,item_id,key,'queued',message,json.dumps(snapshot(cfg))))
+            ws.conn.execute('INSERT INTO web_runs(id,item_id,request_key,status,message,config,policy) VALUES(?,?,?,?,?,?,?)',
+                            (run_id,item_id,key,'queued',message,json.dumps(snapshot(cfg)),json.dumps(policy or {},ensure_ascii=False)))
             signal = self.cancel_signals[run_id] = threading.Event()
         threading.Thread(target=self.execute, args=(run_id,item,cfg,message,signal,background), daemon=True).start()
         return run_id
@@ -260,6 +260,23 @@ class WebApp:
             if not inserted.rowcount:
                 raise LLMError('Run is no longer accepting events', code='cancelled', role='conversation')
 
+    def record_action(self, ws, run_id, receipt):
+        """Host-only facts, retained even if cancellation follows a committed effect.
+
+        Call in the mutation's transaction when possible. Never store memory text
+        here: forgetting a memory must not leave another copy in action history.
+        """
+        data = json.dumps(receipt, ensure_ascii=False, sort_keys=True)
+        ws.conn.execute("INSERT INTO web_events(run_id,kind,data) SELECT ?,'action',? WHERE EXISTS "
+            "(SELECT 1 FROM web_runs WHERE id=?) AND NOT EXISTS "
+            "(SELECT 1 FROM web_events WHERE run_id=? AND kind='action' AND data=?)",
+            (run_id,data,run_id,run_id,data))
+
+    @staticmethod
+    def action_receipts(ws, run_id):
+        return [json.loads(r['data']) for r in ws.conn.execute(
+            "SELECT data FROM web_events WHERE run_id=? AND kind='action' ORDER BY id", (run_id,))]
+
     def execute(self, run_id, item, cfg, message, signal, background=False):
         def check_cancel():
             if signal.is_set():
@@ -269,10 +286,11 @@ class WebApp:
             llm = None
             try:
                 with self.lock, ws.conn:
-                    row = ws.conn.execute('SELECT status FROM web_runs WHERE id=?', (run_id,)).fetchone()
+                    row = ws.conn.execute('SELECT status,policy FROM web_runs WHERE id=?', (run_id,)).fetchone()
                     if row['status'] not in ('queued','cancelling'):
                         return
                     ws.conn.execute("UPDATE web_runs SET status='running' WHERE id=? AND status='queued'", (run_id,))
+                policy = json.loads(row['policy'])
                 # A queued cancellation still records its input and stopped answer,
                 # but never constructs a provider client or starts inference.
                 llm = None if signal.is_set() else self.llm_factory(cfg)
@@ -283,16 +301,19 @@ class WebApp:
                 result = self.agent_factory(ws,llm).turn(item['conversation_id'],message,
                     user_id=self.user(item['id']), memory_notes=notes, check_cancel=check_cancel,
                     history_after=item['context_after'], track_exposure=not background,
-                    assistant_tools=assistant_tools(self, item, run_id, message, check_cancel, user_authored=not background),
+                    execution_policy=policy,
+                    assistant_tools=assistant_tools(self, item, run_id, message, check_cancel, user_authored=not background, execution_policy=policy),
                     on_text=lambda text: self.event(ws,run_id,'text',text),
                     on_progress=lambda action: self.event(ws,run_id,'progress',action))
                 scope = {'item_id': item['id'], 'project_id': item['project_id'], 'user_id': self.user(),
-                         'history_after': item['context_after'], 'background': background,
+                         'history_after': item['context_after'], 'background': background, 'execution_policy': policy,
                          'memory': [{'id': r['id'], 'scope': r['scope'], 'revision': r['revision']} for r in note_rows]}
                 result['web_context'] = scope
+                result['action_receipts'] = self.action_receipts(ws, run_id)
                 last = ws.conn.execute("SELECT id,metadata FROM messages WHERE conversation_id=? AND role='assistant' ORDER BY id DESC LIMIT 1", (item['conversation_id'],)).fetchone()
                 if last:
-                    metadata = {**json.loads(last['metadata']), 'web_context': scope, 'run_id': run_id}
+                    metadata = {**json.loads(last['metadata']), 'web_context': scope, 'run_id': run_id,
+                                'action_receipts': result['action_receipts']}
                     with ws.conn:
                         ws.conn.execute('UPDATE messages SET metadata=? WHERE id=?', (json.dumps(metadata,ensure_ascii=False),last['id']))
                 with self.lock, ws.conn:
@@ -306,13 +327,14 @@ class WebApp:
                 with self.lock, ws.conn:
                     status = 'cancelled' if signal.is_set() else 'error'
                     answer = '本轮已停止，运行记录已保留。' if signal.is_set() else '本轮未完成，记录已保留。请检查本地服务配置后重试。'
+                    receipts = self.action_receipts(ws, run_id)
                     last = ws.conn.execute('SELECT role FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 1',
                                            (item['conversation_id'],)).fetchone()
                     if last and last['role'] == 'user':
                         repo.add_message(ws.conn, item['conversation_id'], 'assistant', answer,
-                                         metadata={'run_id': run_id, 'status': status})
+                                         metadata={'run_id': run_id, 'status': status, 'action_receipts': receipts})
                     ws.conn.execute("UPDATE web_runs SET status=?,result=? WHERE id=? AND status IN ('queued','running','cancelling')",
-                        (status,json.dumps({'answer':answer},ensure_ascii=False),run_id))
+                        (status,json.dumps({'answer':answer,'action_receipts':receipts},ensure_ascii=False),run_id))
             finally:
                 with self.lock:
                     self.cancel_signals.pop(run_id, None)
@@ -357,7 +379,7 @@ def make_server(app, port=8123):
                 if not write:
                     if path == '/':
                         return self.respond((STATIC/'index.html').read_text(encoding='utf-8').replace('__TOKEN__',app.token).encode(),mime='text/html; charset=utf-8')
-                    if path in ('/app.mjs','/markdown.mjs','/sources.mjs','/style.css','/icon.svg'):
+                    if path in ('/app.mjs','/markdown.mjs','/sources.mjs','/actions.mjs','/style.css','/icon.svg'):
                         mime = 'text/css' if path.endswith('.css') else 'image/svg+xml' if path.endswith('.svg') else 'text/javascript'
                         return self.respond((STATIC/path[1:]).read_bytes(),mime=mime+'; charset=utf-8')
                     if path == '/api/state':

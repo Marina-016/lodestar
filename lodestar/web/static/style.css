@@ -270,6 +270,12 @@ main.is-empty .scroll-area { display: flex; align-items: safe center; }
 .subtle { font-size: 12px; color: var(--muted); padding: 5px 0; line-height: 1.6; }
 .subtle:hover { color: var(--ink); }
 .message-error .answer { border-left: 2px solid #d2d2d7; padding-left: 16px; }
+.action-receipts { margin-top: 16px; padding-top: 10px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; line-height: 1.7; }
+.action-receipts small { font-size: 10px; color: var(--tertiary); }
+.action-receipts p, .action-receipts ul { margin: 3px 0 0; padding: 0; list-style: none; }
+.action-receipts li { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.action-receipts button { padding: 2px 0; text-align: left; color: var(--accent); overflow-wrap: anywhere; }
+.action-receipts button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
 .typing-dots { display: flex; gap: 5px; align-items: center; padding: 6px 0; height: 28px; }
 .typing-dots span { width: 4px; height: 4px; background: var(--tertiary); border-radius: 50%; animation: pulse 1.2s ease infinite; }
 .typing-dots span:nth-child(2) { animation-delay: .15s; }

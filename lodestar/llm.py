@@ -7,16 +7,12 @@
 """
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import re
 import requests
 from typing import Any, Dict
-
-try:
-    import anthropic
-except ImportError:  # 未装 SDK 时 live 模式会在使用时报错，mock 不受影响
-    anthropic = None
 
 SYSTEM_ROLE_MARKER = "# ROLE: {role}"
 
@@ -25,6 +21,14 @@ class LLMError(Exception):
     def __init__(self, message, *, code='model_error', role=None):
         super().__init__(message)
         self.code, self.role = code, role
+
+
+def _anthropic_sdk():
+    """Only Anthropic inference loads its SDK and optional system trust store."""
+    try:
+        return importlib.import_module('anthropic')
+    except ImportError as error:
+        raise LLMError('anthropic SDK 未安装，无法使用 live 模式。', code='configuration') from error
 
 
 def error_details(error):
@@ -88,17 +92,18 @@ class LLMClient:
             except ValueError as error:
                 raise LLMError(str(error)) from error
         elif self.mode == "live":
-            if anthropic is None:
-                raise LLMError("anthropic SDK 未安装，无法使用 live 模式。")
             if not (os.getenv('ANTHROPIC_API_KEY') or os.getenv('ANTHROPIC_AUTH_TOKEN')):
                 raise LLMError('Missing ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN; live mode cannot use mock credentials.')
-            self._client = anthropic.Anthropic(timeout=config.llm_timeout_s,
+            anthropic = _anthropic_sdk()
+            self._client = anthropic.Anthropic(timeout=config.llm_timeout_s, max_retries=0,
                 **({'base_url': config.llm_base_url} if config.llm_base_url else {}))
 
     # ---------- 对外接口 ----------
     def close(self):
         if self._client is not None:
             self._client.close()
+        if self._dashscope is not None:
+            self._dashscope.close()
 
     def list_models(self):
         """Optional read-only catalog. A listed ID is not an inference guarantee."""
@@ -169,6 +174,7 @@ class LLMClient:
                 return self._dashscope.complete(role, self.model, system, user, mt, json_mode=json_mode)
             except (ValueError, KeyError, IndexError, requests.RequestException) as error:
                 raise LLMError(f"DashScope request failed: {type(error).__name__}") from error
+        anthropic = _anthropic_sdk()
         from lodestar.providers.reasoning import anthropic_options
         kw = anthropic_options(self.config, structured=json_mode, max_tokens=mt)
         if json_mode:
@@ -179,42 +185,32 @@ class LLMClient:
                               'input_schema': schema}],
                       tool_choice={'type': 'tool', 'name': 'submit_result'},
                       thinking={'type': 'disabled'})
-        for attempt in (1, 2):
-            try:
-                resp = self._client.messages.create(
-                    model=self.model, max_tokens=mt,
-                    system=system, messages=[{"role": "user", "content": user}], **kw,
-                )
-                if json_mode:
-                    blocks = [b for b in resp.content if getattr(b, 'type', '') == 'tool_use'
-                              and getattr(b, 'name', '') == 'submit_result']
-                    if len(blocks) == 1 and isinstance(blocks[0].input, dict):
-                        return json.dumps(blocks[0].input, ensure_ascii=False)
-                    # Some compatible gateways return text despite forced tool_choice;
-                    # retain the bounded parser/repair for that compatibility case.
-                text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
-                if text.strip():
-                    return text
-                if self.config.llm_thinking and not json_mode:
-                    raise LLMError('Thinking request returned no answer text', code='empty_response')
-                if attempt == 1:  # 空文本：可能是思考块吃光预算 → 加大预算并关 thinking 重试
-                    mt *= 2
-                    kw.pop("thinking", None)
-                    continue
-                raise LLMError(f"LLM 返回空文本（model={self.model}）")
-            except LLMError:
-                raise
-            except anthropic.AuthenticationError as e:  # type: ignore[union-attr]
-                raise LLMError(f"LLM 鉴权失败，请检查 token/base_url：{e}") from e
-            except anthropic.APIStatusError as e:  # type: ignore[union-attr]
-                if attempt == 1 and kw.get("thinking") and not self.config.llm_thinking:
-                    kw.pop("thinking", None)
-                    continue
-                raise LLMError(f"LLM API 错误（{e.status_code}）：{e}") from e
-            except anthropic.APIError as e:  # type: ignore[union-attr]
-                raise LLMError(f"LLM API 错误：{e}") from e
-            except Exception as e:
-                raise LLMError(f"LLM 调用失败（{self.model}）：{e}") from e
+        try:
+            resp = self._client.messages.create(
+                model=self.model, max_tokens=mt,
+                system=system, messages=[{"role": "user", "content": user}], **kw,
+            )
+            if json_mode:
+                blocks = [b for b in resp.content if getattr(b, 'type', '') == 'tool_use'
+                          and getattr(b, 'name', '') == 'submit_result']
+                if len(blocks) == 1 and isinstance(blocks[0].input, dict):
+                    return json.dumps(blocks[0].input, ensure_ascii=False)
+                # Compatible gateways can return text despite forced tool_choice;
+                # complete_json owns the single, explicit invalid-JSON repair.
+            text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
+            if text.strip():
+                return text
+            raise LLMError('LLM returned no answer text', code='empty_response')
+        except LLMError:
+            raise
+        except anthropic.AuthenticationError as error:
+            raise LLMError('LLM authentication failed', code='authentication') from error
+        except anthropic.APIStatusError as error:
+            raise LLMError(f'LLM request failed (HTTP {error.status_code})', code='http_error') from error
+        except anthropic.APIError as error:
+            raise LLMError(f'LLM request failed: {type(error).__name__}') from error
+        except Exception as error:
+            raise LLMError(f'LLM call failed: {type(error).__name__}') from error
 
 
 # =====================================================================

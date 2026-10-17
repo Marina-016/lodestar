@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 
 from lodestar.memory import assistant, learning
 from lodestar.web import memory
@@ -58,16 +59,41 @@ def assistant_tools(app, item, run_id, message, check_cancel, *, user_authored=T
                               for row in app.task_list(ws) if row['id'] != 'main']}
 
     def read_task(args):
-        with app.workspace() as ws:
-            other = app.item(ws, args['id'])
-            run = ws.conn.execute('SELECT id,status FROM web_runs WHERE item_id=? ORDER BY rowid DESC LIMIT 1', (other['id'],)).fetchone()
-            rows = ws.conn.execute('SELECT role,content,metadata FROM messages WHERE conversation_id=? AND id>? ORDER BY id DESC LIMIT 6',
-                                    (other['conversation_id'], other['context_after'])).fetchall()
-            return {'id': other['id'], 'name': other['name'], 'status': other['status'],
-                    'run_id': run['id'] if run else None, 'run_status': run['status'] if run else None,
-                    'messages': [{'role': r['role'], 'content': r['content'][:12000],
-                                  'sources': json.loads(r['metadata']).get('source_details', [])}
-                                 for r in reversed(rows)]}
+        wait_seconds = args.get('wait_seconds', 10)
+        if type(wait_seconds) is not int or not 0 <= wait_seconds <= 20:
+            raise ValueError('wait_seconds must be an integer from 0 to 20')
+        started = time.monotonic()
+        deadline = started + wait_seconds
+        while True:
+            check_cancel()
+            with app.workspace() as ws, ws.conn:
+                # A read transaction keeps the selected run and transcript in one
+                # snapshot, even if a new run starts while we assemble the result.
+                ws.conn.execute('BEGIN')
+                other = app.item(ws, args['id'])
+                run = ws.conn.execute('SELECT id,status FROM web_runs WHERE item_id=? ORDER BY rowid DESC LIMIT 1', (other['id'],)).fetchone()
+                active = run is not None and run['status'] in ('queued', 'running', 'cancelling')
+                if not active or time.monotonic() >= deadline:
+                    check_cancel()
+                    rows = ws.conn.execute('SELECT role,content,metadata FROM messages WHERE conversation_id=? AND id>? ORDER BY id DESC LIMIT 6',
+                                            (other['conversation_id'], other['context_after'])).fetchall()
+                    check_cancel()
+                    outcome = ('not_started' if run is None else 'terminal' if not active
+                               else 'snapshot' if wait_seconds == 0 else 'timeout')
+                    return {'id': other['id'], 'name': other['name'], 'status': other['status'],
+                            'run_id': run['id'] if run else None, 'run_status': run['status'] if run else None,
+                            'messages': [{'role': r['role'], 'content': r['content'][:12000],
+                                          'sources': json.loads(r['metadata']).get('source_details', [])}
+                                         for r in reversed(rows)],
+                            'wait': {'requested_seconds': wait_seconds,
+                                     'elapsed_seconds': round(max(0, time.monotonic()-started), 3),
+                                     'reached_terminal': run is not None and not active,
+                                     'outcome': outcome}}
+            # Neither app.lock nor a SQLite read transaction is held here.
+            check_cancel()
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                time.sleep(min(.1, remaining))
 
     def create_task(args):
         check_cancel()
@@ -109,15 +135,33 @@ def assistant_tools(app, item, run_id, message, check_cancel, *, user_authored=T
 
     def record_learning(args):
         check_cancel()
+        action = args.get('action', 'record')
         with app.lock, app.workspace() as ws:
             row = ws.conn.execute("SELECT id FROM messages WHERE conversation_id=? AND role='user' ORDER BY id DESC LIMIT 1", (item['conversation_id'],)).fetchone()
             if row is None:
                 raise ValueError('缺少用户消息证据')
-            result = learning.record(ws.conn, user_id=memory.USER, technology=args['technology'],
-                method=args.get('method', ''), event=args['event'], actor='user',
-                evidence=json.dumps({'message_id': row['id'], 'content': message}, ensure_ascii=False))
+            if action == 'record':
+                if not args.get('technology') or not args.get('event') or 'id' in args:
+                    raise ValueError('新增需要 technology 和 event；纠正或撤销请指定 action 和已有证据 ID')
+                result = learning.record(ws.conn, user_id=memory.USER, technology=args['technology'],
+                    method=args.get('method', ''), event=args['event'], actor='user',
+                    evidence=json.dumps({'message_id': row['id'], 'content': message}, ensure_ascii=False))
+                with ws.conn:
+                    app.record_action(ws, run_id, {'action': 'record_learning', 'evidence_id': result['evidence_id'], 'event': args['event']})
+                return result
+            if action not in ('correct', 'revoke') or type(args.get('id')) is not int or args['id'] < 1:
+                raise ValueError('纠正或撤销需要 action 和已有证据 ID，请先读取学习记忆')
+            if 'event' in args or (action == 'revoke' and any(k in args for k in ('technology', 'method'))):
+                raise ValueError('纠正自动保存为自评，撤销只需要证据 ID')
+            data = {k: v for k, v in args.items() if k in ('action', 'id', 'technology', 'method')}
+            data['evidence'] = message
             with ws.conn:
-                app.record_action(ws, run_id, {'action': 'record_learning', 'evidence_id': result['evidence_id'], 'event': args['event']})
+                result = memory.edit_learning(ws, data, allow_run=run_id, source_message_id=row['id'])
+                app.record_action(ws, run_id, {'action': 'record_learning', 'operation': action,
+                    'id': args['id'], **{k: result[k] for k in ('evidence_id', 'event', 'revoked') if k in result}})
+            current = app.item(ws, item['id'])
+            result['learning'] = learning.profile(ws.conn, memory.USER, limit=20)
+            result['managed_memory'] = assistant.prompt_rows(assistant.select_rows(memory.notes(ws, current, active_only=True), message))
             return result
 
     tools = {
@@ -128,15 +172,18 @@ def assistant_tools(app, item, run_id, message, check_cancel, *, user_authored=T
              'content': {'type': 'string', 'maxLength': 2000},
              'scope': {'type': 'string', 'enum': ['personal', 'project', 'task']}}, manage_memory, ['action']),
         'list_tasks': definition('List task names and current execution states without loading their transcripts.', {}, list_tasks),
-        'read_task': definition('Read a selected task\'s recent results and source metadata when relevant to the user request. Old context retired by memory corrections is excluded.',
-                                {'id': {'type': 'string'}}, read_task, ['id']),
+        'read_task': definition('Read a selected task\'s recent results and source metadata when relevant to the user request. If active, wait up to wait_seconds (default 10, maximum 20) without another model call; 0 returns immediately. The wait outcome and run state are host observations, not a promise of completion. A timeout does not cancel the task. Old context retired by memory corrections is excluded.',
+                                {'id': {'type': 'string'},
+                                 'wait_seconds': {'type': 'integer', 'minimum': 0, 'maximum': 20}}, read_task, ['id']),
     }
     if user_authored:
-        tools['record_learning'] = definition('Record the current user\'s explicit discussion, attempt or self-report about a technology/method. The host attaches the actual user message as evidence. No event here establishes verified mastery. Do not record an assistant answer or research assignment as learning evidence.',
-            {'technology': {'type': 'string', 'minLength': 1, 'maxLength': 200},
+        tools['record_learning'] = definition('Record, correct or revoke the current user\'s technology/method learning evidence. action defaults to record and requires technology and event. For correct/revoke, read_memory first to find the evidence id. Corrections always become self_report, not verified mastery. The host attaches the actual user message and retires stale context after edits. Never record an assistant answer or research assignment as user learning.',
+            {'action': {'type': 'string', 'enum': ['record', 'correct', 'revoke']},
+             'id': {'type': 'integer', 'minimum': 1},
+             'technology': {'type': 'string', 'minLength': 1, 'maxLength': 200},
              'method': {'type': 'string', 'maxLength': 300},
              'event': {'type': 'string', 'enum': ['discussed', 'attempted', 'self_report']}},
-            record_learning, ['technology', 'event'])
+            record_learning)
     if item['id'] == 'main':
         tools['create_task'] = definition('Dispatch separate research work only when the user asks. Give a self-contained instruction preserving relevant term meanings, not just topic names. constraints must quote all applicable constraints verbatim from the CURRENT user message; [] if none. Set external_retrieval=blocked if search/network is prohibited; the host enforces it for this child run. Do not omit constraints to enable tools. Only instruction and selected quotes reach the child, not parent history. Personal and bound project memory are shared. Project ID defaults to the current project. Submission is not completion; read_task returns progress/results.',
             {'name': {'type': 'string', 'minLength': 1, 'maxLength': 80},

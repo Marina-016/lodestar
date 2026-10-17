@@ -16,7 +16,7 @@ class NativeProviderTests(unittest.TestCase):
         client._client = Mock()
         return client
 
-    def sdk_stream(self, chunks):
+    def sdk_stream(self, chunks, content_type='text/event-stream'):
         import anthropic
         import importlib
         package = next(t.__module__.split('.')[0] for t in anthropic.DefaultHttpxClient.__mro__
@@ -28,7 +28,7 @@ class NativeProviderTests(unittest.TestCase):
                 yield from chunks
         def respond(request):
             seen.append(request)
-            return http.Response(200, headers={'Content-Type': 'text/event-stream'}, stream=Stream())
+            return http.Response(200, headers={'Content-Type': content_type}, stream=Stream())
         client = self.client()
         client._client = anthropic.Anthropic(api_key='offline-fixture', max_retries=0,
             http_client=anthropic.DefaultHttpxClient(transport=http.MockTransport(respond)))
@@ -62,6 +62,37 @@ class NativeProviderTests(unittest.TestCase):
                     self.assertEqual(len(seen), 1)
                 finally:
                     client.close()
+
+    def test_sdk_data_errors_follow_sse_line_endings_and_case_insensitive_mime(self):
+        for newline in (b'\n', b'\r\n', b'\r'):
+            wire = (b'data: {"type":"ping"}'+newline*2+
+                    b'data: {"type":"error","error":{"message":"PRIVATE_CANARY"}}'+newline*2)
+            for width in (1, 3, len(wire)):
+                for mime in ('text/event-stream', 'Text/Event-Stream; charset=utf-8'):
+                    with self.subTest(newline=newline, width=width, mime=mime):
+                        client, seen = self.sdk_stream(
+                            [wire[i:i+width] for i in range(0, len(wire), width)], mime)
+                        try:
+                            with self.assertRaises(LLMError) as caught:
+                                client.dialogue_step('system', [], [])
+                            self.assertEqual(caught.exception.code, 'upstream_stream_error')
+                            self.assertNotIn('PRIVATE_CANARY', str(caught.exception))
+                            self.assertEqual(len(seen), 1)
+                        finally:
+                            client.close()
+
+    def test_sdk_cr_data_error_preserves_text_before_error_in_one_chunk(self):
+        wire = (self.sdk_text_prefix()+b'data: {"type":"error"}\n\n').replace(b'\n', b'\r')
+        client, seen = self.sdk_stream([wire])
+        delivered = []
+        try:
+            with self.assertRaises(LLMError) as caught:
+                client.dialogue_step('system', [], [], delivered.append)
+            self.assertEqual(caught.exception.code, 'upstream_stream_error')
+            self.assertEqual(delivered, ['partial'])
+            self.assertEqual(len(seen), 1)
+        finally:
+            client.close()
 
     def test_sdk_data_error_preserves_preceding_text_even_in_the_same_chunk(self):
         client, seen = self.sdk_stream([self.sdk_text_prefix()+b'data: {"type":"error"}\n\n'])

@@ -1,33 +1,46 @@
 # Lodestar 开发约定
 
-## 项目定位
-Single Agent + Tools 的个人 AI 前沿研究 Agent（V0：Research → Learn → Knowledge）。
-Agent 名 **Lodestar（导星）**，常量在 `lodestar/__init__.py`，prompts/README 引用它。
-原则（源自 PRD §26）：
-1. 不做论文摘要器，做长期 Research Agent。
-2. 不做万能 Agent，先把一个 Research Loop 做深。
-3. 不强行 Agent 化——确定性步骤用 Code（去重/截断/限流/预算/FTS）。
-4. Memory 的价值是减少重复、提供个性化 Context。
-5. 每加一个 Agent 能力，必须有对应 Eval。
+以用户当前指令及 `docs/agent-prd.md` 为产品依据；当前版本是本地单用户 V0 / 0.5.0。下一阶段执行 `docs/v0-quality-plan-20261017.md`。
 
-## 关键决策
-- **编排器是确定性代码**（`agent/loop.py`），LLM 只产内容（Plan/Query/Rerank/Assess/Synthesis/Novelty/Judge），不决定工具图。不要引入 LangGraph/LangChain。
-- **Tools**：`tools/registry.py` 注册，`call_tool` 统一捕获异常返回 `{"error":...}`，绝不让单工具崩溃打断 Loop。
-- **Mock 双通道**：`llm_mode=mock`（LLM 夹具）+ `search_mode=mock`（检索/读取夹具）→ 冒烟测试全离线、确定性。新增 LLM role 时必须同步 `llm.py::MockLLM`；新增工具 fixture 时同步 `fixtures.py`。
-- **Trace 先于执行**：loop 每一步先 `trace.log` 再执行（`trace/recorder.py`）。
-- **Knowledge 写入只走 pending proposal**（`update_knowledge_proposal` 工具 → 确认 → applied），HITL 见 `agent/loop.py::_decide_updates`。
-- **Eval 两层**：确定性指标（Trace 算）为真值底座；质量指标由 Judge-LLM 打（judge 失败 → `None` → verdict=warn，不编造）。
+## 产品与架构
 
-## 数据流
-`cli.py` → `agent/loop.py::ResearchAgent.run()` → tools → memory/repo + trace → brief 落 `workspace/<task_id>/` → eval 用隔离库 `data/eval_lodestar.db`（不污染真实 Knowledge State）。
+- Lodestar 是个人论文研究 Agent：发现论文、理解技术与方法、维护用户学习证据，结合项目形成待验证建议。
+- 普通对话使用 `agent/dialogue.py` 的模型自主工具循环。模型决定直接回答、检索、阅读、澄清或调用任务/记忆工具；不要增加关键词意图路由、固定研究阶段、固定报告模板或反思 Agent。
+- 宿主只负责必要边界：数据范围、外发许可、工具参数、操作/费用预算、取消、持久状态、来源与执行回执。
+- 旧 `agent/loop.py` 是显式结构化研究流程；不要把它的固定工具图规则扩大到普通对话，也不要将两个入口的验收混称。
+- 不引入 LangGraph/LangChain 等编排框架。确定性去重、截断、限流、数据库和状态检查用普通代码。
+- 来源优先论文。检索、摘要、正文片段、发表状态、渠道热度和实际支持的结论分别记录；未知不是未发表，片段不是全文。
 
-## 测试
-```bash
-python -m unittest tests.test_smoke -v
+## 任务与记忆
+
+- 主对话、研究任务和记忆中心共享同一位用户身份；任务各自保留对话、来源、进度和配置。
+- 个人事实可跨任务使用；项目事实仅同项目；任务备注仅局部。读取其他任务结果应按需、可追溯，不自动注入全部历史。
+- 学习围绕知识点、技术和方法，论文是关联来源。概念定义不保存为个人事实；后台读论文不等于用户接触、实践或掌握。
+- 修改/停用/遗忘同时处理上下文与缓存失效；保留可见历史与实际执行记录，不伪造删除承诺。
+- 方案、实验草案、实际执行及采用决策分别处理；普通 Web 聊天不自动运行生成代码。
+
+## 安全与运行
+
+- 不在代码、Git 或聊天输出凭据；`.env`、用户数据库、缓存和真实运行日志不入库。
+- 不自动更换模型、启用付费回退或重放副作用动作。真实调用前核实当前额度，历史免费额度不作今日余额。
+- 项目登记/绑定不扩大代码外发许可；仅发送用户明确授权文件的有界片段。
+- 当前仅监听 127.0.0.1。本地 owner/token 检查不等于公网账号或多租户隔离。
+- 工具或服务失败必须准确报告并保留已发生动作；不得把模型声称完成当实际回执，也不能让一个只读工具错误抹去已有证据。
+
+## 测试与验收
+
+改 Agent、Prompt、Tool 前先建立基线；实现后运行与改动匹配的针对性验证及必要回归。
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -q
+node --test tests/web_sources.test.mjs tests/web_actions.test.mjs
+node --check lodestar/web/static/app.mjs
+.\.venv\Scripts\python.exe scripts/preflight_public_release.py
 ```
-回归纪律：改 Prompt/Agent/Tool 前先跑一次基线，改完对比；golden case 阈值在 `lodestar/eval/cases/*.json` 的 `thresholds`。
 
-## 环境
-- Python 3.12；依赖仅 4 个（`requirements.txt`）。
-- 不在仓库写 Key；`.env` 不入库。
-- 语言：外部技术术语保留英文，叙述默认中文（`LODESTAR_BRIEF_LANGUAGE` 可切 en）。
+离线 HTTP 验收：`python -X utf8 -m scripts.eval_workspace`，使用全新数据库，默认不调用真实模型。
+
+- `llm_mode=mock` 与 `search_mode=mock` 是明确标识的离线夹具。新增能力须有对应 Eval，但不要写只复述实现的测试。
+- 功能通过、非空、字数、绿色回归与模型自评分都不代表研究语义通过。人工质量检查见 `docs/v0-quality-cases.md`。
+- Windows WMI 卡点、临时目录清理和网络错误要记录复现条件；不靠忽略异常、改断言或无限重跑宣布修复。
+- 默认中文叙述，外部技术术语保留英文；依赖及 Python 版本以 `pyproject.toml` 为准。

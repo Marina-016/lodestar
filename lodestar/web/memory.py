@@ -108,24 +108,33 @@ def edit(ws, item, data, *, allow_run=None, source='user', source_message_id=Non
     return {'id': saved['id'], 'revision': saved['revision'], 'context_reset': bool(old)}
 
 
-def edit_learning(ws, data):
+def edit_learning(ws, data, *, allow_run=None, source_message_id=None):
     row = ws.conn.execute('SELECT * FROM learning_events WHERE id=? AND user_id=? AND revoked_at IS NULL',
                           (data.get('id'), USER)).fetchone()
     if row is None:
         raise LookupError('找不到这条学习证据')
-    invalidate(ws, affected(ws, {'scope': 'personal'}))
+    invalidate(ws, affected(ws, {'scope': 'personal'}), allow_run=allow_run)
+    result = {'id': row['id'], 'context_reset': True}
     if data.get('action') == 'correct':
         # A manual correction is a self-report, never a verified demonstration.
         content = data.get('evidence', '')
-        if not isinstance(content, str) or not 1 <= len(content.strip()) <= 2000:
-            raise ValueError('纠正说明应为 1–2000 字')
-        evidence = json.dumps({'corrects': row['id'], 'content': content.strip()}, ensure_ascii=False)
+        limit = 24000 if source_message_id is not None else 2000
+        if not isinstance(content, str) or not 1 <= len(content.strip()) <= limit:
+            raise ValueError(f'纠正说明应为 1–{limit} 字')
+        observation = {'corrects': row['id'], 'content': content.strip()}
+        if source_message_id is not None:
+            observation['message_id'] = source_message_id
+        evidence = json.dumps(observation, ensure_ascii=False)
         technology, method = data.get('technology', row['technology']), data.get('method', row['method'])
         if not isinstance(technology, str) or not technology.strip() or len(technology) > 200 or not isinstance(method, str) or len(method) > 300:
             raise ValueError('技术或方法无效')
-        ws.conn.execute('INSERT INTO learning_events(user_id,technology,method,event,actor,evidence,paper_url,task_id,created_at) VALUES(?,?,?,?,?,?,?,?,?)',
+        cursor = ws.conn.execute('INSERT INTO learning_events(user_id,technology,method,event,actor,evidence,paper_url,task_id,created_at) VALUES(?,?,?,?,?,?,?,?,?)',
             (USER, technology.strip(), method.strip(), 'self_report', 'user', evidence, row['paper_url'], row['task_id'], datetime.now(timezone.utc).isoformat()))
+        result.update(evidence_id=cursor.lastrowid, event='self_report')
     elif data.get('action') != 'revoke':
         raise ValueError('学习操作无效')
+    else:
+        result['revoked'] = True
     ws.conn.execute('UPDATE learning_events SET revoked_at=? WHERE id=? AND user_id=?',
                      (datetime.now(timezone.utc).isoformat(), row['id'], USER))
+    return result

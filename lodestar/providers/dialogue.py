@@ -1,6 +1,7 @@
 """Native tool dialogue transport. Messages use Anthropic's block representation."""
 import importlib
 import json
+import re
 
 import requests
 
@@ -14,7 +15,7 @@ def _guard_sse_errors(response):
     bytes, retain upstream bodies, retry, or infer a specific service cause.
     """
     content_type = response.headers.get('content-type', '') if response is not None else ''
-    if not isinstance(content_type, str) or content_type.split(';')[0].strip() != 'text/event-stream':
+    if not isinstance(content_type, str) or content_type.split(';')[0].strip().lower() != 'text/event-stream':
         return
     from lodestar.llm import LLMError
     http = importlib.import_module(type(response).__module__.split('.')[0])
@@ -23,10 +24,11 @@ def _guard_sse_errors(response):
     class GuardedStream(http.SyncByteStream):
         def __iter__(self):
             pending, data, size, oversized = b'', [], 0, False
+            skip_lf = False
 
             def line(value):
                 nonlocal data, size, oversized
-                if not value.strip():
+                if value == b'':
                     if data and not oversized:
                         try:
                             event = json.loads(b'\n'.join(data))
@@ -45,10 +47,19 @@ def _guard_sse_errors(response):
             for chunk in original:
                 # Let the SDK deliver preceding text from this same chunk first.
                 yield chunk
+                if not chunk:
+                    continue
+                if skip_lf and chunk.startswith(b'\n'):
+                    chunk = chunk[1:]
+                skip_lf = False
                 pending += chunk
-                while b'\n' in pending:
-                    value, pending = pending.split(b'\n', 1)
-                    line(value.rstrip(b'\r'))
+                start = 0
+                # SSE permits CR, LF and CRLF; CRLF may span byte chunks.
+                for ending in re.finditer(br'\r\n|\r|\n', pending):
+                    line(pending[start:ending.start()])
+                    start = ending.end()
+                    skip_lf = ending.group() == b'\r' and start == len(pending)
+                pending = pending[start:]
                 if len(pending) > 65536:
                     pending, data, oversized = b'', [], True
             if pending:
@@ -144,7 +155,8 @@ def _openai_step(client, system, messages, tools, on_text):
         payload['tool_choice'] = 'none'
     text, reasoning, calls, finished, done = [], [], {}, False, False
     usage, returned_model = {}, None
-    with requests.post(adapter.base_url + '/chat/completions',
+    transport = getattr(adapter, 'http', requests)
+    with transport.post(adapter.base_url + '/chat/completions',
             headers={'Authorization': 'Bearer ' + adapter.key}, json=payload,
             timeout=client.config.llm_timeout_s, stream=True) as response:
         response.raise_for_status()
@@ -159,7 +171,7 @@ def _openai_step(client, system, messages, tools, on_text):
             data = json.loads(raw)
             returned_model = data.get('model') or returned_model
             if data.get('error'):
-                raise LLMError('Provider stream error', code='stream_interrupted')
+                raise LLMError('Provider stream error', code='upstream_stream_error')
             if data.get('usage'):
                 usage = data['usage']
                 adapter.usage.append({'role': 'conversation', **data['usage']})

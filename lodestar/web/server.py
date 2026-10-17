@@ -234,7 +234,30 @@ class WebApp:
             ws.conn.execute('INSERT INTO web_runs(id,item_id,request_key,status,message,config,policy) VALUES(?,?,?,?,?,?,?)',
                             (run_id,item_id,key,'queued',message,json.dumps(snapshot(cfg)),json.dumps(policy or {},ensure_ascii=False)))
             signal = self.cancel_signals[run_id] = threading.Event()
-        threading.Thread(target=self.execute, args=(run_id,item,cfg,message,signal,background), daemon=True).start()
+        try:
+            threading.Thread(target=self.execute, args=(run_id,item,cfg,message,signal,background), daemon=True).start()
+        except Exception:
+            # No worker exists to release this queued slot. Keep the failed
+            # attempt visible, then propagate the actual startup exception.
+            try:
+                with self.lock, self.workspace() as ws, ws.conn:
+                    # A stop acknowledged during startup stays a user cancellation.
+                    status = 'cancelled' if signal.is_set() else 'error'
+                    answer = ('本轮已停止，运行记录已保留。' if signal.is_set() else
+                              '本轮未启动，记录已保留。可以重试；不会自动调用模型。')
+                    failure = {'answer': answer, 'runtime_error': {'code': 'worker_start_failed'}, 'action_receipts': []}
+                    updated = ws.conn.execute(
+                        "UPDATE web_runs SET status=?,result=? WHERE id=? AND status IN ('queued','cancelling')",
+                        (status, json.dumps(failure, ensure_ascii=False), run_id))
+                    if updated.rowcount:
+                        repo.add_message(ws.conn, item['conversation_id'], 'user', message,
+                                         metadata={'run_id': run_id})
+                        repo.add_message(ws.conn, item['conversation_id'], 'assistant', answer, kind=status,
+                                         metadata={'run_id': run_id, 'status': status, **failure})
+            finally:
+                with self.lock:
+                    self.cancel_signals.pop(run_id, None)
+            raise
         return run_id
 
     def cancel(self, item_id, run_id):

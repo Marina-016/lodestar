@@ -72,7 +72,7 @@ node --check lodestar/web/static/app.mjs
 .\.venv\Scripts\python.exe scripts/preflight_public_release.py
 ~~~
 
-最新证据和未通过项见 [10-15 续检](docs/v0-live-review-20261015.md)，历史功能验收见 [V0 发布验收](docs/v0-release-check.md)。本轮完整 334 项离线、14 项前端通过；本机测试使用进程内 WMI 系统信息降级及项目临时目录，环境失败另行保留。新增约束交接、真实动作回执及流内错误识别；绿色测试不代表模型语义或服务可靠性已全部通过。
+master 基线的真实证据与未通过项见 [10-15 续检](docs/v0-live-review-20261015.md)，历史功能验收见 [V0 发布验收](docs/v0-release-check.md)。质量分支的最新机制验证与后续真实检查见 [10-17 记录](docs/v0-quality-review-20261017.md)，逐条回答审阅见 [语义审阅](docs/v0-quality-semantic-review-20261017.md)。绿色功能测试不代表模型语义或服务可靠性已全部通过。
 
 - [产品逻辑与系统架构](docs/agent-prd.md)
 - [Web 使用与数据说明](docs/web-ui.md)
@@ -80,6 +80,20 @@ node --check lodestar/web/static/app.mjs
 - [对话用法](docs/chat-usage.md)
 - [阿里官方搜索接入](docs/aliyun-web-search.md)
 - [Changelog](CHANGELOG.md)
+
+## V0 质量版开发
+
+2026-10-17 起在 `codex/v0-stability-20261017` 推进质量与可靠性，不改变 master 的发布边界。执行顺序与放行条件见 [开发计划](docs/v0-quality-plan-20261017.md)，人工语义检查见 [八组验收卡](docs/v0-quality-cases.md)，本轮验证与剩余边界见 [10-17 首轮验收](docs/v0-quality-review-20261017.md)。
+
+本轮移除模型服务的隐式重试/参数降级，修复线程启动失败占住任务槽位和取消竞态；mock/DashScope 不再加载无关 Anthropic SDK。Windows 实验凭证不查询 WMI，但旧系统卡点的根因仍未查明。
+
+固定合成证据的隔离 HTTP 验收：
+
+~~~powershell
+.\.venv\Scripts\python.exe -X utf8 -m scripts.eval_workspace --scenario quality
+~~~
+
+默认不调用真实模型，只验证管道。QF-1 是明确虚构的验收材料，快照、哈希与人工事实表分别保存；参考答案不会注入模型，不自动给研究语义打通过分。真实验收支持 Anthropic 和 DashScope 的整轮物理请求上限；这个上限不是云端免费额度总账。用户确认免费额度与用完即停后，本批实际执行 24 次隔离调用并停止；前三轮研究语义未通过，双任务实际完成但父轮询耗尽汇总预算。默认调用开关、模型和 .env 均未修改。
 
 ## 后续重点
 

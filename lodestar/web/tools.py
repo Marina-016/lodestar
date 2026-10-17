@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 
 from lodestar.memory import assistant, learning
 from lodestar.web import memory
@@ -58,16 +59,41 @@ def assistant_tools(app, item, run_id, message, check_cancel, *, user_authored=T
                               for row in app.task_list(ws) if row['id'] != 'main']}
 
     def read_task(args):
-        with app.workspace() as ws:
-            other = app.item(ws, args['id'])
-            run = ws.conn.execute('SELECT id,status FROM web_runs WHERE item_id=? ORDER BY rowid DESC LIMIT 1', (other['id'],)).fetchone()
-            rows = ws.conn.execute('SELECT role,content,metadata FROM messages WHERE conversation_id=? AND id>? ORDER BY id DESC LIMIT 6',
-                                    (other['conversation_id'], other['context_after'])).fetchall()
-            return {'id': other['id'], 'name': other['name'], 'status': other['status'],
-                    'run_id': run['id'] if run else None, 'run_status': run['status'] if run else None,
-                    'messages': [{'role': r['role'], 'content': r['content'][:12000],
-                                  'sources': json.loads(r['metadata']).get('source_details', [])}
-                                 for r in reversed(rows)]}
+        wait_seconds = args.get('wait_seconds', 10)
+        if type(wait_seconds) is not int or not 0 <= wait_seconds <= 20:
+            raise ValueError('wait_seconds must be an integer from 0 to 20')
+        started = time.monotonic()
+        deadline = started + wait_seconds
+        while True:
+            check_cancel()
+            with app.workspace() as ws, ws.conn:
+                # A read transaction keeps the selected run and transcript in one
+                # snapshot, even if a new run starts while we assemble the result.
+                ws.conn.execute('BEGIN')
+                other = app.item(ws, args['id'])
+                run = ws.conn.execute('SELECT id,status FROM web_runs WHERE item_id=? ORDER BY rowid DESC LIMIT 1', (other['id'],)).fetchone()
+                active = run is not None and run['status'] in ('queued', 'running', 'cancelling')
+                if not active or time.monotonic() >= deadline:
+                    check_cancel()
+                    rows = ws.conn.execute('SELECT role,content,metadata FROM messages WHERE conversation_id=? AND id>? ORDER BY id DESC LIMIT 6',
+                                            (other['conversation_id'], other['context_after'])).fetchall()
+                    check_cancel()
+                    outcome = ('not_started' if run is None else 'terminal' if not active
+                               else 'snapshot' if wait_seconds == 0 else 'timeout')
+                    return {'id': other['id'], 'name': other['name'], 'status': other['status'],
+                            'run_id': run['id'] if run else None, 'run_status': run['status'] if run else None,
+                            'messages': [{'role': r['role'], 'content': r['content'][:12000],
+                                          'sources': json.loads(r['metadata']).get('source_details', [])}
+                                         for r in reversed(rows)],
+                            'wait': {'requested_seconds': wait_seconds,
+                                     'elapsed_seconds': round(max(0, time.monotonic()-started), 3),
+                                     'reached_terminal': run is not None and not active,
+                                     'outcome': outcome}}
+            # Neither app.lock nor a SQLite read transaction is held here.
+            check_cancel()
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                time.sleep(min(.1, remaining))
 
     def create_task(args):
         check_cancel()
@@ -128,8 +154,9 @@ def assistant_tools(app, item, run_id, message, check_cancel, *, user_authored=T
              'content': {'type': 'string', 'maxLength': 2000},
              'scope': {'type': 'string', 'enum': ['personal', 'project', 'task']}}, manage_memory, ['action']),
         'list_tasks': definition('List task names and current execution states without loading their transcripts.', {}, list_tasks),
-        'read_task': definition('Read a selected task\'s recent results and source metadata when relevant to the user request. Old context retired by memory corrections is excluded.',
-                                {'id': {'type': 'string'}}, read_task, ['id']),
+        'read_task': definition('Read a selected task\'s recent results and source metadata when relevant to the user request. If active, wait up to wait_seconds (default 10, maximum 20) without another model call; 0 returns immediately. The wait outcome and run state are host observations, not a promise of completion. A timeout does not cancel the task. Old context retired by memory corrections is excluded.',
+                                {'id': {'type': 'string'},
+                                 'wait_seconds': {'type': 'integer', 'minimum': 0, 'maximum': 20}}, read_task, ['id']),
     }
     if user_authored:
         tools['record_learning'] = definition('Record the current user\'s explicit discussion, attempt or self-report about a technology/method. The host attaches the actual user message as evidence. No event here establishes verified mastery. Do not record an assistant answer or research assignment as learning evidence.',

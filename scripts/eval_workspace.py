@@ -5,6 +5,9 @@ explicit --live, respect the model-disable switch, and never use paid search.
 Artifacts persist in a fresh ignored directory; no real Web database is opened.
 """
 import argparse
+from contextlib import ExitStack
+from datetime import datetime
+from hashlib import sha256
 import importlib
 import json
 import re
@@ -12,6 +15,7 @@ import threading
 import time
 import traceback
 import uuid
+from urllib.parse import urlsplit
 from dataclasses import replace
 from pathlib import Path
 
@@ -35,14 +39,18 @@ class ModelBudget:
         self.responses = []
 
     def reserve(self, request):
-        if request.method != 'POST' or not request.url.path.rstrip('/').endswith('/messages'):
+        path = request.url if isinstance(request.url, str) else request.url.path
+        path = urlsplit(path).path.rstrip('/')
+        if request.method != 'POST' or not path.endswith(('/messages', '/chat/completions')):
             return
         with self.lock:
             if self.stopped or self.used >= self.limit:
                 self.blocked += 1
                 raise LLMError('Acceptance model-attempt limit reached', code='acceptance_budget')
             self.used += 1
-            request.extensions['lodestar_attempt'] = self.used
+            if isinstance(getattr(request, 'extensions', None), dict):
+                request.extensions['lodestar_attempt'] = self.used
+            return self.used
 
     def observe_response(self, response):
         """Transport shape only: no text, reasoning, other headers or URLs."""
@@ -104,8 +112,8 @@ class ModelBudget:
         response.stream = ObservedStream()
 
     def client(self, config):
-        if config.llm_mode == 'live' and config.llm_provider != 'anthropic':
-            raise ValueError('This acceptance request guard currently supports Anthropic-compatible services only')
+        if config.llm_mode == 'live' and config.llm_provider not in ('anthropic', 'dashscope'):
+            raise ValueError('This acceptance request guard supports Anthropic and DashScope only')
         budget = self
         class ObservedClient(LLMClient):
             def dialogue_step(self, *args, **kwargs):
@@ -118,7 +126,26 @@ class ModelBudget:
                     with budget.lock:
                         budget.failures.append({**error_details(error), 'frames': frames})
                     raise
+        class GuardedSession(requests.Session):
+            def send(self, request, **kwargs):
+                attempt = budget.reserve(request)
+                response = super().send(request, **kwargs)
+                if attempt is not None:
+                    # No response body, prompt, credential or URL is retained here.
+                    # SSE body-shape diagnostics above remain Anthropic-specific.
+                    record = {'attempt': attempt, 'protocol': 'openai_compatible',
+                              'http_status': response.status_code,
+                              'content_type': response.headers.get('content-type', '').split(';')[0][:80],
+                              'body_observation': 'not_collected'}
+                    with budget.lock:
+                        budget.responses.append(record)
+                return response
+
         client = ObservedClient(config)
+        if client._dashscope is not None:
+            # A separate session per client avoids global requests monkeypatches
+            # and shares the physical-attempt counter across foreground/children.
+            client._dashscope.http = GuardedSession()
         if client._client is not None:
             from anthropic import DefaultHttpxClient
             original = client._client
@@ -130,6 +157,32 @@ class ModelBudget:
 
 
 def run(config, output_dir, *, scenario='direct', max_model_calls=24, wait_seconds=180, llm_factory=None):
+    if scenario not in ('direct', 'research', 'workspace', 'quality'):
+        raise ValueError('Unknown acceptance scenario')
+    if scenario == 'quality' and config.search_mode != 'mock':
+        raise ValueError('Quality evidence is fixed and synthetic; live search is not allowed')
+    with ExitStack() as sources:
+        fixture = None
+        if scenario == 'quality':
+            from scripts import quality_fixtures as fixture
+            from unittest.mock import patch
+
+            class FixedDateTime(datetime):
+                @classmethod
+                def now(cls, tz=None):
+                    value = datetime.fromisoformat(fixture.FIXED_NOW)
+                    return value.astimezone(tz) if tz else value
+
+            # Evaluation-only injection; never alter the production tool registry.
+            sources.enter_context(patch('lodestar.tools.registry.call_tool', fixture.call_tool))
+            sources.enter_context(patch('lodestar.agent.dialogue.verify_publication', fixture.verify_publication))
+            sources.enter_context(patch('lodestar.agent.dialogue.datetime', FixedDateTime))
+            sources.enter_context(patch('lodestar.agent.evidence.datetime', FixedDateTime))
+        return _run(config, output_dir, scenario=scenario, max_model_calls=max_model_calls,
+                    wait_seconds=wait_seconds, llm_factory=llm_factory, fixture=fixture)
+
+
+def _run(config, output_dir, *, scenario, max_model_calls, wait_seconds, llm_factory, fixture):
     root = Path(output_dir).resolve()
     root.mkdir(parents=True, exist_ok=False)  # Never reuse a real/user database.
     cfg = replace(config, db_path=root/'web.db', workspace_dir=root, demo_replay=False,
@@ -137,10 +190,29 @@ def run(config, output_dir, *, scenario='direct', max_model_calls=24, wait_secon
     if cfg.search_mode == 'live' and cfg.web_search_backend != 'duckduckgo':
         raise ValueError('Acceptance only allows public search; paid/MCP search is not enabled')
     budget = ModelBudget(max_model_calls)
+    frozen_sources = None
+    if fixture is not None:
+        frozen_sources = json.dumps(fixture.snapshot(), ensure_ascii=False, sort_keys=True, indent=2)
+        (root/'source-snapshot.json').write_bytes(frozen_sources.encode('utf-8'))
+        # Review answers stay on disk, never in tool results or model context.
+        (root/'human-facts.json').write_text(
+            json.dumps(fixture.human_facts(), ensure_ascii=False, indent=2), encoding='utf-8')
     app = WebApp(cfg, llm_factory=llm_factory or budget.client)
     server = make_server(app, 0)
-    worker = threading.Thread(target=server.serve_forever, daemon=True)
-    worker.start()
+    try:
+        worker = threading.Thread(target=server.serve_forever, daemon=True)
+        worker.start()
+    except Exception as error:
+        # shutdown waits forever if serve_forever never started; only close here.
+        try:
+            (root/'report.json').write_text(json.dumps({
+                'mode': cfg.llm_mode, 'semantic_review': 'not_run',
+                'failure_type': type(error).__name__,
+                'scope': 'acceptance HTTP server did not start; no model request submitted',
+                'checks': {'server_started': False}}, ensure_ascii=False, indent=2), encoding='utf-8')
+        finally:
+            server.server_close()
+        raise
     base = f'http://127.0.0.1:{server.server_port}'
     client = requests.Session()
     client.trust_env = False
@@ -148,6 +220,12 @@ def run(config, output_dir, *, scenario='direct', max_model_calls=24, wait_secon
               'semantic_review': 'pending' if cfg.llm_mode == 'live' else 'not_applicable_offline_fixture',
               'scope': 'local HTTP/backend; not browser visual acceptance or public deployment',
               'max_model_attempts': max_model_calls, 'model_attempts': 0, 'turns': [], 'checks': {}}
+    if fixture is not None:
+        report['source_fixture'] = {'id': fixture.FIXTURE_ID, 'synthetic': True,
+            'fixed_now': fixture.FIXED_NOW, 'sha256': sha256(frozen_sources.encode('utf-8')).hexdigest(),
+            'snapshot': 'source-snapshot.json', 'human_review_only': 'human-facts.json'}
+        report['quality_cards'] = ['Q02', 'Q03', 'Q04']
+        report['scope'] += '; fixed synthetic evidence, not real discovery or paper correctness'
 
     def save():
         with budget.lock:
@@ -177,6 +255,7 @@ def run(config, output_dir, *, scenario='direct', max_model_calls=24, wait_secon
                 record = {'phase': phase, 'item_id': item_id, 'run_id': run_id,
                     'status': value['run']['status'], 'answer': result.get('answer'),
                     'model_error': result.get('model_error'), 'grounding': result.get('grounding'),
+                    'sources': result.get('source_details', []),
                     'action_receipts': result.get('action_receipts', []),
                     'execution_policy': json.loads(value['run'].get('policy') or '{}'),
                     'learning_exposure_status': result.get('learning_exposure_status'),
@@ -218,8 +297,25 @@ def run(config, output_dir, *, scenario='direct', max_model_calls=24, wait_secon
             turn('compare', '比较这两篇的核心机制、实验支持和适用边界，不要只复述摘要；'
                  '说明哪些是论文结论、哪些是你的推断。')
             turn('concise-followup', '不用检索，用两句话概括这两篇最重要的区别，不要标题。')
+        elif scenario == 'quality':
+            turn('fixed-discovery', '现在只研究 QF-1 虚构验收材料，不把它们当现实论文。'
+                 '推荐近 7 天两篇 Agent 记忆论文，分别说明为什么值得看，给出来源。')
+            turn('fixed-compare', '比较刚才两篇怎样管理记忆、各自适用什么场景，'
+                 '哪些结论能从实验中看出来？不要只复述摘要。')
+            turn('fixed-publication-numbers', '这里 A 是 Window Memory，B 是 Retrieved Memory。'
+                 '哪篇更权威？A 的效果提升和成本变化怎么算？能直接比较 A 和 B 谁更好吗？'
+                 '核对发表状态，区分事实和你的推断。')
+            turn('fixed-concise-followup', '不用再检索，用两句话保留刚才最重要的结论和限制，不要标题。')
+            report['observed_coverage'] = {
+                'body_reads': [a['params'].get('url') for t in report['turns'] for a in t['actions']
+                               if a['action'] == 'read_paper' and a['executed'] and not a['error']
+                               and a['params'].get('full_text')],
+                'publication_lookups': [a['params'].get('url') for t in report['turns'] for a in t['actions']
+                                        if a['action'] == 'verify_paper' and a['executed'] and not a['error']]}
+            # Coverage is evidence for a human, never a semantic pass/fail score.
         else:
-            turn('dispatch', '请分别派发 Harness 和 RAG 两个独立研究任务。本轮不要联网，'
+            turn('dispatch', '请分别派发 Agent harness 和 RAG 两个独立研究任务。'
+                 '这里 harness 指模型周围的工具调用、上下文和运行控制。本轮不要联网，'
                  '各用已有知识解释关键机制、适用边界和尚需查证之处。不要把后台研究记成我已经学会了。')
             tasks = [t for t in get('/api/tasks')['items'] if t['id'] != 'main']
             report['checks']['two_tasks_dispatched'] = len(tasks) == 2
@@ -288,7 +384,7 @@ def main():
     parser.add_argument('--live-search', action='store_true')
     parser.add_argument('--model')
     parser.add_argument('--thinking', choices=('on', 'off'))
-    parser.add_argument('--scenario', choices=('direct', 'research', 'workspace'), default='direct')
+    parser.add_argument('--scenario', choices=('direct', 'research', 'workspace', 'quality'), default='direct')
     parser.add_argument('--max-model-calls', type=int, default=24)
     parser.add_argument('--output-dir', type=Path)
     args = parser.parse_args()
@@ -301,6 +397,8 @@ def main():
         cfg = configure(cfg, model=args.model, thinking=args.thinking)
     except ValueError as error:
         parser.error(str(error))
+    if args.scenario == 'quality' and args.live_search:
+        parser.error('Quality uses frozen synthetic evidence; do not combine it with --live-search')
     cfg = replace(cfg, search_mode='live' if args.live_search else 'mock')
     root = args.output_dir or PROJECT_ROOT/'workspace'/'acceptance'/uuid.uuid4().hex
     try:

@@ -29,7 +29,9 @@ GOLDEN_GOAL = ("研究最近 Self-Evolving Skill / Self-Evolving Agent 有哪些
 
 class SmokeTestCase(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="rf_smoke_")
+        temporary = tempfile.TemporaryDirectory(prefix="rf_smoke_")
+        self.addCleanup(temporary.cleanup)
+        self.tmp = temporary.name
         self.cfg = Config(
             llm_mode="mock",
             search_mode="mock",

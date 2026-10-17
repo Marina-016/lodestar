@@ -5,8 +5,15 @@ from urllib.parse import urlsplit
 from lodestar.providers.reasoning import dashscope_options
 
 class DashScopeClient:
-    def __init__(self, config):
+    """Own an injected requests-compatible transport; never close shared requests.
+
+    An injected transport (including one assigned to ``http`` after construction)
+    belongs to this adapter. Use a separate transport for each active client.
+    """
+    def __init__(self, config, *, http=None):
         self.config = config
+        self.http = requests if http is None else http
+        self._closed = False
         self.key = os.getenv('DASHSCOPE_API_KEY')
         self.base_url = config.llm_base_url.rstrip('/')
         parts = urlsplit(self.base_url)
@@ -16,17 +23,26 @@ class DashScopeClient:
             raise ValueError('DashScope requires an official HTTPS endpoint')
         self.usage = []
 
+    def close(self):
+        if self._closed:
+            return
+        self._closed = True
+        if self.http is not requests:
+            close = getattr(self.http, 'close', None)
+            if close is not None:
+                close()
+
     def list_models(self):
         """Read the official catalog, without inference or search charges."""
         parts = urlsplit(self.base_url)
         url = parts.scheme + '://' + parts.netloc + '/api/v1/models'
         models = []
         for page in (1, 2, 3):
-            response = requests.get(url, headers={'Authorization': 'Bearer ' + self.key},
+            response = self.http.get(url, headers={'Authorization': 'Bearer ' + self.key},
                 params={'capabilities': 'TG', 'page_size': 100, 'page_no': page},
                 timeout=min(10, self.config.llm_timeout_s))
             if not response.ok:
-                raise ValueError(f'Model catalog HTTP {response.status_code}')
+                response.raise_for_status()
             data = response.json()
             if data.get('success') is False or not isinstance(data.get('output'), dict):
                 raise ValueError('Invalid model catalog response')
@@ -46,11 +62,11 @@ class DashScopeClient:
                     **dashscope_options(self.config, structured=json_mode)}
         if json_mode:
             payload['response_format'] = {'type': 'json_object'}
-        response = requests.post(self.base_url + '/chat/completions',
+        response = self.http.post(self.base_url + '/chat/completions',
             headers={'Authorization': 'Bearer ' + self.key}, json=payload,
             timeout=self.config.llm_timeout_s)
         if not response.ok:
-            raise ValueError(f'DashScope HTTP {response.status_code}')
+            response.raise_for_status()
         data = response.json()
         choice = data['choices'][0]
         self.usage.append({'role': role, 'model': data.get('model', model),

@@ -5,8 +5,9 @@ import hashlib
 from importlib import metadata
 import json
 from pathlib import Path
-import platform
 import re
+
+from lodestar.runtime_info import runtime_info
 
 
 def capture(directory):
@@ -16,9 +17,7 @@ def capture(directory):
         version = distribution.version
         if re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*', name) and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.+!-]*', version):
             packages[name.lower().replace('_', '-')] = version
-    receipt = {'version': 1, 'python': platform.python_version(),
-        'implementation': platform.python_implementation(), 'system': platform.system(),
-        'release': platform.release(), 'machine': platform.machine(),
+    receipt = {'version': 1, **runtime_info(),
         'packages': dict(sorted(packages.items())),
         'scope': 'installed Python distribution versions; excludes source URLs and environment variables',
         'limits': 'No wheel hashes, OS libraries, provider model weights or deterministic model replay guarantee.'}

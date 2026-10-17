@@ -57,7 +57,7 @@ dialogue.gather：模型决定回答、检索、阅读、调用宿主工具
 | search_web / read_webpage | 补充官方网页与工程资料；失败不能冒充成功 |
 | read_memory | 按需读取当前允许的事实及学习证据，有界返回 |
 | manage_memory | 保存用户提供的事实/偏好或确认的项目决定，按 ID 纠正/遗忘 |
-| record_learning | 前台用户讨论、尝试和自评；宿主附实际用户消息作为证据，不提供 demonstrated 掌握事件 |
+| record_learning | 前台记录讨论、尝试和自评；可按已有证据 ID 纠正或撤销，宿主附实际用户消息；纠正始终是 self_report，不提供 demonstrated 掌握事件 |
 | list_tasks / read_task | 先看任务状态，再按需读指定结果及来源，不自动装入所有聊天 |
 | create_task | 仅主对话可派发；子任务继承模型设置及默认项目，防止递归派发 |
 

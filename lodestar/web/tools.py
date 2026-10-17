@@ -135,15 +135,33 @@ def assistant_tools(app, item, run_id, message, check_cancel, *, user_authored=T
 
     def record_learning(args):
         check_cancel()
+        action = args.get('action', 'record')
         with app.lock, app.workspace() as ws:
             row = ws.conn.execute("SELECT id FROM messages WHERE conversation_id=? AND role='user' ORDER BY id DESC LIMIT 1", (item['conversation_id'],)).fetchone()
             if row is None:
                 raise ValueError('缺少用户消息证据')
-            result = learning.record(ws.conn, user_id=memory.USER, technology=args['technology'],
-                method=args.get('method', ''), event=args['event'], actor='user',
-                evidence=json.dumps({'message_id': row['id'], 'content': message}, ensure_ascii=False))
+            if action == 'record':
+                if not args.get('technology') or not args.get('event') or 'id' in args:
+                    raise ValueError('新增需要 technology 和 event；纠正或撤销请指定 action 和已有证据 ID')
+                result = learning.record(ws.conn, user_id=memory.USER, technology=args['technology'],
+                    method=args.get('method', ''), event=args['event'], actor='user',
+                    evidence=json.dumps({'message_id': row['id'], 'content': message}, ensure_ascii=False))
+                with ws.conn:
+                    app.record_action(ws, run_id, {'action': 'record_learning', 'evidence_id': result['evidence_id'], 'event': args['event']})
+                return result
+            if action not in ('correct', 'revoke') or type(args.get('id')) is not int or args['id'] < 1:
+                raise ValueError('纠正或撤销需要 action 和已有证据 ID，请先读取学习记忆')
+            if 'event' in args or (action == 'revoke' and any(k in args for k in ('technology', 'method'))):
+                raise ValueError('纠正自动保存为自评，撤销只需要证据 ID')
+            data = {k: v for k, v in args.items() if k in ('action', 'id', 'technology', 'method')}
+            data['evidence'] = message
             with ws.conn:
-                app.record_action(ws, run_id, {'action': 'record_learning', 'evidence_id': result['evidence_id'], 'event': args['event']})
+                result = memory.edit_learning(ws, data, allow_run=run_id, source_message_id=row['id'])
+                app.record_action(ws, run_id, {'action': 'record_learning', 'operation': action,
+                    'id': args['id'], **{k: result[k] for k in ('evidence_id', 'event', 'revoked') if k in result}})
+            current = app.item(ws, item['id'])
+            result['learning'] = learning.profile(ws.conn, memory.USER, limit=20)
+            result['managed_memory'] = assistant.prompt_rows(assistant.select_rows(memory.notes(ws, current, active_only=True), message))
             return result
 
     tools = {
@@ -159,11 +177,13 @@ def assistant_tools(app, item, run_id, message, check_cancel, *, user_authored=T
                                  'wait_seconds': {'type': 'integer', 'minimum': 0, 'maximum': 20}}, read_task, ['id']),
     }
     if user_authored:
-        tools['record_learning'] = definition('Record the current user\'s explicit discussion, attempt or self-report about a technology/method. The host attaches the actual user message as evidence. No event here establishes verified mastery. Do not record an assistant answer or research assignment as learning evidence.',
-            {'technology': {'type': 'string', 'minLength': 1, 'maxLength': 200},
+        tools['record_learning'] = definition('Record, correct or revoke the current user\'s technology/method learning evidence. action defaults to record and requires technology and event. For correct/revoke, read_memory first to find the evidence id. Corrections always become self_report, not verified mastery. The host attaches the actual user message and retires stale context after edits. Never record an assistant answer or research assignment as user learning.',
+            {'action': {'type': 'string', 'enum': ['record', 'correct', 'revoke']},
+             'id': {'type': 'integer', 'minimum': 1},
+             'technology': {'type': 'string', 'minLength': 1, 'maxLength': 200},
              'method': {'type': 'string', 'maxLength': 300},
              'event': {'type': 'string', 'enum': ['discussed', 'attempted', 'self_report']}},
-            record_learning, ['technology', 'event'])
+            record_learning)
     if item['id'] == 'main':
         tools['create_task'] = definition('Dispatch separate research work only when the user asks. Give a self-contained instruction preserving relevant term meanings, not just topic names. constraints must quote all applicable constraints verbatim from the CURRENT user message; [] if none. Set external_retrieval=blocked if search/network is prohibited; the host enforces it for this child run. Do not omit constraints to enable tools. Only instruction and selected quotes reach the child, not parent history. Personal and bound project memory are shared. Project ID defaults to the current project. Submission is not completion; read_task returns progress/results.',
             {'name': {'type': 'string', 'minLength': 1, 'maxLength': 80},

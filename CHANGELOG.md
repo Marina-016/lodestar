@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Extend the existing Web learning tool with correction/revocation by evidence ID. Reuse memory-center mutations, attach the actual user message, downgrade corrections to self-report, retire stale context and preserve concurrent-run protection. No new tool or intent route.
+
 - Load the Anthropic SDK only for its provider; mock and DashScope startup avoid unrelated SDK/trust-store imports. Windows experiment receipts collect local runtime facts without WMI and disclose that the architecture is the Python build target.
 - Disable SDK retries and remove implicit HTTP/empty-answer resubmission, token-budget growth and reasoning fallback. Keep the existing, explicit one-time invalid-JSON repair separate. Preserve safe HTTP classification without including upstream response bodies in error messages.
 - Release failed task startup slots, persist a safe terminal record and preserve request-key idempotency. An acknowledged cancellation takes precedence over startup failure; actual created-but-not-submitted task receipts remain distinct.
@@ -14,13 +16,15 @@
 
 ### Added
 
+- Optional DashScope-only token reservations in isolated acceptance, alongside the shared physical-request cap. Pre-reserve UTF-8 request bytes, output/reasoning allowances and overhead; refund only coherent usage from completed calls. Errors and unknown usage retain reservations, and uncertain/excess usage stops further requests. This estimates local consumption, not the cloud balance or billing ceiling.
+
 - Shared physical inference-attempt limits for Anthropic and DashScope acceptance clients, including independent transports for foreground/background clients. This is a local limit, not a cloud free-quota guarantee.
 - Frozen QF-1 synthetic sources and a four-turn `--scenario quality` HTTP acceptance path for source discovery, method/experiment comparison, publication/numeric claims and concise followups. Store source snapshots/hashes separately from human-only facts; never feed reference answers to the model or claim a semantic pass automatically.
 - A staged V0 development plan and eight human review cards. Updated old development conventions to reflect the current model-led dialogue rather than the legacy fixed research loop.
 
 ### Validation
 
-- Final frozen code: 384 offline Python regressions and 14 frontend tests passed, with no WMI workaround or skipped tests. Syntax, dependency and release checks passed; test resources were cleaned up.
+- Latest frozen code: 405 offline Python regressions and 14 frontend tests passed, with no WMI workaround or skipped tests. Syntax, dependency and release checks passed; test resources were cleaned up. The earlier 384-test snapshot remains in the historical review.
 - Public arXiv retrieval and one query-selected PDF read succeeded. The 24 authorized real-model requests do not establish semantic acceptance; failed answers, budget stops and older hash-mismatch artifacts are retained.
 
 ### Scope

@@ -3,6 +3,8 @@
 Default is offline plumbing, not autonomous-model acceptance. Live runs require
 explicit --live, respect the model-disable switch, and never use paid search.
 Artifacts persist in a fresh ignored directory; no real Web database is opened.
+Optional DashScope token protection reserves conservative local estimates. It is
+not a supplier billing bound or account balance, and cannot cover other clients.
 """
 import argparse
 from contextlib import ExitStack
@@ -29,25 +31,128 @@ from lodestar.web.server import WebApp, make_server
 
 class ModelBudget:
     """Count physical inference attempts across foreground/background clients."""
-    def __init__(self, limit):
+    def __init__(self, limit, max_total_tokens=None):
         if not 1 <= limit <= 100:
             raise ValueError('Model attempt limit must be 1-100')
+        if max_total_tokens is not None and (type(max_total_tokens) is not int or max_total_tokens < 1):
+            raise ValueError('max_total_tokens must be a positive integer')
         self.limit, self.used, self.blocked = limit, 0, 0
         self.lock = threading.Lock()
         self.stopped = False
         self.failures = []
         self.responses = []
+        self.max_total_tokens = max_total_tokens
+        self.token_used, self.token_blocked, self.token_stopped = 0, 0, False
+        self.token_reservations = {}
+        self._token_local = threading.local()
+
+    @staticmethod
+    def estimate_tokens(request):
+        """UTF-8 body bytes + output/reasoning allowances + fixed overhead.
+
+        Only these transient local variables contain the request body. This is a
+        conservative estimate, not a tokenizer or a supplier billing guarantee.
+        """
+        body = request.body
+        if isinstance(body, str):
+            body = body.encode('utf-8')
+        if not isinstance(body, bytes):
+            raise ValueError('Expected a JSON request body')
+        payload = json.loads(body.decode('utf-8'))
+        ceiling = payload.get('max_tokens') if isinstance(payload, dict) else None
+        if type(ceiling) is not int or ceiling < 1:
+            raise ValueError('Expected a positive max_tokens')
+        if payload.get('enable_thinking') is not False:
+            thinking = payload.get('thinking_budget')
+            if payload.get('enable_thinking') is not True or type(thinking) is not int or thinking < 1:
+                raise ValueError('Expected explicit disabled or bounded thinking')
+            ceiling += thinking
+        return len(body) + ceiling + 1024
+
+    def finish_tokens(self, usage=None, *, success=False):
+        """Refund only complete successful calls with coherent reported usage."""
+        if self.max_total_tokens is None:
+            return
+        attempt = getattr(self._token_local, 'attempt', None)
+        with self.lock:
+            record = self.token_reservations.get(attempt)
+            if not record or record['state'] != 'reserved':
+                return
+            if not success:
+                record['state'] = 'error_reserved'
+                return
+            if not isinstance(usage, dict) or not usage:
+                record['state'] = 'unknown_usage_reserved'
+                return
+            totals = []
+            valid = True
+            for left, right in (('input_tokens', 'output_tokens'), ('prompt_tokens', 'completion_tokens')):
+                if left in usage or right in usage:
+                    values = (usage.get(left), usage.get(right))
+                    if any(type(value) is not int or value < 0 for value in values):
+                        valid = False
+                    else:
+                        totals.append(sum(values))
+            if 'total_tokens' in usage:
+                value = usage['total_tokens']
+                if type(value) is not int or value < 0:
+                    valid = False
+                else:
+                    totals.append(value)
+            if not valid or (totals and (len(set(totals)) != 1 or totals[0] <= 0)):
+                record['state'] = 'invalid_usage_reserved'
+                self.token_stopped = True
+            elif not totals:
+                record['state'] = 'unknown_usage_reserved'
+            else:
+                actual = totals[0]
+                self.token_used += actual-record['reserved_tokens']
+                record.update(accounted_tokens=actual, reported_tokens=actual,
+                    state='reported_usage' if actual <= record['reserved_tokens'] else 'usage_exceeded_reservation')
+                if actual > record['reserved_tokens']:
+                    self.token_stopped = True
+
+    def token_report(self):
+        with self.lock:
+            return {'enabled': self.max_total_tokens is not None, 'max_total_tokens': self.max_total_tokens,
+                    'accounted_tokens': self.token_used, 'blocked_attempts': self.token_blocked,
+                    'stopped': self.token_stopped,
+                    'attempts': [{'attempt': attempt, **record}
+                                 for attempt, record in self.token_reservations.items()],
+                    'scope': 'This acceptance run only; no account balance or other-client consumption is covered.',
+                    'estimate': 'UTF-8 JSON bytes + max_tokens + explicit thinking allowance + 1024. '
+                                'A conservative local estimate, not a supplier billing upper bound. '
+                                'Errors, interrupted calls and unknown usage retain the full reservation. '
+                                'Protected runs require explicit thinking off or a positive fixed thinking budget; '
+                                'default/effort settings are refused only by this local acceptance guard.'}
 
     def reserve(self, request):
         path = request.url if isinstance(request.url, str) else request.url.path
         path = urlsplit(path).path.rstrip('/')
         if request.method != 'POST' or not path.endswith(('/messages', '/chat/completions')):
             return
+        estimate = None
+        if self.max_total_tokens is not None:
+            try:
+                estimate = self.estimate_tokens(request)
+            except (ValueError, TypeError, UnicodeError):
+                with self.lock:
+                    self.token_blocked += 1
+                    self.token_stopped = True
+                raise LLMError('Acceptance request has no safe token estimate', code='acceptance_token_budget') from None
         with self.lock:
             if self.stopped or self.used >= self.limit:
                 self.blocked += 1
                 raise LLMError('Acceptance model-attempt limit reached', code='acceptance_budget')
+            if estimate is not None and (self.token_stopped or self.token_used + estimate > self.max_total_tokens):
+                self.token_blocked += 1
+                raise LLMError('Acceptance token reservation limit reached', code='acceptance_token_budget')
             self.used += 1
+            if estimate is not None:
+                self.token_used += estimate
+                self.token_reservations[self.used] = {'reserved_tokens': estimate, 'accounted_tokens': estimate,
+                    'reported_tokens': None, 'state': 'reserved'}
+                self._token_local.attempt = self.used
             if isinstance(getattr(request, 'extensions', None), dict):
                 request.extensions['lodestar_attempt'] = self.used
             return self.used
@@ -114,12 +219,34 @@ class ModelBudget:
     def client(self, config):
         if config.llm_mode == 'live' and config.llm_provider not in ('anthropic', 'dashscope'):
             raise ValueError('This acceptance request guard supports Anthropic and DashScope only')
+        if self.max_total_tokens is not None and config.llm_mode == 'live' and config.llm_provider != 'dashscope':
+            raise ValueError('Optional acceptance token protection currently supports DashScope only')
         budget = self
         class ObservedClient(LLMClient):
-            def dialogue_step(self, *args, **kwargs):
+            def _complete_live(self, *args, **kwargs):
+                if budget.max_total_tokens is None:
+                    return super()._complete_live(*args, **kwargs)
+                budget._token_local.attempt = None
+                before = len(self._dashscope.usage)
                 try:
-                    return super().dialogue_step(*args, **kwargs)
+                    result = super()._complete_live(*args, **kwargs)
+                except Exception:
+                    budget.finish_tokens()
+                    raise
+                usage = self._dashscope.usage[-1] if len(self._dashscope.usage) > before else None
+                budget.finish_tokens(usage, success=True)
+                return result
+
+            def dialogue_step(self, *args, **kwargs):
+                if budget.max_total_tokens is not None:
+                    budget._token_local.attempt = None
+                try:
+                    result = super().dialogue_step(*args, **kwargs)
+                    observation = self.last_dialogue_observation or {}
+                    budget.finish_tokens(observation.get('usage'), success=True)
+                    return result
                 except LLMError as error:
+                    budget.finish_tokens()
                     cause = error.__cause__ or error
                     frames = [{'file': Path(f.filename).name, 'function': f.name, 'line': f.lineno}
                               for f in traceback.extract_tb(cause.__traceback__)[-8:]]
@@ -129,6 +256,8 @@ class ModelBudget:
         class GuardedSession(requests.Session):
             def send(self, request, **kwargs):
                 attempt = budget.reserve(request)
+                if attempt is not None:
+                    kwargs['allow_redirects'] = False  # A redirect must not trigger a second inference.
                 response = super().send(request, **kwargs)
                 if attempt is not None:
                     # No response body, prompt, credential or URL is retained here.
@@ -156,7 +285,7 @@ class ModelBudget:
         return client
 
 
-def run(config, output_dir, *, scenario='direct', max_model_calls=24, wait_seconds=180, llm_factory=None):
+def run(config, output_dir, *, scenario='direct', max_model_calls=24, max_total_tokens=None, wait_seconds=180, llm_factory=None):
     if scenario not in ('direct', 'research', 'workspace', 'quality'):
         raise ValueError('Unknown acceptance scenario')
     if scenario == 'quality' and config.search_mode != 'mock':
@@ -179,17 +308,21 @@ def run(config, output_dir, *, scenario='direct', max_model_calls=24, wait_secon
             sources.enter_context(patch('lodestar.agent.dialogue.datetime', FixedDateTime))
             sources.enter_context(patch('lodestar.agent.evidence.datetime', FixedDateTime))
         return _run(config, output_dir, scenario=scenario, max_model_calls=max_model_calls,
-                    wait_seconds=wait_seconds, llm_factory=llm_factory, fixture=fixture)
+                    max_total_tokens=max_total_tokens, wait_seconds=wait_seconds,
+                    llm_factory=llm_factory, fixture=fixture)
 
 
-def _run(config, output_dir, *, scenario, max_model_calls, wait_seconds, llm_factory, fixture):
+def _run(config, output_dir, *, scenario, max_model_calls, max_total_tokens, wait_seconds, llm_factory, fixture):
+    if max_total_tokens is not None and config.llm_mode == 'live':
+        if config.llm_provider != 'dashscope' or llm_factory is not None:
+            raise ValueError('Token protection requires the guarded DashScope acceptance client')
+    budget = ModelBudget(max_model_calls, max_total_tokens)
     root = Path(output_dir).resolve()
     root.mkdir(parents=True, exist_ok=False)  # Never reuse a real/user database.
     cfg = replace(config, db_path=root/'web.db', workspace_dir=root, demo_replay=False,
                   project_model_allowed_repository='', project_model_allowed_paths=())
     if cfg.search_mode == 'live' and cfg.web_search_backend != 'duckduckgo':
         raise ValueError('Acceptance only allows public search; paid/MCP search is not enabled')
-    budget = ModelBudget(max_model_calls)
     frozen_sources = None
     if fixture is not None:
         frozen_sources = json.dumps(fixture.snapshot(), ensure_ascii=False, sort_keys=True, indent=2)
@@ -233,6 +366,8 @@ def _run(config, output_dir, *, scenario, max_model_calls, wait_seconds, llm_fac
             report['blocked_model_attempts'] = budget.blocked
             report['model_failures'] = list(budget.failures)
             report['transport_responses'] = json.loads(json.dumps(budget.responses))
+        if max_total_tokens is not None:
+            report['token_budget'] = budget.token_report()
         (root/'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
 
     def get(path, **params):
@@ -368,6 +503,8 @@ def _run(config, output_dir, *, scenario, max_model_calls, wait_seconds, llm_fac
             time.sleep(.1)
         report['remaining_runs_at_exit'] = len(app.cancel_signals)
         report['checks']['model_attempt_budget_not_exhausted'] = budget.blocked == 0
+        if max_total_tokens is not None:
+            report['checks']['token_budget_not_exhausted'] = budget.token_blocked == 0 and not budget.token_stopped
         if app.cancel_signals:
             report['checks']['all_observed_runs_completed'] = False
         save()
@@ -386,6 +523,8 @@ def main():
     parser.add_argument('--thinking', choices=('on', 'off'))
     parser.add_argument('--scenario', choices=('direct', 'research', 'workspace', 'quality'), default='direct')
     parser.add_argument('--max-model-calls', type=int, default=24)
+    parser.add_argument('--max-total-tokens', type=int,
+                        help='Optional local DashScope reservation cap; not an account balance or exact billing limit')
     parser.add_argument('--output-dir', type=Path)
     args = parser.parse_args()
     cfg = load_config()
@@ -402,7 +541,8 @@ def main():
     cfg = replace(cfg, search_mode='live' if args.live_search else 'mock')
     root = args.output_dir or PROJECT_ROOT/'workspace'/'acceptance'/uuid.uuid4().hex
     try:
-        report = run(cfg, root, scenario=args.scenario, max_model_calls=args.max_model_calls)
+        report = run(cfg, root, scenario=args.scenario, max_model_calls=args.max_model_calls,
+                     max_total_tokens=args.max_total_tokens)
     except (ValueError, FileExistsError) as error:
         parser.error(str(error))
     print(json.dumps({'report': str(root/'report.json'), 'mode': cfg.llm_mode,

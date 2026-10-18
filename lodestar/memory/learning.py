@@ -6,6 +6,7 @@ does not establish mastery; only user-authored demonstrations do.
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 import sqlite3
 from datetime import datetime, timezone
 
@@ -152,7 +153,102 @@ def revoke(conn: sqlite3.Connection, evidence_id: int, user_id: str = 'default')
     return result.rowcount == 1
 
 
+
+def _evidence_reference(row):
+    """Keep stored provenance without turning a sliced quote into a new claim."""
+    reference = {key: row[key] for key in ('id', 'event', 'actor', 'created_at', 'paper_url', 'task_id') if key in row}
+    raw = row.get('evidence', '')
+    try:
+        origin = json.loads(raw)
+    except (ValueError, TypeError):
+        origin = None
+    if isinstance(origin, dict):
+        for source, target in (('message_id', 'source_message_id'), ('corrects', 'corrects_evidence_id')):
+            if type(origin.get(source)) is int:
+                reference[target] = origin[source]
+    # References may already be from a bounded context; preserve their links.
+    for key in ('source_message_id', 'corrects_evidence_id'):
+        if key in row:
+            reference[key] = row[key]
+    return {**reference, 'evidence': '', 'evidence_omitted': True,
+            'evidence_original_chars': row.get('evidence_original_chars', len(raw))}
+
+
+def model_context(records: list[dict], budget: int = 12000) -> dict:
+    """Bound serialized profile JSON, leaving storage and mastery decisions alone.
+
+    Whole evidence strings are either retained or explicitly omitted. Preserve
+    group identities and old mastery support before spending space on evidence
+    bodies; never summarize or cut a user's statement into a different claim.
+    Coverage metadata is outside the profile character budget, not a token cap.
+    """
+    if type(budget) is not int or budget < 2:
+        raise ValueError('Learning context budget must fit an empty JSON list')
+    originals = deepcopy(records)
+    def size(value):
+        return len(json.dumps(value, ensure_ascii=False))
+    compressed = size(originals) > budget
+    profiles = originals
+    if compressed:
+        profiles, pairs = [], []
+        for source in originals:
+            evidence = source.get('evidence', [])
+            projection = {key: value for key, value in source.items()
+                          if key not in ('evidence', 'mastery_evidence', 'papers')}
+            projection.update(evidence=[_evidence_reference(evidence[0])] if evidence else [],
+                mastery_evidence=_evidence_reference(source['mastery_evidence'])
+                    if source.get('mastery_evidence') else None,
+                papers=[], papers_truncated=bool(source.get('paper_count') or source.get('papers')),
+                evidence_truncated=source.get('evidence_truncated', False) or len(evidence) > 1,
+                context_truncated=True)
+            if size(profiles+[projection]) <= budget:
+                profiles.append(projection)
+                pairs.append((projection, source))
+
+        def retain(projection, updates):
+            previous = dict(projection)
+            projection.update(updates)
+            if size(profiles) > budget:
+                projection.clear()
+                projection.update(previous)
+                return False
+            return True
+
+        for projection, source in pairs:
+            if source.get('mastery_evidence'):
+                retain(projection, {'mastery_evidence': source['mastery_evidence']})
+        for index in range(max((len(source.get('evidence', [])) for _, source in pairs), default=0)):
+            for projection, source in pairs:
+                rows = source.get('evidence', [])
+                if index >= len(rows):
+                    continue
+                current = projection['evidence'][:]
+                candidate = [rows[index]] if index == 0 else current+[rows[index]]
+                updates = {'evidence': candidate, 'evidence_truncated':
+                           source.get('evidence_truncated', False) or source.get('event_count', len(rows)) > len(candidate)}
+                if not retain(projection, updates) and index > 0:
+                    candidate = current+[_evidence_reference(rows[index])]
+                    retain(projection, {'evidence': candidate, 'evidence_truncated':
+                           source.get('evidence_truncated', False) or source.get('event_count', len(rows)) > len(candidate)})
+        for projection, source in pairs:
+            retain(projection, {'papers': source.get('papers', []),
+                                'papers_truncated': source.get('papers_truncated', False)})
+    references, bodies = set(), set()
+    for profile in profiles:
+        for row in profile.get('evidence', []) + ([profile['mastery_evidence']] if profile.get('mastery_evidence') else []):
+            (references if row.get('evidence_omitted') else bodies).add(row.get('id'))
+    return {'profiles': profiles, 'coverage': {
+        'char_budget': budget, 'serialized_profile_chars': size(profiles),
+        'input_profiles': len(originals), 'returned_profiles': len(profiles),
+        'profiles_omitted': len(originals)-len(profiles), 'evidence_texts_omitted': len(references-bodies),
+        'truncated': compressed or any(p.get('context_truncated') for p in profiles),
+        'note': 'Character budget applies to serialized profile JSON only. Omitted evidence text is not an '
+                'empty original or a summary; IDs preserve stored links, not newly verified source content. '
+                'Mastery comes from stored history; this projection does not assess it. '
+                'Record-count coverage is reported separately.'}}
+
+
 def prompt_context(records: list[dict]) -> str:
     return ('用户学习证据（仅记录技术/方法的接触与掌握；阅读不代表掌握；'
             'self_report 是自评，不是验证；未记录的技术掌握程度为 unknown）：\n'
-            + json.dumps(records, ensure_ascii=False))
+            + json.dumps(model_context(records), ensure_ascii=False))

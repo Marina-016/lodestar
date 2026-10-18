@@ -33,14 +33,16 @@ def assistant_tools(app, item, run_id, message, check_cancel, *, user_authored=T
             matched_notes = len(rows)
             memories = assistant.select_rows(rows, query, budget=12000, limit=30)
             recall = learning.retrieve(ws.conn, memory.USER, query or None, limit=8 if query else 20)
-            recalled = recall['profiles']
+            learning_packet = learning.model_context(recall['profiles'])
+            recalled = learning_packet['profiles']
             return {'memories': memories, 'learning': recalled,
+                    'learning_context': learning_packet['coverage'],
                     'retrieval': {'query': query, 'filter_applied': bool(query),
                         'visible_active_notes': visible_notes, 'user_active_learning_events': active_learning,
                         'matching_memories': matched_notes, 'memories_truncated': len(memories) < matched_notes,
                         'user_active_learning_profiles': recall['active_profiles'],
                         'matching_learning_profiles': recall['matching_profiles'],
-                        'learning_profiles_truncated': recall['profiles_truncated'],
+                        'learning_profiles_truncated': recall['matching_profiles'] > len(recalled),
                         'filter_fields': {'memories': ['content'], 'learning': ['technology', 'method']},
                         'returned_memories': len(memories), 'returned_learning_profiles': len(recalled),
                         'note': 'Query filters lexically; no matches does not mean no stored records. '
@@ -183,12 +185,14 @@ def assistant_tools(app, item, run_id, message, check_cancel, *, user_authored=T
                 app.record_action(ws, run_id, {'action': 'record_learning', 'operation': action,
                     'id': args['id'], **{k: result[k] for k in ('evidence_id', 'event', 'revoked') if k in result}})
             current = app.item(ws, item['id'])
-            result['learning'] = learning.profile(ws.conn, memory.USER, limit=20)
+            learning_packet = learning.model_context(learning.profile(ws.conn, memory.USER, limit=20))
+            result['learning'] = learning_packet['profiles']
+            result['learning_context'] = learning_packet['coverage']
             result['managed_memory'] = assistant.prompt_rows(assistant.select_rows(memory.notes(ws, current, active_only=True), message))
             return result
 
     tools = {
-        'read_memory': definition('Read visible active personal/project/task facts and your user\'s learning evidence. query is an optional lexical filter; omit it for a bounded overview. Counts cover this space\'s visible notes, the current user\'s events and distinct technology/method profiles. Match counts and truncation flags disclose omitted records. Empty filtered results do not imply empty memory.',
+        'read_memory': definition('Read visible active personal/project/task facts and your user\'s learning evidence. query is an optional lexical filter; omit it for a bounded overview. Counts cover this space\'s visible notes, the current user\'s events and distinct technology/method profiles. Match counts and truncation flags disclose omitted records. Long evidence may be returned as an explicit omitted-text reference. Empty filtered results do not imply empty memory.',
                                  {'query': {'type': 'string'}}, read_memory),
         'manage_memory': definition('Save a durable user preference/fact, or correct/forget an existing memory by ID. Use only user-provided facts or confirmed project decisions. Never store technology definitions, infer mastery, or turn background reading into user exposure. scope defaults to personal; project requires a bound project; task keeps a local note. Read existing IDs before modifying them.',
             {'action': {'type': 'string', 'enum': ['save', 'forget']}, 'id': {'type': 'string'},

@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Bound learning-profile JSON at model boundaries to 12000 characters, retaining source/mastery references and explicitly omitting evidence strings that do not fit. Never slice or summarize user evidence, change stored history or replace full memory-center data. Apply the same view to automatic context, memory reads, edit/reset results and legacy synthesis.
+
 - Deduplicate learning recall with the same NOCASE identities as profiles and project matching methods directly, so 500 newer methods cannot hide an exact older match. Retain full-history mastery support and disclose omitted evidence.
 - Report memory match counts, distinct learning-profile counts, filter fields and truncation independently from event counts or empty query results; preserve the shared read snapshot.
 
@@ -45,13 +47,15 @@
 
 ### Validation
 
+- Long learning-context changes passed 457 Python tests, 14 frontend tests and a 327-file preflight. Local HTTP delivered a 470-character profile reference for a 23093-character stored synthetic evidence record, preserving full UI data and source IDs. Zero cloud-model/external-network calls; semantic acceptance remains pending.
+
 - Learning-recall changes passed 450 Python regressions, 14 frontend tests and a 325-file preflight. The isolated five-turn filter/overview lifecycle uses scripted model decisions; no real-model requests and no semantic acceptance. Prior intermittent HTTP failure remains recorded, not declared fixed.
 
 - Frozen-public-corpus HTTP replay passed with scripted decisions and zero cloud-model/external-network calls. The initial 443-test run had one existing HTTP test abort with Windows 10053; 18 targeted Web tests, five repetitions of the failing test and the full 443-test recheck passed. Preserve the initial failure; its cause remains unestablished.
 
 - Six local reads of the two existing public PDF caches stayed within budget; query spans matched the extracted text. No model or network requests. This checks ingestion, not autonomous research or answer correctness; see docs/v0-pdf-evidence-review-20261018.md.
 
-- Latest full regression: 450 offline Python regressions and 14 frontend tests passed, with no WMI workaround or skipped tests. Syntax, dependency and release checks passed; test resources were cleaned up. Earlier 384/405/419/420/424/434/443-test snapshots remain in the historical review.
+- Latest full regression: 457 offline Python regressions and 14 frontend tests passed, with no WMI workaround or skipped tests. Syntax, dependency and release checks passed; test resources were cleaned up. Earlier 384/405/419/420/424/434/443/450-test snapshots remain in the historical review.
 - Public arXiv retrieval and one query-selected PDF read succeeded. The 24 authorized real-model requests do not establish semantic acceptance; failed answers, budget stops and older hash-mismatch artifacts are retained.
 
 ### Scope

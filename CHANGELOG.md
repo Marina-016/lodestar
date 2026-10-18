@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- Normalize numbered PDF headings and preserve repeated sections; include Approach and experimental variants in bounded section excerpts, retaining room for method/experiment evidence and reporting truncation.
+- Honor queries on generic PDFs and key their caches by complete URL instead of filename. Keep delivered query spans and match flags aligned with the caller's character budget.
+
 - Accept schema-valid redundant event values when correcting learning evidence, while always storing user self-report. Keep unsupported mastery events, revocation arguments and concurrent mutations protected.
 - Distinguish lexical memory-search misses from an empty profile using scoped counts and bounded overview guidance; counts and returned data share one read snapshot.
 
@@ -33,7 +36,9 @@
 
 ### Validation
 
-- Latest frozen code: 424 offline Python regressions and 14 frontend tests passed, with no WMI workaround or skipped tests. Syntax, dependency and release checks passed; test resources were cleaned up. Earlier 384/405/419/420-test snapshots remain in the historical review.
+- Six local reads of the two existing public PDF caches stayed within budget; query spans matched the extracted text. No model or network requests. This checks ingestion, not autonomous research or answer correctness; see docs/v0-pdf-evidence-review-20261018.md.
+
+- Latest code: 434 offline Python regressions and 14 frontend tests passed, with no WMI workaround or skipped tests. Syntax, dependency and release checks passed; test resources were cleaned up. Earlier 384/405/419/420/424-test snapshots remain in the historical review.
 - Public arXiv retrieval and one query-selected PDF read succeeded. The 24 authorized real-model requests do not establish semantic acceptance; failed answers, budget stops and older hash-mismatch artifacts are retained.
 
 ### Scope

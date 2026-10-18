@@ -9,6 +9,7 @@ V0：arXiv 摘要级。V1-R2：扩展 PDF 全文读取——
 from __future__ import annotations
 
 import re
+from hashlib import sha256
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -22,7 +23,7 @@ ARXIV_API = "https://export.arxiv.org/api/query"
 ATOM = "{http://www.w3.org/2005/Atom}"
 _ARXIV_RE = re.compile(r"arxiv\.org/(?:abs|pdf)/([A-Za-z0-9.]+(?:v\d+)?)")
 _SECTION_RE = re.compile(
-    r"^\s*(?:\d+[\.\)]\s*)?(Abstract|Introduction|Background|Related Work|Method|Methods|Methodology|"
+    r"^\s*(?:\d+(?:\.\d+)*(?:[.)]\s*|\s+))?(Abstract|Introduction|Background|Related Work|Method|Methods|Methodology|"
     r"Approach|Experiments|Experimental (?:Setup|Results|Evaluation)|Results|Discussion|Conclusion|"
     r"References)\s*$", re.I)
 
@@ -55,7 +56,7 @@ def _fetch_abstract(arxiv_id: str, timeout: int) -> dict:
 
 def _truncate(body: str, char_budget: int) -> tuple[str, bool]:
     if len(body) > char_budget:
-        return body[:char_budget] + f"\n…[已截断，预算={char_budget}字符]", True
+        return body[:char_budget], True
     return body, False
 
 
@@ -99,9 +100,10 @@ def _parse_sections(text: str) -> dict:
         stripped = ln.strip()
         if not stripped:
             continue
-        if _SECTION_RE.match(stripped) and len(stripped) < 60:
-            cur = stripped.lower().replace(" ", "_")
-            sections[cur] = []
+        heading = _SECTION_RE.fullmatch(stripped)
+        if heading and len(stripped) < 60:
+            cur = heading.group(1).lower().replace(" ", "_")
+            sections.setdefault(cur, [])
             continue
         if cur is not None and stripped:
             sections[cur].append(stripped)
@@ -143,46 +145,87 @@ def _read_arxiv_full(cfg, arxiv_id, meta, base: str, url: str, char_budget: int,
     if text is None:
         return _result(base, meta["title"], url, "abstract", False, char_budget,
                        "PDF 无文本层（疑似扫描件），已回退摘要级", [])
+    return _pdf_body_result(text, sections, base, meta["title"], url, char_budget, query)
+
+
+def _pdf_body_result(text, sections, base, title, url, char_budget, query=""):
+    """Deliver bounded body evidence; extracted sections are not complete coverage."""
     if query:
-        from lodestar.retrieval import select_excerpt
-        excerpt = select_excerpt(text, query, max(500, char_budget - len(base)))
-        result = _result(base + "\n\n" + excerpt['text'], meta['title'], url,
-                         'full', True, char_budget, 'Query-selected PDF excerpts; offsets refer to extracted PDF text.',
-                         list(sections), excerpt['truncated'])
-        result.update({k: v for k, v in excerpt.items() if k != 'text'})
+        from lodestar.retrieval import select_excerpt, terms
+        excerpt = select_excerpt(text, query, char_budget)
+        # select_excerpt's minimum window and inter-window separators may exceed
+        # a caller's small budget. Keep retained spans aligned with delivered text.
+        chunks, spans, remaining = [], [], char_budget
+        wanted = terms(query)
+        for span in excerpt['evidence_spans']:
+            separator = "\n\n" if chunks else ""
+            if remaining <= len(separator):
+                break
+            passage = text[span['start']:span['end']][:remaining-len(separator)]
+            chunks.append(separator + passage)
+            spans.append({**span, 'end': span['start'] + len(passage),
+                          'term_matches': len(wanted & terms(passage))})
+            remaining -= len(separator) + len(passage)
+        body = ''.join(chunks)
+        result = _result(body, title, url, 'full', True, char_budget,
+                         'Query-selected bounded PDF excerpts; offsets refer to extracted PDF text.',
+                         [], sum(s['end']-s['start'] for s in spans) < len(text))
+        result.update(coverage=excerpt['coverage'], evidence_spans=spans,
+                      query_matched=any(s['term_matches'] for s in spans),
+                      available_sections=list(sections))
         return result
-    parts = [base]
-    for key in ("introduction", "method", "methods", "methodology", "experiments",
-                "experimental_setup", "results", "conclusion"):
-        if key in sections:
-            parts.append(f"\n## {key}\n{sections[key][:4000]}")
     method_keys = {"method", "methods", "methodology", "approach"}
     if not method_keys.intersection(sections):
-        # Nonstandard numbered headings must not silently omit the main body.
-        body, truncated = _truncate(base + "\n\n## Bounded PDF body excerpt\n" + text, char_budget)
-        result = _result(body, meta["title"], url, "full", True, char_budget,
+        # Unrecognized headings still allow a bounded view of the actual body.
+        prefix = base[:char_budget//4]
+        label = "\n\n## Bounded PDF body excerpt\n"
+        if len(label) > char_budget//4:
+            label = ""
+        body, truncated = _truncate(prefix + label + text, char_budget)
+        truncated = truncated or len(prefix) < len(base)
+        result = _result(body, title, url, "full", True, char_budget,
                          "Method headings not recognized; returning a bounded raw body excerpt, not complete coverage.",
-                         list(sections), truncated)
-        result["coverage"] = "raw_body_excerpt"
+                         [], truncated)
+        result.update(coverage="raw_body_excerpt", available_sections=list(sections))
         return result
-    body, truncated = _truncate("\n".join(parts), char_budget)
-    return _result(body, meta["title"], url, "full", True, char_budget,
-                   f"PDF 全文抽取成功（{len(text)} 字符 → 按节截断）", list(sections.keys()), truncated)
+    # Reserve room across recognized sections: a long introduction must not
+    # consume the entire response before method and experiment evidence appears.
+    selected = [(key, value) for key, value in sections.items()
+                if key not in ("abstract", "references") and value]
+    prefix = base[:char_budget//4]
+    headers = [f"\n\n## {key}\n" for key, _ in selected]
+    remaining = char_budget - len(prefix) - sum(map(len, headers))
+    if remaining < len(selected):
+        body, truncated = _truncate(text, char_budget)
+        result = _result(body, title, url, "full", True, char_budget,
+                         "Budget too small for section excerpts; returning a bounded body prefix.", [], truncated)
+        result.update(coverage="raw_body_excerpt", available_sections=list(sections))
+        return result
+    allowances = {}
+    for count, (key, value) in enumerate(sorted(selected, key=lambda part: len(part[1]))):
+        allowance = min(len(value), 4000, remaining // (len(selected)-count))
+        allowances[key] = allowance
+        remaining -= allowance
+    body = prefix + ''.join(header + value[:allowances[key]]
+                            for (key, value), header in zip(selected, headers))
+    omitted = len(prefix) < len(base) or any(allowances[key] < len(value) for key, value in selected)
+    result = _result(body, title, url, "full", True, char_budget,
+                     "Bounded excerpts from recognized PDF sections; unrecognized headings and other passages may be omitted.",
+                     [key for key, _ in selected], omitted)
+    result.update(coverage="bounded_section_excerpts", available_sections=list(sections))
+    return result
 
 
-def _read_generic_pdf(cfg, url: str, char_budget: int) -> dict:
-    dest = _pdf_cache_path(cfg, url.split("/")[-1])
+def _read_generic_pdf(cfg, url: str, char_budget: int, query: str = "") -> dict:
+    # Filename alone is not document identity. Do not reuse legacy filename-only
+    # caches, which may belong to a different publisher or query-string version.
+    dest = _pdf_cache_path(cfg, "url_" + sha256(url.encode("utf-8")).hexdigest())
     if not _download_pdf(url, dest, cfg.tool_timeout_s):
         return {"error": f"PDF 下载失败: {url}", "url": url}
     text, sections = _extract_pdf_text(dest)
     if text is None:
         return {"error": "PDF 无文本层（疑似扫描件）", "url": url}
-    parts = ["\n".join(text.splitlines()[:40])]  # 开头多为标题+摘要
-    for k, v in sections.items():
-        parts.append(f"\n## {k}\n{v[:3000]}")
-    body, truncated = _truncate("\n".join(parts), char_budget)
-    return _result(body, url.split("/")[-1], url, "full", True, char_budget,
-                   f"通用 PDF 抽取成功（{len(text)} 字符）", list(sections.keys()), truncated)
+    return _pdf_body_result(text, sections, "", url.split("/")[-1], url, char_budget, query)
 
 
 def _result(body: str, title: str, url: str, read_depth: str, full_ok: bool,
@@ -222,7 +265,7 @@ def tool_read_paper(ws, url: str, char_budget: int | None = None, full_text: boo
 
     if re.search(r"\.pdf(\?|$)", (url or "").lower()):
         if full_text and cfg.full_text_enabled:
-            return _read_generic_pdf(cfg, url, char_budget)
+            return _read_generic_pdf(cfg, url, char_budget, query=query)
         return {"error": "PDF 链接需要 full_text 模式开启", "url": url}
 
     return {"error": "V0/V1-R2 的 read_paper 仅支持 arXiv 链接或 .pdf 链接", "url": url}

@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Count observed body evidence using actual depth, returned text and query matches; disclose abstract fallbacks separately from full-text requests. Preserve incremental coverage before a failed run and exclude unchecked publication snapshots.
+
 - Normalize numbered PDF headings and preserve repeated sections; include Approach and experimental variants in bounded section excerpts, retaining room for method/experiment evidence and reporting truncation.
 - Honor queries on generic PDFs and key their caches by complete URL instead of filename. Keep delivered query spans and match flags aligned with the caller's character budget.
 
@@ -25,6 +27,8 @@
 
 ### Added
 
+- A public-quality HTTP acceptance scenario with versioned, hashed public PDF snapshots, on-demand body reads and a separate empty human review template. No live-search fallback or automatic semantic score; reuse shared model-budget controls only with explicit live execution.
+
 - A five-turn isolated learning acceptance scenario with per-turn persisted event/source snapshots. Scripted native-tool tests verify correction, recall and revocation; reports retain pending semantic review and do not score generated prose.
 - Integration coverage for a budget-failed parent whose two submitted tasks continue: request replay stays idempotent, a new message reads actual terminal results, and partial output/receipts remain available.
 
@@ -36,9 +40,11 @@
 
 ### Validation
 
+- Frozen-public-corpus HTTP replay passed with scripted decisions and zero cloud-model/external-network calls. The initial 443-test run had one existing HTTP test abort with Windows 10053; 18 targeted Web tests, five repetitions of the failing test and the full 443-test recheck passed. Preserve the initial failure; its cause remains unestablished.
+
 - Six local reads of the two existing public PDF caches stayed within budget; query spans matched the extracted text. No model or network requests. This checks ingestion, not autonomous research or answer correctness; see docs/v0-pdf-evidence-review-20261018.md.
 
-- Latest code: 434 offline Python regressions and 14 frontend tests passed, with no WMI workaround or skipped tests. Syntax, dependency and release checks passed; test resources were cleaned up. Earlier 384/405/419/420/424-test snapshots remain in the historical review.
+- Latest full recheck: 443 offline Python regressions and 14 frontend tests passed, with no WMI workaround or skipped tests. Syntax, dependency and release checks passed; test resources were cleaned up. Earlier 384/405/419/420/424/434-test snapshots remain in the historical review.
 - Public arXiv retrieval and one query-selected PDF read succeeded. The 24 authorized real-model requests do not establish semantic acceptance; failed answers, budget stops and older hash-mismatch artifacts are retained.
 
 ### Scope

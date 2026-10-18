@@ -20,7 +20,7 @@
 
 ### 现有入口与本页的关系
 
-scripts.eval_workspace 现有 direct、research、workspace、quality、learning 五类场景。quality 已接入 [QF-1 适配器](../scripts/quality_fixtures.py)，通过本机 HTTP 执行 Q02、Q03、Q04 的四轮代表性输入：近期发现、方法比较、发表/数字核对、精简追问。它不覆盖八组全部输入、第二种表达、结果不足变体或浏览器交互，这些仍按下方卡片补验。
+scripts.eval_workspace 现有 direct、research、workspace、quality、public-quality、learning 六类场景。quality 已接入 [QF-1 适配器](../scripts/quality_fixtures.py)，通过本机 HTTP 执行 Q02、Q03、Q04 的四轮代表性输入：近期发现、方法比较、发表/数字核对、精简追问。它不覆盖八组全部输入、第二种表达、结果不足变体或浏览器交互，这些仍按下方卡片补验。
 
 从仓库根目录运行默认离线模式：
 
@@ -51,6 +51,12 @@ quality 在独立验收进程中注入 registry.call_tool、dialogue.verify_publ
 实现中 A 的发表观察为 publication_status=unresolved、peer_review_status=not_verified；B 为 publication_status=publication_record_found。它们分别对应下方“尚未核实”和“夹具内正式记录已确认”，不是质量排名。
 
 现有 lodestar/fixtures.py 仍是旧占位管道数据，不能当 QF-1 或真实论文证据。若直接粘贴材料给模型，只能验收材料理解；真实公开论文场景需另建来源快照和人工事实表，不外推合成结果。
+
+### 冻结真实公开论文的验收
+
+`public-quality --source-packet <冻结JSON路径>` 使用已有公开 PDF 的版本化正文快照执行四轮定位、比较、证据边界和精简追问。它与 QF-1 合成材料分开，仍通过同一隔离 HTTP/Agent 路径；模型自行取证，不把全部正文预先送给模型。它不覆盖实时检索或发表核验，human-facts.json 仅为空的待人工标注模板。准备方法、验证记录与限制见 [公开材料续检](v0-public-evidence-review-20261018.md)。
+
+报告现在区分 body_read_requests、实际 body_reads、abstract_fallbacks 与 unmatched_body_reads；不能用请求了 full_text=true 证明正文已实际交付。每轮记录实际覆盖、匹配标记和返回字符数，失败前的结果仍保存。旧报告不改写，其旧 body_reads 需要与原始工具结果重新核对。
 
 ### 学习证据的连续验收
 

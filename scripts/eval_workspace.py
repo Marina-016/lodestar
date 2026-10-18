@@ -295,17 +295,46 @@ class ModelBudget:
         return client
 
 
-def run(config, output_dir, *, scenario='direct', max_model_calls=24, max_total_tokens=None, wait_seconds=180, llm_factory=None):
-    if scenario not in ('direct', 'research', 'workspace', 'quality', 'learning'):
+
+def observed_coverage(turns):
+    """Report actual tool outcomes separately from requested reading depth."""
+    actions = [a for turn in turns for a in turn['actions'] if a['executed']]
+    reads = [a for a in actions if a['action'] == 'read_paper']
+    return {
+        'body_read_requests': [a['params'].get('url') for a in reads if a['params'].get('full_text')],
+        'body_reads': [a['params'].get('url') for a in reads if not a['error']
+            and a.get('read_depth') == 'full' and a.get('query_matched') is not False
+            and a.get('returned_text_chars', 0) > 0],
+        'abstract_fallbacks': [a['params'].get('url') for a in reads if not a['error']
+            and a['params'].get('full_text') and a.get('read_depth') == 'abstract'],
+        'unmatched_body_reads': [a['params'].get('url') for a in reads if not a['error']
+            and a.get('read_depth') == 'full' and a.get('query_matched') is False],
+        'publication_lookups': [a['params'].get('url') for a in actions if a['action'] == 'verify_paper'
+            and not a['error'] and a.get('publication_status') not in (None, 'not_checked')],
+        'scope': 'Observed retrieval outcomes only; no semantic pass or sufficient-evidence judgment.'}
+
+
+def run(config, output_dir, *, scenario='direct', max_model_calls=24, max_total_tokens=None, wait_seconds=180, llm_factory=None, source_packet=None):
+    if scenario not in ('direct', 'research', 'workspace', 'quality', 'public-quality', 'learning'):
         raise ValueError('Unknown acceptance scenario')
+    if scenario == 'public-quality' and source_packet is None:
+        raise ValueError('public-quality requires a frozen source packet')
+    if scenario != 'public-quality' and source_packet is not None:
+        raise ValueError('source_packet is only supported by public-quality')
+    if scenario == 'public-quality' and config.search_mode != 'mock':
+        raise ValueError('Public evidence is frozen; live search is not allowed')
     if scenario == 'quality' and config.search_mode != 'mock':
         raise ValueError('Quality evidence is fixed and synthetic; live search is not allowed')
     if scenario == 'learning' and config.search_mode != 'mock':
         raise ValueError('Learning uses this isolated conversation; live search is not allowed')
     with ExitStack() as sources:
         fixture = None
-        if scenario == 'quality':
+        if scenario == 'public-quality':
+            from scripts.public_paper_fixtures import PublicPaperFixture
+            fixture = PublicPaperFixture.load(source_packet)
+        elif scenario == 'quality':
             from scripts import quality_fixtures as fixture
+        if fixture is not None:
             from unittest.mock import patch
 
             class FixedDateTime(datetime):
@@ -366,11 +395,12 @@ def _run(config, output_dir, *, scenario, max_model_calls, max_total_tokens, wai
               'scope': 'local HTTP/backend; not browser visual acceptance or public deployment',
               'max_model_attempts': max_model_calls, 'model_attempts': 0, 'turns': [], 'checks': {}}
     if fixture is not None:
-        report['source_fixture'] = {'id': fixture.FIXTURE_ID, 'synthetic': True,
+        report['source_fixture'] = {'id': fixture.FIXTURE_ID, 'synthetic': scenario == 'quality',
             'fixed_now': fixture.FIXED_NOW, 'sha256': sha256(frozen_sources.encode('utf-8')).hexdigest(),
             'snapshot': 'source-snapshot.json', 'human_review_only': 'human-facts.json'}
-        report['quality_cards'] = ['Q02', 'Q03', 'Q04']
-        report['scope'] += '; fixed synthetic evidence, not real discovery or paper correctness'
+        report['quality_cards'] = ['Q02', 'Q03', 'Q04'] if scenario == 'quality' else ['Q03', 'Q04']
+        report['scope'] += ('; fixed synthetic evidence, not real discovery or paper correctness'
+            if scenario == 'quality' else '; frozen public PDF corpus, not live discovery or publication verification')
 
     if scenario == 'learning':
         report['semantic_review'] = 'pending'
@@ -404,6 +434,8 @@ def _run(config, output_dir, *, scenario, max_model_calls, max_total_tokens, wai
                     'observation': 'observed_learning_events' if events else 'not_established_no_events'}
 
     def save():
+        if fixture is not None:
+            report['observed_coverage'] = observed_coverage(report['turns'])
         with budget.lock:
             report['model_attempts'] = budget.used
             report['blocked_model_attempts'] = budget.blocked
@@ -442,7 +474,12 @@ def _run(config, output_dir, *, scenario, max_model_calls, max_total_tokens, wai
                     'observed_wait_s': round(time.monotonic()-started, 3),
                     'actions': [{'action': e.get('action'), 'params': e.get('params'),
                                  'executed': e.get('executed', True), 'error': e.get('result', {}).get('error'),
-                                 'repeat_of': e.get('result', {}).get('repeat_of')}
+                                 'repeat_of': e.get('result', {}).get('repeat_of'),
+                                 **{k: e.get('result', {})[k] for k in
+                                    ('read_depth', 'coverage', 'full_text_ok', 'query_matched', 'publication_status')
+                                    if k in e.get('result', {})},
+                                 **({'returned_text_chars': len(e['result'].get('text') or '')}
+                                    if e.get('action') == 'read_paper' else {})}
                                 for e in result.get('dialogue_events', [])]}
                 if scenario == 'learning':
                     # Observe only persisted host state. Never inject expected
@@ -518,13 +555,15 @@ def _run(config, output_dir, *, scenario, max_model_calls, max_total_tokens, wai
                  '哪篇更权威？A 的效果提升和成本变化怎么算？能直接比较 A 和 B 谁更好吗？'
                  '核对发表状态，区分事实和你的推断。')
             turn('fixed-concise-followup', '不用再检索，用两句话保留刚才最重要的结论和限制，不要标题。')
-            report['observed_coverage'] = {
-                'body_reads': [a['params'].get('url') for t in report['turns'] for a in t['actions']
-                               if a['action'] == 'read_paper' and a['executed'] and not a['error']
-                               and a['params'].get('full_text')],
-                'publication_lookups': [a['params'].get('url') for t in report['turns'] for a in t['actions']
-                                        if a['action'] == 'verify_paper' and a['executed'] and not a['error']]}
-            # Coverage is evidence for a human, never a semantic pass/fail score.
+        elif scenario == 'public-quality':
+            titles = '；'.join(s['title'] for s in fixture.candidates())
+            turn('public-find', '请找出这些历史论文并说明各自研究什么问题，给出出处：' + titles +
+                 '。本轮只使用提供的冻结公开论文库，不把它当最新或全面检索。')
+            turn('public-compare', '比较刚才这些论文的方法机制和实验依据，不要只复述摘要。'
+                 '哪些适用条件由材料支持，哪些是你的推断？若证据不足，请说明实际阅读范围。')
+            turn('public-evidence-limits', '这些实验能直接证明哪种方法更好、总费用更低吗？'
+                 '区分论文观察、可计算的量和仍需验证的假设；不能从材料推出的结论请明确说。')
+            turn('public-concise-followup', '不用再检索，用两句话保留最重要的区别和证据限制，不要标题。')
         else:
             turn('dispatch', '请分别派发 Agent harness 和 RAG 两个独立研究任务。'
                  '这里 harness 指模型周围的工具调用、上下文和运行控制。本轮不要联网，'
@@ -598,11 +637,12 @@ def main():
     parser.add_argument('--live-search', action='store_true')
     parser.add_argument('--model')
     parser.add_argument('--thinking', choices=('on', 'off'))
-    parser.add_argument('--scenario', choices=('direct', 'research', 'workspace', 'quality', 'learning'), default='direct')
+    parser.add_argument('--scenario', choices=('direct', 'research', 'workspace', 'quality', 'public-quality', 'learning'), default='direct')
     parser.add_argument('--max-model-calls', type=int, default=24)
     parser.add_argument('--max-total-tokens', type=int,
                         help='Optional local DashScope reservation cap; not an account balance or exact billing limit')
     parser.add_argument('--output-dir', type=Path)
+    parser.add_argument('--source-packet', type=Path, help='Frozen public PDF JSON for public-quality only')
     args = parser.parse_args()
     cfg = load_config()
     if not args.live:
@@ -613,6 +653,8 @@ def main():
         cfg = configure(cfg, model=args.model, thinking=args.thinking)
     except ValueError as error:
         parser.error(str(error))
+    if args.scenario == 'public-quality' and args.live_search:
+        parser.error('public-quality uses a frozen public corpus; do not combine it with --live-search')
     if args.scenario == 'quality' and args.live_search:
         parser.error('Quality uses frozen synthetic evidence; do not combine it with --live-search')
     if args.scenario == 'learning' and args.live_search:
@@ -621,7 +663,7 @@ def main():
     root = args.output_dir or PROJECT_ROOT/'workspace'/'acceptance'/uuid.uuid4().hex
     try:
         report = run(cfg, root, scenario=args.scenario, max_model_calls=args.max_model_calls,
-                     max_total_tokens=args.max_total_tokens)
+                     max_total_tokens=args.max_total_tokens, source_packet=args.source_packet)
     except (ValueError, FileExistsError) as error:
         parser.error(str(error))
     print(json.dumps({'report': str(root/'report.json'), 'mode': cfg.llm_mode,

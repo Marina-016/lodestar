@@ -128,6 +128,31 @@ def _validate(name, arguments, project_id, extra_tools=None):
     return None
 
 
+
+def _linked_task_sources(result, context):
+    """Forward provenance without inheriting a child's body-reading claim."""
+    known = {s['url']: s for s in merge_sources(context['candidates']+context['papers'])}
+    linked = []
+    for message in result.get('messages', []):
+        for source in message.get('sources', []):
+            if not isinstance(source, dict) or not isinstance(source.get('url'), str):
+                continue
+            forwarded = {**source, 'linked_task_source': {
+                'task_id': result.get('id'), 'message_id': message.get('id'),
+                'run_id': message.get('run_id'), 'reported_read_depth': source.get('read_depth')}}
+            if not source.get('content') and not source.get('readings'):
+                previous = known.get(source['url'], {})
+                if previous.get('content') or previous.get('readings'):
+                    forwarded.update(read_depth=previous.get('read_depth', 'metadata'),
+                                     coverage=previous.get('coverage', 'bounded_excerpt'))
+                else:
+                    forwarded.update(read_depth='abstract' if source.get('abstract') else
+                        'search_snippet' if source.get('snippet') else 'metadata', coverage='task_source_metadata')
+                forwarded.pop('body_observation', None)
+            linked.append(forwarded)
+    return linked
+
+
 def gather(ws, llm, context, project_id=None, max_calls=None, on_progress=None, on_text=None, check_cancel=None, extra_tools=None, execution_policy=None):
     """Return the native conversation's answer and bounded, persistable evidence."""
     max_calls = max_calls if max_calls is not None else ws.config.dialogue_max_operations
@@ -235,7 +260,7 @@ def gather(ws, llm, context, project_id=None, max_calls=None, on_progress=None, 
                         if result.get('context_reset'):
                             reset = result
                         elif name == 'read_task':
-                            linked = [s for m in result.get('messages', []) for s in m.get('sources', [])]
+                            linked = _linked_task_sources(result, context)
                             context['candidates'] = merge_sources(context['candidates'] + linked)[-MAX_CANDIDATES:]
                             allowed_urls.update(s['url'] for s in linked if s.get('url'))
                     else:

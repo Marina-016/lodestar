@@ -9,6 +9,51 @@ from lodestar.memory import assistant, learning
 from lodestar.web import memory
 
 
+
+def _task_transcript(ws, item, run, rows):
+    """Link messages to owned runs and disclose bounded transcript coverage."""
+    parsed = [(row, json.loads(row['metadata'])) for row in reversed(rows)]
+    run_ids = {meta.get('run_id') for _, meta in parsed if isinstance(meta.get('run_id'), str)}
+    linked_runs = {}
+    if run_ids:
+        placeholders = ','.join('?' for _ in run_ids)
+        linked_runs = {r['id']: r['status'] for r in ws.conn.execute(
+            f'SELECT id,status FROM web_runs WHERE item_id=? AND id IN ({placeholders})',
+            [item['id'], *run_ids])}
+    messages = []
+    budget = 12000
+    marker = '\n[Middle of message omitted; only beginning and ending retained]\n'
+    for row, meta in parsed:
+        original = row['content']
+        truncated = len(original) > budget
+        content = original
+        if truncated:
+            remaining = budget-len(marker)
+            head = remaining*2//3
+            content = original[:head]+marker+original[-(remaining-head):]
+        recorded = meta.get('run_id')
+        linked = recorded if isinstance(recorded, str) and recorded in linked_runs else None
+        messages.append({'id': row['id'], 'role': row['role'], 'kind': row['kind'],
+            'run_id': linked, 'run_status': linked_runs.get(linked),
+            'run_link': 'current_run' if linked and run and linked == run['id'] else
+                        'earlier_run' if linked else 'unlinked',
+            'content': content, 'original_content_chars': len(original), 'content_truncated': truncated,
+            'content_coverage': 'head_and_tail_excerpt' if truncated else 'complete_message',
+            'sources': meta.get('source_details', [])})
+    visible = ws.conn.execute('SELECT COUNT(*) FROM messages WHERE conversation_id=? AND id>?',
+                              (item['conversation_id'], item['context_after'])).fetchone()[0]
+    current = [m for m in messages if m['run_link'] == 'current_run']
+    return messages, {'visible_messages': visible, 'returned_messages': len(messages),
+        'message_limit': 6, 'messages_truncated': visible > len(messages),
+        'content_char_budget_per_message': budget,
+        'truncated_message_ids': [m['id'] for m in messages if m['content_truncated']],
+        'current_run_message_ids': [m['id'] for m in current],
+        'current_run_assistant_message_ids': [m['id'] for m in current if m['role'] == 'assistant'],
+        'note': 'Bounded task transcript, not the entire history. Unlinked messages are not assigned to the latest run. '
+                'No returned current-run message does not prove no result exists. Terminal status includes failure/cancellation. '
+                'Source entries are metadata observed by this task, not delivery of their original bodies to the reader.'}
+
+
 def assistant_tools(app, item, run_id, message, check_cancel, *, user_authored=True, execution_policy=None):
     def definition(description, properties, handler, required=()):
         return {'description': description, 'input_schema': {'type': 'object',
@@ -96,16 +141,15 @@ def assistant_tools(app, item, run_id, message, check_cancel, *, user_authored=T
                 active = run is not None and run['status'] in ('queued', 'running', 'cancelling')
                 if not active or time.monotonic() >= deadline:
                     check_cancel()
-                    rows = ws.conn.execute('SELECT role,content,metadata FROM messages WHERE conversation_id=? AND id>? ORDER BY id DESC LIMIT 6',
+                    rows = ws.conn.execute('SELECT id,role,kind,content,metadata FROM messages WHERE conversation_id=? AND id>? ORDER BY id DESC LIMIT 6',
                                             (other['conversation_id'], other['context_after'])).fetchall()
                     check_cancel()
+                    messages, transcript = _task_transcript(ws, other, run, rows)
                     outcome = ('not_started' if run is None else 'terminal' if not active
                                else 'snapshot' if wait_seconds == 0 else 'timeout')
                     return {'id': other['id'], 'name': other['name'], 'status': other['status'],
                             'run_id': run['id'] if run else None, 'run_status': run['status'] if run else None,
-                            'messages': [{'role': r['role'], 'content': r['content'][:12000],
-                                          'sources': json.loads(r['metadata']).get('source_details', [])}
-                                         for r in reversed(rows)],
+                            'messages': messages, 'transcript': transcript,
                             'wait': {'requested_seconds': wait_seconds,
                                      'elapsed_seconds': round(max(0, time.monotonic()-started), 3),
                                      'reached_terminal': run is not None and not active,
@@ -199,7 +243,7 @@ def assistant_tools(app, item, run_id, message, check_cancel, *, user_authored=T
              'content': {'type': 'string', 'maxLength': 2000},
              'scope': {'type': 'string', 'enum': ['personal', 'project', 'task']}}, manage_memory, ['action']),
         'list_tasks': definition('List task names and current execution states without loading their transcripts.', {}, list_tasks),
-        'read_task': definition('Read a selected task\'s recent results and source metadata when relevant to the user request. If active, wait up to wait_seconds (default 10, maximum 20) without another model call; 0 returns immediately. The wait outcome and run state are host observations, not a promise of completion. A timeout does not cancel the task. Old context retired by memory corrections is excluded.',
+        'read_task': definition('Read a selected task\'s recent results and source metadata when relevant to the user request. If active, wait up to wait_seconds (default 10, maximum 20) without another model call; 0 returns immediately. The wait outcome and run state are host observations, not a promise of completion. A timeout does not cancel the task. Message run links, kind and truncation are disclosed; source metadata does not mean you read the original bodies. Old context retired by memory corrections is excluded.',
                                 {'id': {'type': 'string'},
                                  'wait_seconds': {'type': 'integer', 'minimum': 0, 'maximum': 20}}, read_task, ['id']),
     }

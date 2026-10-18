@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- Accept schema-valid redundant event values when correcting learning evidence, while always storing user self-report. Keep unsupported mastery events, revocation arguments and concurrent mutations protected.
+- Distinguish lexical memory-search misses from an empty profile using scoped counts and bounded overview guidance; counts and returned data share one read snapshot.
+
+- Normalize decoded acceptance JSON before UTF-8 token reservation so equivalent Unicode escaping does not consume different local allowance. Preserve unknown/error reservations and report only safe numeric denial details.
+- Disclose observed paper reading depth and bounded coverage in canonical context, retaining abstract fallbacks and merged body excerpts. Clarify the existing full_text parameter without forcing a research route.
+
 - Extend the existing Web learning tool with correction/revocation by evidence ID. Reuse memory-center mutations, attach the actual user message, downgrade corrections to self-report, retire stale context and preserve concurrent-run protection. No new tool or intent route.
 
 - Load the Anthropic SDK only for its provider; mock and DashScope startup avoid unrelated SDK/trust-store imports. Windows experiment receipts collect local runtime facts without WMI and disclose that the architecture is the Python build target.
@@ -12,9 +18,12 @@
 - Recognize data-only SSE errors across LF, CRLF, CR and case-insensitive MIME headers while retaining preceding text and successful bytes.
 - Close an acceptance server socket if its worker cannot start; clean up smoke-test temporary directories after failures as well as successes.
 - Write fixed-source snapshots as exact UTF-8 bytes and verify the stored bytes, avoiding Windows newline conversion/hash mismatch. Preserve earlier mismatched evidence rather than rewriting it.
-- Let read_task wait briefly for a selected active task with cancellation and an explicit deadline, avoiding repeated model calls just to wait. This remains pending a real-model retest after the authorized batch was exhausted.
+- Let read_task wait briefly for a selected active task with cancellation and an explicit deadline, avoiding repeated model calls just to wait. Real runs observed bounded waits and truthful timeouts; request savings and autonomous recovery remain unproven.
 
 ### Added
+
+- A five-turn isolated learning acceptance scenario with per-turn persisted event/source snapshots. Scripted native-tool tests verify correction, recall and revocation; reports retain pending semantic review and do not score generated prose.
+- Integration coverage for a budget-failed parent whose two submitted tasks continue: request replay stays idempotent, a new message reads actual terminal results, and partial output/receipts remain available.
 
 - Optional DashScope-only token reservations in isolated acceptance, alongside the shared physical-request cap. Pre-reserve UTF-8 request bytes, output/reasoning allowances and overhead; refund only coherent usage from completed calls. Errors and unknown usage retain reservations, and uncertain/excess usage stops further requests. This estimates local consumption, not the cloud balance or billing ceiling.
 
@@ -24,10 +33,12 @@
 
 ### Validation
 
-- Latest frozen code: 405 offline Python regressions and 14 frontend tests passed, with no WMI workaround or skipped tests. Syntax, dependency and release checks passed; test resources were cleaned up. The earlier 384-test snapshot remains in the historical review.
+- Latest frozen code: 424 offline Python regressions and 14 frontend tests passed, with no WMI workaround or skipped tests. Syntax, dependency and release checks passed; test resources were cleaned up. Earlier 384/405/419/420-test snapshots remain in the historical review.
 - Public arXiv retrieval and one query-selected PDF read succeeded. The 24 authorized real-model requests do not establish semantic acceptance; failed answers, budget stops and older hash-mismatch artifacts are retained.
 
 ### Scope
+
+- Additional verified free-quota acceptance used separate Flash/Max ledgers: 71 requests in total. Host-assisted task continuation, persisted learning correction and a seeded three-turn recall/revocation path succeeded within their scopes. Full five-turn semantics and controlled research quality still have failures; retain them in docs/v0-quality-review-20261018.md and keep the PR draft.
 
 - After explicit free-quota/free-only confirmation, 24 isolated qwen3.8-flash requests were used across fixed-evidence and two-task scenarios. All returned HTTP 200; both batches stopped at their allocated limits. Three research answers still failed manual semantic review; two child tasks completed but parent polling exhausted the summary/memory budget. No default-model changes, paid search, user-database migration, automatic experiment execution or public deployment. The prior WMI/service-stream root causes remain unresolved.
 

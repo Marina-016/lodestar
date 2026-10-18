@@ -43,12 +43,13 @@ class ModelBudget:
         self.responses = []
         self.max_total_tokens = max_total_tokens
         self.token_used, self.token_blocked, self.token_stopped = 0, 0, False
+        self.last_denial = None
         self.token_reservations = {}
         self._token_local = threading.local()
 
     @staticmethod
     def estimate_tokens(request):
-        """UTF-8 body bytes + output/reasoning allowances + fixed overhead.
+        """Decoded JSON UTF-8 bytes + output/reasoning allowances + overhead.
 
         Only these transient local variables contain the request body. This is a
         conservative estimate, not a tokenizer or a supplier billing guarantee.
@@ -67,7 +68,9 @@ class ModelBudget:
             if payload.get('enable_thinking') is not True or type(thinking) is not int or thinking < 1:
                 raise ValueError('Expected explicit disabled or bounded thinking')
             ceiling += thinking
-        return len(body) + ceiling + 1024
+        # Wire escaping/whitespace must not change the decoded prompt estimate.
+        normalized = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+        return len(normalized) + ceiling + 1024
 
     def finish_tokens(self, usage=None, *, success=False):
         """Refund only complete successful calls with coherent reported usage."""
@@ -117,10 +120,12 @@ class ModelBudget:
             return {'enabled': self.max_total_tokens is not None, 'max_total_tokens': self.max_total_tokens,
                     'accounted_tokens': self.token_used, 'blocked_attempts': self.token_blocked,
                     'stopped': self.token_stopped,
+                    'last_denial': dict(self.last_denial) if self.last_denial else None,
                     'attempts': [{'attempt': attempt, **record}
                                  for attempt, record in self.token_reservations.items()],
                     'scope': 'This acceptance run only; no account balance or other-client consumption is covered.',
-                    'estimate': 'UTF-8 JSON bytes + max_tokens + explicit thinking allowance + 1024. '
+                    'estimate': 'Decoded JSON reserialized with ensure_ascii=False, UTF-8 bytes '
+                                '+ max_tokens + explicit thinking allowance + 1024. '
                                 'A conservative local estimate, not a supplier billing upper bound. '
                                 'Errors, interrupted calls and unknown usage retain the full reservation. '
                                 'Protected runs require explicit thinking off or a positive fixed thinking budget; '
@@ -139,6 +144,8 @@ class ModelBudget:
                 with self.lock:
                     self.token_blocked += 1
                     self.token_stopped = True
+                    self.last_denial = {'reason': 'unsafe_estimate', 'estimate': None,
+                        'accounted': self.token_used, 'remaining': max(0, self.max_total_tokens-self.token_used)}
                 raise LLMError('Acceptance request has no safe token estimate', code='acceptance_token_budget') from None
         with self.lock:
             if self.stopped or self.used >= self.limit:
@@ -146,6 +153,9 @@ class ModelBudget:
                 raise LLMError('Acceptance model-attempt limit reached', code='acceptance_budget')
             if estimate is not None and (self.token_stopped or self.token_used + estimate > self.max_total_tokens):
                 self.token_blocked += 1
+                self.last_denial = {'reason': 'stopped' if self.token_stopped else 'insufficient_reservation',
+                    'estimate': estimate, 'accounted': self.token_used,
+                    'remaining': max(0, self.max_total_tokens-self.token_used)}
                 raise LLMError('Acceptance token reservation limit reached', code='acceptance_token_budget')
             self.used += 1
             if estimate is not None:
@@ -286,10 +296,12 @@ class ModelBudget:
 
 
 def run(config, output_dir, *, scenario='direct', max_model_calls=24, max_total_tokens=None, wait_seconds=180, llm_factory=None):
-    if scenario not in ('direct', 'research', 'workspace', 'quality'):
+    if scenario not in ('direct', 'research', 'workspace', 'quality', 'learning'):
         raise ValueError('Unknown acceptance scenario')
     if scenario == 'quality' and config.search_mode != 'mock':
         raise ValueError('Quality evidence is fixed and synthetic; live search is not allowed')
+    if scenario == 'learning' and config.search_mode != 'mock':
+        raise ValueError('Learning uses this isolated conversation; live search is not allowed')
     with ExitStack() as sources:
         fixture = None
         if scenario == 'quality':
@@ -360,6 +372,37 @@ def _run(config, output_dir, *, scenario, max_model_calls, max_total_tokens, wai
         report['quality_cards'] = ['Q02', 'Q03', 'Q04']
         report['scope'] += '; fixed synthetic evidence, not real discovery or paper correctness'
 
+    if scenario == 'learning':
+        report['semantic_review'] = 'pending'
+        report['quality_cards'] = ['Q07']
+        report['scope'] += '; isolated learning lifecycle, not automatic semantic verification'
+
+    def learning_snapshot():
+        from lodestar.memory import learning
+        with app.workspace() as ws:
+            rows = ws.conn.execute('SELECT * FROM learning_events WHERE user_id=? ORDER BY id',
+                                   (app.user(),)).fetchall()
+            events = []
+            for row in rows:
+                try:
+                    evidence = json.loads(row['evidence'])
+                except (ValueError, TypeError):
+                    evidence = {}
+                if not isinstance(evidence, dict):
+                    evidence = {}
+                message_id = evidence.get('message_id')
+                source = ws.conn.execute('SELECT id,role,content FROM messages WHERE id=?',
+                                         (message_id,)).fetchone() if type(message_id) is int else None
+                events.append({'id': row['id'], 'technology': row['technology'], 'method': row['method'],
+                    'event': row['event'], 'actor': row['actor'], 'active': row['revoked_at'] is None,
+                    'revoked_at': row['revoked_at'], 'source': {
+                        'message_id': message_id, 'corrects': evidence.get('corrects'),
+                        'message': dict(source) if source else None}})
+            return {'events': events, 'profile': learning.profile(ws.conn, user_id=app.user()),
+                    'active_event_ids': [event['id'] for event in events if event['active']],
+                    'verified_mastery_event_ids': [event['id'] for event in events if event['event'] in learning.MASTERY],
+                    'observation': 'observed_learning_events' if events else 'not_established_no_events'}
+
     def save():
         with budget.lock:
             report['model_attempts'] = budget.used
@@ -401,6 +444,10 @@ def _run(config, output_dir, *, scenario, max_model_calls, max_total_tokens, wai
                                  'executed': e.get('executed', True), 'error': e.get('result', {}).get('error'),
                                  'repeat_of': e.get('result', {}).get('repeat_of')}
                                 for e in result.get('dialogue_events', [])]}
+                if scenario == 'learning':
+                    # Observe only persisted host state. Never inject expected
+                    # answers into tools or score the generated prose here.
+                    record['learning_snapshot'] = learning_snapshot()
                 report['turns'].append(record)
                 save()
                 print(json.dumps(record, ensure_ascii=False), flush=True)
@@ -432,6 +479,36 @@ def _run(config, output_dir, *, scenario, max_model_calls, max_total_tokens, wai
             turn('compare', '比较这两篇的核心机制、实验支持和适用边界，不要只复述摘要；'
                  '说明哪些是论文结论、哪些是你的推断。')
             turn('concise-followup', '不用检索，用两句话概括这两篇最重要的区别，不要标题。')
+        elif scenario == 'learning':
+            report['learning_initial_snapshot'] = learning_snapshot()
+            report['checks']['learning_started_empty'] = not report['learning_initial_snapshot']['events']
+            save()
+            for phase, message in (
+                ('learning-record', '我只看过 ReAct 的思考与行动交替方法，没有自己实现过。请记住这次接触，不要算作掌握。'),
+                ('learning-correct', '纠正刚才的记录：其实我只看了摘要，没有认真学，也没有实践。'),
+                ('learning-recall', '我接触过哪些技术和方法？目前掌握情况怎样？'),
+                ('learning-forget', '请忘记刚才关于 ReAct 的学习证据。'),
+                ('learning-recall-after-forget', '现在我接触过哪些技术和方法？还有刚才的学习记录吗？')):
+                turn(phase, message)
+            observed = [record['learning_snapshot'] for record in report['turns']]
+            first, corrected, recalled, forgotten, after = observed
+            initial_ids, corrected_ids, recalled_ids = (
+                set(value['active_event_ids']) for value in (first, corrected, recalled))
+            corrected_retired = {event['id'] for event in corrected['events'] if not event['active']}
+            forgotten_retired = {event['id'] for event in forgotten['events'] if not event['active']}
+            report['checks'].update(
+                learning_evidence_recorded=bool(initial_ids),
+                learning_correction_replaced_evidence=bool(initial_ids and corrected_ids and
+                    initial_ids <= corrected_retired and initial_ids.isdisjoint(corrected_ids)),
+                learning_recall_kept_active_evidence=bool(corrected_ids and recalled_ids == corrected_ids),
+                learning_evidence_revoked=bool(recalled_ids and recalled_ids <= forgotten_retired and
+                    not forgotten['active_event_ids']),
+                learning_remained_empty_after_forget=bool(recalled_ids and not after['active_event_ids'] and
+                    not after['profile']),
+                learning_no_verified_mastery=all(not value['verified_mastery_event_ids'] for value in observed))
+            report['learning_observation'] = ('observed_learning_events' if any(value['events'] for value in observed)
+                                              else 'not_established_no_events')
+            report['learning_check_scope'] = 'Persisted lifecycle only; generated meaning requires human review.'
         elif scenario == 'quality':
             turn('fixed-discovery', '现在只研究 QF-1 虚构验收材料，不把它们当现实论文。'
                  '推荐近 7 天两篇 Agent 记忆论文，分别说明为什么值得看，给出来源。')
@@ -521,7 +598,7 @@ def main():
     parser.add_argument('--live-search', action='store_true')
     parser.add_argument('--model')
     parser.add_argument('--thinking', choices=('on', 'off'))
-    parser.add_argument('--scenario', choices=('direct', 'research', 'workspace', 'quality'), default='direct')
+    parser.add_argument('--scenario', choices=('direct', 'research', 'workspace', 'quality', 'learning'), default='direct')
     parser.add_argument('--max-model-calls', type=int, default=24)
     parser.add_argument('--max-total-tokens', type=int,
                         help='Optional local DashScope reservation cap; not an account balance or exact billing limit')
@@ -538,6 +615,8 @@ def main():
         parser.error(str(error))
     if args.scenario == 'quality' and args.live_search:
         parser.error('Quality uses frozen synthetic evidence; do not combine it with --live-search')
+    if args.scenario == 'learning' and args.live_search:
+        parser.error('Learning uses isolated user evidence; do not combine it with --live-search')
     cfg = replace(cfg, search_mode='live' if args.live_search else 'mock')
     root = args.output_dir or PROJECT_ROOT/'workspace'/'acceptance'/uuid.uuid4().hex
     try:

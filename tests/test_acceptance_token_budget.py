@@ -191,6 +191,54 @@ class AcceptanceTokenBudgetTests(unittest.TestCase):
         budget.reserve(request)
         self.assertEqual(budget.token_used, len(body)+128+1024+1024)
 
+    def test_equivalent_ascii_escaped_and_utf8_json_fit_the_same_reservation_cap(self):
+        payload = {'messages': [{'role': 'user', 'content': '研究长期记忆🙂\n统一状态'}],
+                   'max_tokens': 128, 'enable_thinking': False}
+        normalized = json.dumps(payload, ensure_ascii=False).encode('utf8')
+        escaped = json.dumps(payload, ensure_ascii=True, indent=2).encode('utf8')
+        utf8 = json.dumps(payload, ensure_ascii=False, separators=(',', ':')).encode('utf8')
+        cap = len(normalized)+128+1024
+        self.assertGreater(len(escaped)+128+1024, cap, 'Old wire-byte estimate would reject this encoding')
+        self.assertNotEqual(escaped, utf8)
+        estimates = []
+        for body in (escaped, utf8):
+            budget = ModelBudget(24, max_total_tokens=cap)
+            request = requests.Request('POST', 'https://example.invalid/chat/completions', data=body).prepare()
+            budget.reserve(request)
+            self.assertEqual(budget.used, 1)
+            estimates.append(budget.token_used)
+            # Normalizing input does not relax the full reservation on failure.
+            budget.finish_tokens()
+            self.assertEqual(budget.token_used, cap)
+            self.assertEqual(budget.token_report()['attempts'][0]['state'], 'error_reserved')
+        self.assertEqual(estimates, [cap, cap])
+
+    def test_last_denial_is_one_numeric_threshold_snapshot_without_body(self):
+        payload = {'messages': [{'content': 'PRIVATE_PROMPT_CANARY'}],
+                   'max_tokens': 128, 'enable_thinking': False}
+        request = requests.Request('POST', 'https://example.invalid/chat/completions', json=payload).prepare()
+        estimate = ModelBudget.estimate_tokens(request)
+        budget = ModelBudget(24, max_total_tokens=estimate+100)
+        budget.reserve(request)
+        with self.assertRaises(LLMError):
+            budget.reserve(request)
+        diagnostic = budget.token_report()['last_denial']
+        self.assertEqual(diagnostic, {'reason': 'insufficient_reservation',
+            'estimate': estimate, 'accounted': estimate, 'remaining': 100})
+        payload['messages'][0]['content'] *= 2
+        bigger = requests.Request('POST', 'https://example.invalid/chat/completions', json=payload).prepare()
+        with self.assertRaises(LLMError):
+            budget.reserve(bigger)
+        latest = budget.token_report()['last_denial']
+        self.assertIsInstance(latest, dict)
+        self.assertEqual(set(latest), {'reason', 'estimate', 'accounted', 'remaining'})
+        self.assertGreater(latest['estimate'], diagnostic['estimate'])
+        self.assertEqual(latest['accounted'], estimate)
+        self.assertEqual(latest['remaining'], 100)
+        self.assertEqual(budget.max_total_tokens, estimate+100)
+        self.assertEqual(budget.used, 1)
+        self.assertNotIn('PRIVATE_PROMPT_CANARY', json.dumps(budget.token_report()))
+
     def test_default_and_effort_settings_are_refused_only_in_protected_acceptance(self):
         for mode in ('default', 'effort'):
             with self.subTest(mode=mode):

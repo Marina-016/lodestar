@@ -16,17 +16,28 @@ def assistant_tools(app, item, run_id, message, check_cancel, *, user_authored=T
             'handler': handler}
 
     def read_memory(args):
-        with app.workspace() as ws:
+        with app.workspace() as ws, ws.conn:
+            ws.conn.execute('BEGIN')  # Counts and bounded results share one read snapshot.
             current = app.item(ws, item['id'])
             rows = memory.notes(ws, current, active_only=True)
+            visible_notes = len(rows)
+            active_learning = ws.conn.execute(
+                'SELECT COUNT(*) FROM learning_events WHERE user_id=? AND revoked_at IS NULL',
+                (memory.USER,)).fetchone()[0]
             query = args.get('query', '').strip()
             if query:
                 from lodestar.retrieval import terms
                 wanted = terms(query)
                 rows = sorted(rows, key=lambda r: -len(wanted & terms(r['content'])))
                 rows = [r for r in rows if wanted & terms(r['content'])]
-            return {'memories': assistant.select_rows(rows, query, budget=12000, limit=30), 'learning': learning.recall(ws.conn, query, memory.USER)
-                    if query else learning.profile(ws.conn, memory.USER, limit=20)}
+            memories = assistant.select_rows(rows, query, budget=12000, limit=30)
+            recalled = learning.recall(ws.conn, query, memory.USER) if query else learning.profile(ws.conn, memory.USER, limit=20)
+            return {'memories': memories, 'learning': recalled,
+                    'retrieval': {'query': query, 'filter_applied': bool(query),
+                        'visible_active_notes': visible_notes, 'user_active_learning_events': active_learning,
+                        'returned_memories': len(memories), 'returned_learning_profiles': len(recalled),
+                        'note': 'Query filters lexically; no matches does not mean no stored records. '
+                                'Omit query for a bounded overview.'}}
 
     def manage_memory(args):
         if not user_authored and args.get('scope', 'personal') == 'personal':
@@ -151,8 +162,12 @@ def assistant_tools(app, item, run_id, message, check_cancel, *, user_authored=T
                 return result
             if action not in ('correct', 'revoke') or type(args.get('id')) is not int or args['id'] < 1:
                 raise ValueError('纠正或撤销需要 action 和已有证据 ID，请先读取学习记忆')
-            if 'event' in args or (action == 'revoke' and any(k in args for k in ('technology', 'method'))):
-                raise ValueError('纠正自动保存为自评，撤销只需要证据 ID')
+            if action == 'revoke' and any(k in args for k in ('technology', 'method', 'event')):
+                raise ValueError('撤销只需要证据 ID')
+            if action == 'correct' and 'event' in args and args['event'] not in ('discussed', 'attempted', 'self_report'):
+                raise ValueError('纠正的 event 无效；纠正结果始终保存为自评')
+            # A schema-valid redundant event does not control the replacement:
+            # edit_learning attaches the user message and always uses self_report.
             data = {k: v for k, v in args.items() if k in ('action', 'id', 'technology', 'method')}
             data['evidence'] = message
             with ws.conn:
@@ -165,7 +180,7 @@ def assistant_tools(app, item, run_id, message, check_cancel, *, user_authored=T
             return result
 
     tools = {
-        'read_memory': definition('Read your user\'s relevant personal/project facts and learning evidence. Query is optional.',
+        'read_memory': definition('Read visible active personal/project/task facts and your user\'s learning evidence. query is an optional lexical filter; omit it for a bounded overview. Counts cover this space\'s visible notes and the current user\'s active learning events. Empty filtered results do not imply empty memory.',
                                  {'query': {'type': 'string'}}, read_memory),
         'manage_memory': definition('Save a durable user preference/fact, or correct/forget an existing memory by ID. Use only user-provided facts or confirmed project decisions. Never store technology definitions, infer mastery, or turn background reading into user exposure. scope defaults to personal; project requires a bound project; task keeps a local note. Read existing IDs before modifying them.',
             {'action': {'type': 'string', 'enum': ['save', 'forget']}, 'id': {'type': 'string'},
@@ -177,7 +192,7 @@ def assistant_tools(app, item, run_id, message, check_cancel, *, user_authored=T
                                  'wait_seconds': {'type': 'integer', 'minimum': 0, 'maximum': 20}}, read_task, ['id']),
     }
     if user_authored:
-        tools['record_learning'] = definition('Record, correct or revoke the current user\'s technology/method learning evidence. action defaults to record and requires technology and event. For correct/revoke, read_memory first to find the evidence id. Corrections always become self_report, not verified mastery. The host attaches the actual user message and retires stale context after edits. Never record an assistant answer or research assignment as user learning.',
+        tools['record_learning'] = definition('Record, correct or revoke the current user\'s technology/method learning evidence. action defaults to record and requires technology and event. For correct/revoke, read_memory first to find the evidence id. Corrections always become self_report; an optional discussed/attempted/self_report event is ignored and never upgrades mastery. Revoke accepts only action and id. The host attaches the actual user message and retires stale context after edits. Never record an assistant answer or research assignment as user learning.',
             {'action': {'type': 'string', 'enum': ['record', 'correct', 'revoke']},
              'id': {'type': 'integer', 'minimum': 1},
              'technology': {'type': 'string', 'minLength': 1, 'maxLength': 200},

@@ -123,6 +123,18 @@ def assess(sources, now=None):
                 'Missing publication metadata neither proves nonpublication nor disqualifies useful research.'}
 
 
+def _paper_read_observation(source):
+    """Describe retained paper evidence, never body availability or nonexistence."""
+    kind = source.get('source_type')
+    if kind != 'paper' and (kind or not source['url'].startswith('https://arxiv.org/abs/')):
+        return source
+    depth = source.get('read_depth') or ('abstract' if source.get('abstract') else 'search_snippet')
+    coverage = source.get('coverage') or ('bounded_body_excerpt' if depth == 'full'
+        else 'abstract_only' if depth == 'abstract' or source.get('abstract') else 'search_metadata_only')
+    return {**source, 'read_depth': depth, 'coverage': coverage,
+            'body_observation': 'bounded_excerpt_read' if depth == 'full' else 'not_read'}
+
+
 def answer_context(context):
     """One evidence packet, not repeated transcripts of every abstract and old answer."""
     sources = merge_sources(context['candidates'] + context['papers'])
@@ -131,6 +143,7 @@ def answer_context(context):
     sources = [{**{k: v for k, v in s.items() if k != 'content'},
                 'readings': [{k: v for k, v in r.items() if k != 'digest'} for r in s['readings']]}
                if s.get('readings') else s for s in sources]
+    sources = [_paper_read_observation(source) for source in sources]
     operations = []
     events = context['dialogue_events']
     reset_at = max((i for i, e in enumerate(events) if e.get('result', {}).get('context_reset')), default=0)

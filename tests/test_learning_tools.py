@@ -62,6 +62,35 @@ class LearningToolTests(unittest.TestCase):
         with self.app.workspace() as ws:
             self.assertEqual(ws.conn.execute('SELECT COUNT(*) FROM learning_events').fetchone()[0], 1)
 
+    def test_correction_ignores_compatible_events_and_replaces_with_user_self_report(self):
+        message = '我读过 ReAct 的方法描述，但还没实现；请纠正那条记录。'
+        handler = self.tool(message)
+        for event in ('discussed', 'attempted', 'self_report'):
+            with self.subTest(event=event):
+                old_id = self.seed()
+                result = handler({'action': 'correct', 'id': old_id, 'technology': 'ReAct',
+                                  'method': 'Tool use', 'event': event})
+                self.assertEqual(result['event'], 'self_report')
+                self.assertTrue(result['context_reset'])
+                self.assertNotEqual(result['evidence_id'], old_id)
+                with self.app.workspace() as ws:
+                    old = ws.conn.execute('SELECT revoked_at FROM learning_events WHERE id=?', (old_id,)).fetchone()
+                    replacement = ws.conn.execute('SELECT * FROM learning_events WHERE id=?', (result['evidence_id'],)).fetchone()
+                    self.assertIsNotNone(old['revoked_at'])
+                    self.assertEqual(replacement['event'], 'self_report')
+                    self.assertEqual(replacement['actor'], 'user')
+                    self.assertEqual(replacement['technology'], 'ReAct')
+                    self.assertEqual(replacement['method'], 'Tool use')
+                    self.assertEqual(replacement['paper_url'], 'https://example.invalid/source')
+                    provenance = json.loads(replacement['evidence'])
+                    self.assertEqual(provenance['corrects'], old_id)
+                    source = ws.conn.execute('SELECT role,content FROM messages WHERE id=?', (provenance['message_id'],)).fetchone()
+                    self.assertEqual(source['role'], 'user')
+                    self.assertEqual(source['content'], message)
+                    self.assertEqual(provenance['content'], message)
+                    profile = learning.profile(ws.conn, memory.USER, technology='ReAct')
+                    self.assertEqual(profile[0]['mastery'], 'unknown')
+
     def test_other_active_run_blocks_edit_without_partial_invalidation(self):
         evidence_id = self.seed()
         task = self.app.create('Busy task')
@@ -69,7 +98,7 @@ class LearningToolTests(unittest.TestCase):
         with self.app.workspace() as ws, ws.conn:
             ws.conn.execute("INSERT INTO web_runs(id,item_id,request_key,status,message,config) VALUES('busy',?,'busy','running','x','{}')", (task,))
         with self.assertRaises(memory.MemoryBusy):
-            handler({'action': 'correct', 'id': evidence_id})
+            handler({'action': 'correct', 'id': evidence_id, 'event': 'discussed'})
         self.assertEqual(self.app.state()['learning'][0]['mastery'], 'can_implement')
         with self.app.workspace() as ws:
             self.assertEqual(self.app.item(ws, 'main')['context_after'], 0)
@@ -90,7 +119,13 @@ class LearningToolTests(unittest.TestCase):
         handler = self.tool()
         for args in ({}, {'action': 'correct'}, {'action': 'revoke', 'id': True},
                      {'action': 'correct', 'id': evidence_id, 'event': 'demonstrated_implementation'},
+                     {'action': 'correct', 'id': evidence_id, 'event': 'demonstrated_explanation'},
+                     {'action': 'correct', 'id': evidence_id, 'event': 'demonstrated_application'},
+                     {'action': 'correct', 'id': evidence_id, 'event': None},
+                     {'action': 'update', 'id': evidence_id, 'event': 'discussed'},
                      {'action': 'revoke', 'id': evidence_id, 'technology': 'Changed'},
+                     {'action': 'revoke', 'id': evidence_id, 'method': ''},
+                     {'action': 'revoke', 'id': evidence_id, 'event': 'discussed'},
                      {'technology': 'Agent', 'event': 'attempted', 'id': evidence_id}):
             with self.subTest(args=args), self.assertRaises(ValueError):
                 handler(args)
@@ -100,7 +135,7 @@ class LearningToolTests(unittest.TestCase):
         evidence_id = self.seed()
         handler = self.tool()
         with self.assertRaises(ValueError):
-            handler({'action': 'correct', 'id': evidence_id, 'technology': ''})
+            handler({'action': 'correct', 'id': evidence_id, 'technology': '', 'event': 'attempted'})
         with self.app.workspace() as ws:
             self.assertEqual(self.app.item(ws, 'main')['context_after'], 0)
             self.assertEqual(ws.conn.execute('SELECT COUNT(*) FROM learning_events').fetchone()[0], 1)
@@ -114,7 +149,7 @@ class LearningToolTests(unittest.TestCase):
                 captured.append(json.dumps(messages))
                 if len(captured) == 1:
                     return {'role': 'assistant', 'content': [{'type': 'tool_use', 'id': 'correct',
-                        'name': 'record_learning', 'input': {'action': 'correct', 'id': evidence_id}}]}
+                        'name': 'record_learning', 'input': {'action': 'correct', 'id': evidence_id, 'event': 'discussed'}}]}
                 return {'role': 'assistant', 'content': [{'type': 'text', 'text': 'Corrected as a self-report.'}]}
         self.app.llm_factory = Scripted
         result = self.wait(self.app.submit('main', 'Correct my Agent Memory record: I only read an abstract.', 'native-edit'))

@@ -56,7 +56,8 @@ PARAMETERS = {
         'enum': ['relevance', 'submittedDate']}, 'days': {'type': 'integer', 'minimum': 0, 'maximum': 365}},
     'discover_papers': {'query': {'type': 'string'}, 'kind': {'type': 'string',
         'enum': ['recent', 'trending']}, 'days': {'type': 'integer', 'minimum': 1, 'maximum': 30}},
-    'read_paper': {'url': {'type': 'string'}, 'full_text': {'type': 'boolean'},
+    'read_paper': {'url': {'type': 'string'}, 'full_text': {'type': 'boolean',
+                   'description': 'true reads bounded body passages; false (default) reads the abstract only.'},
                    'query': {'type': 'string'}},
     'search_web': {'query': {'type': 'string'}},
     'read_webpage': {'url': {'type': 'string'}},
@@ -66,7 +67,7 @@ PARAMETERS = {
 DESCRIPTIONS = {
     'search_papers': 'Search arXiv abstracts. Prefer queries: 1-3 short independent concepts, searched separately and merged. Words within each query are ANDed. Each query costs one operation. With submittedDate sorting, omitted days defaults to the last 90 days of first submission. Set days=0 for unrestricted historical search, or choose 1-365 days. Results disclose the applied window. Publication metadata is available when reading or verifying a paper; it is not a quality ranking.',
     'discover_papers': 'Discover recent arXiv papers (empty query browses cs.AI), or HF trending papers. HF popularity is not publication recency.',
-    'read_paper': 'Read a previously returned paper URL, including available publication metadata. Search already returns abstracts. Use full_text=true for methods, experiments or comparisons that need body evidence; returned text is bounded excerpts, not the entire paper. Optional query selects relevant passages in the paper language. Omit query for general sections. Unresolved metadata is unknown, not unpublished.',
+    'read_paper': 'Fetch evidence from a previously returned paper URL. Set full_text=true to read method or experiment passages missing from search abstracts. The default returns only the abstract. Results disclose actual reading coverage, bounded excerpts and available publication metadata; a failed body fetch does not prove absence from the paper. Optional query selects relevant passages in the paper language. Unresolved publication metadata remains unknown.',
     'search_web': 'Search the web. Returned snippets are not full articles.',
     'read_webpage': 'Read a previously returned webpage URL.',
     'verify_paper': 'Look up publication/venue metadata for a previously returned paper URL. Costs one operation. Unknown means unverified, not unpublished. A publication record alone does not establish authority.',

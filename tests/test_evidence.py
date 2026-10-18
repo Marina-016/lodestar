@@ -1,4 +1,5 @@
 import unittest
+from copy import deepcopy
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -149,6 +150,99 @@ class EvidenceTests(unittest.TestCase):
     def test_web_sources_have_no_implied_publication_check(self):
         facts = assess([{'url': 'https://example.com', 'source_type': 'web'}])
         self.assertNotIn('publication_status', facts['sources'][0])
+
+    def test_candidate_paper_depth_describes_observed_input_not_body_existence(self):
+        for content, depth, coverage in (({'abstract': 'Abstract only'}, 'abstract', 'abstract_only'),
+                                         ({'snippet': 'Search excerpt'}, 'search_snippet', 'search_metadata_only')):
+            with self.subTest(depth=depth):
+                source = {'url': 'https://example.invalid/paper', 'source_type': 'paper', **content}
+                original = deepcopy(source)
+                packet = answer_context({'current_time': 'now', 'papers': [],
+                                         'candidates': [source], 'dialogue_events': []})
+                observed = packet['sources'][0]
+                self.assertEqual(observed['read_depth'], depth)
+                self.assertEqual(observed['coverage'], coverage)
+                self.assertEqual(observed['body_observation'], 'not_read')
+                self.assertNotIn('body_available', observed)
+                self.assertNotIn('body_exists', observed)
+                self.assertEqual(source, original)
+
+    def test_known_body_depth_survives_later_abstract_candidate_annotation(self):
+        body = {'url': 'https://example.invalid/paper', 'source_type': 'paper',
+                'read_depth': 'full', 'coverage': 'query_excerpt', 'content': 'Bounded method evidence'}
+        abstract = {'url': body['url'], 'source_type': 'paper', 'read_depth': 'abstract',
+                    'coverage': 'abstract_only', 'abstract': 'Abstract',
+                    'body_observation': 'not_read'}
+        originals = deepcopy((body, abstract))
+        packet = answer_context({'current_time': 'now', 'papers': [body, abstract],
+                                 'candidates': [], 'dialogue_events': []})
+        observed = packet['sources'][0]
+        self.assertEqual(observed['read_depth'], 'full')
+        self.assertEqual(observed['coverage'], 'query_excerpt')
+        self.assertEqual(observed['body_observation'], 'bounded_excerpt_read')
+        self.assertEqual(observed['content'], 'Bounded method evidence')
+        self.assertEqual((body, abstract), originals)
+
+    def test_body_download_fallback_stays_abstract_with_actual_failure_metadata(self):
+        source = {'url': 'https://example.invalid/paper', 'source_type': 'paper',
+                  'read_depth': 'abstract', 'coverage': 'abstract_fallback',
+                  'full_text_ok': False, 'abstract': 'Abstract only',
+                  'note': 'PDF unavailable; returning abstract'}
+        original = deepcopy(source)
+        packet = answer_context({'current_time': 'now', 'papers': [source], 'candidates': [],
+            'dialogue_events': [{'action': 'read_paper', 'params': {'url': source['url'], 'full_text': True},
+                                'result': deepcopy(source)}]})
+        observed = packet['sources'][0]
+        self.assertEqual(observed['body_observation'], 'not_read')
+        self.assertEqual(observed['read_depth'], 'abstract')
+        self.assertEqual(observed['coverage'], 'abstract_fallback')
+        self.assertFalse(observed['full_text_ok'])
+        self.assertEqual(packet['operations'][0]['note'], source['note'])
+        self.assertFalse(packet['operations'][0]['full_text_ok'])
+        self.assertEqual(source, original)
+
+    def test_compacted_body_readings_keep_observation_and_do_not_modify_sources(self):
+        sources = [{'url': 'https://example.invalid/paper', 'source_type': 'paper',
+                    'read_depth': 'full', 'coverage': 'query_excerpt', 'read_query': query,
+                    'content': query + 'x' * 12000,
+                    'evidence_spans': [{'start': index*20000, 'end': index*20000+12000}]}
+                   for index, query in enumerate(('method', 'experiment'))]
+        original = deepcopy(sources)
+        packet = answer_context({'current_time': 'now', 'papers': sources,
+                                 'candidates': [], 'dialogue_events': []})
+        observed = packet['sources'][0]
+        self.assertEqual(observed['read_depth'], 'full')
+        self.assertEqual(observed['body_observation'], 'bounded_excerpt_read')
+        self.assertEqual(observed['coverage'], 'multiple_bounded_excerpts')
+        self.assertTrue(observed['context_truncated'])
+        self.assertEqual(len(observed['readings']), 2)
+        self.assertNotIn('content', observed)
+        self.assertLessEqual(sum(len(r['text']) for r in observed['readings']), 12000)
+        self.assertEqual(sources, original)
+
+    def test_web_or_unidentified_sources_do_not_receive_paper_observation(self):
+        sources = [{'url': 'https://arxiv.org/abs/2601.00001', 'source_type': 'web',
+                    'read_depth': 'web', 'coverage': 'html_excerpt', 'abstract': 'Web metadata'},
+                   {'url': 'https://example.invalid/page', 'snippet': 'Untyped page'},
+                   {'url': 'https://example.invalid/dataset.pdf', 'source_type': 'dataset'}]
+        original = deepcopy(sources)
+        packet = answer_context({'current_time': 'now', 'papers': sources,
+                                 'candidates': [], 'dialogue_events': []})
+        for observed in packet['sources']:
+            self.assertNotIn('body_observation', observed)
+        self.assertEqual(packet['sources'], sources)
+        self.assertEqual(sources, original)
+
+    def test_legacy_untyped_arxiv_candidate_gets_observed_depth_without_mutation(self):
+        source = {'url': 'https://arxiv.org/abs/2601.00001v2', 'abstract': 'Legacy abstract'}
+        original = deepcopy(source)
+        packet = answer_context({'current_time': 'now', 'papers': [],
+                                 'candidates': [source], 'dialogue_events': []})
+        observed = packet['sources'][0]
+        self.assertEqual(observed['body_observation'], 'not_read')
+        self.assertEqual(observed['read_depth'], 'abstract')
+        self.assertEqual(observed['coverage'], 'abstract_only')
+        self.assertEqual(source, original)
 
     def test_disabled_lookup_does_not_contact_provider(self):
         ws = SimpleNamespace(config=Config(enrich_venues=False))

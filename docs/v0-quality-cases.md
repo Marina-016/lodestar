@@ -1,6 +1,6 @@
 # V0 质量验收卡
 
-更新：2026-10-17。范围：本地单用户 Web 研究闭环。产品边界以 [当前 PRD](agent-prd.md) 为准；历史失败见 [10-14](v0-live-review-20261014.md) 与 [10-15](v0-live-review-20261015.md)。
+更新：2026-10-18。范围：本地单用户 Web 研究闭环。产品边界以 [当前 PRD](agent-prd.md) 为准；历史失败见 [10-14](v0-live-review-20261014.md) 与 [10-15](v0-live-review-20261015.md)。
 
 本页是待执行的人工验收协议，不是已通过报告。模型负责理解语言与选择工具；验收卡不要求固定搜索顺序、最低阅读篇数、固定回答模板、关键词路由或额外反思 Agent。
 
@@ -20,7 +20,7 @@
 
 ### 现有入口与本页的关系
 
-scripts.eval_workspace 现有 direct、research、workspace、quality 四类场景。quality 已接入 [QF-1 适配器](../scripts/quality_fixtures.py)，通过本机 HTTP 执行 Q02、Q03、Q04 的四轮代表性输入：近期发现、方法比较、发表/数字核对、精简追问。它不覆盖八组全部输入、第二种表达、结果不足变体或浏览器交互，这些仍按下方卡片补验。
+scripts.eval_workspace 现有 direct、research、workspace、quality、learning 五类场景。quality 已接入 [QF-1 适配器](../scripts/quality_fixtures.py)，通过本机 HTTP 执行 Q02、Q03、Q04 的四轮代表性输入：近期发现、方法比较、发表/数字核对、精简追问。它不覆盖八组全部输入、第二种表达、结果不足变体或浏览器交互，这些仍按下方卡片补验。
 
 从仓库根目录运行默认离线模式：
 
@@ -37,7 +37,7 @@ $qualityModel = '替换为当前已核实免费额度的模型ID'
 .\.venv\Scripts\python.exe -X utf8 -m scripts.eval_workspace --live --scenario quality --model $qualityModel --max-model-calls 24
 ~~~
 
---live 只改变模型调用，quality 的检索、正文和发表信息始终是虚构固定证据，不能称为真实论文检索。当前物理请求计数保护仅支持 Anthropic 兼容服务；不支持的服务会拒绝使用该 live runner。24 是共享请求尝试上限，不是云端零费用保证。真实模型输出的 semantic_review 保持 pending，须按本页人工核对。
+--live 只改变模型调用，quality 的检索、正文和发表信息始终是虚构固定证据，不能称为真实论文检索。当前物理请求计数保护支持 Anthropic 和 DashScope；不支持的服务会拒绝使用该 live runner。DashScope 还可用 --max-total-tokens 设置整轮共享的本地 token 预约上限，前台、子任务与辅助提取共用；完整成功且 usage 一致才退还未用预留，失败或未知用量保留预留。请求 JSON 解码后以 UTF-8 重新序列化估算，因此等价的 ASCII 转义不会多占预算。保护估算不是供应商账单上界，也不覆盖其它客户端；真实调用前仍须从已核实免费余额留出至少 20%，确认用完即停，再分配本轮预算。24 是共享请求尝试上限，不是云端零费用保证。真实模型输出的 semantic_review 保持 pending，须按本页人工核对。
 
 quality 在独立验收进程中注入 registry.call_tool、dialogue.verify_publication，并冻结 dialogue/evidence 的当前时间；生产工具注册内容和用户服务不变。QF-1 的 query 文本不做领域路由或语义匹配，只提供固定候选及首次提交日期过滤/排序；正文可选精确的 method/experiment 节，其他查询返回两段有界正文并说明范围。未知 URL、网页或项目工具明确拒绝，无真实工具或网络回退。quality 拒绝 --live-search，也拒绝通过程序入口传入 search_mode=live。
 
@@ -51,6 +51,12 @@ quality 在独立验收进程中注入 registry.call_tool、dialogue.verify_publ
 实现中 A 的发表观察为 publication_status=unresolved、peer_review_status=not_verified；B 为 publication_status=publication_record_found。它们分别对应下方“尚未核实”和“夹具内正式记录已确认”，不是质量排名。
 
 现有 lodestar/fixtures.py 仍是旧占位管道数据，不能当 QF-1 或真实论文证据。若直接粘贴材料给模型，只能验收材料理解；真实公开论文场景需另建来源快照和人工事实表，不外推合成结果。
+
+### 学习证据的连续验收
+
+scripts.eval_workspace --scenario learning 经本机 HTTP 在新空会话发送五轮 Q07：接触记录、纠正、召回、遗忘、再次召回。每轮 learning_snapshot 只从本轮隔离库读取真实事件、来源消息、有效状态及 profile，并保留实际工具动作和回执。semantic_review 始终 pending；生命周期检查不判断回答是否忠于用户原话。
+
+默认 mock 不会编造预期学习事件，因而可完成五轮管道但给出 not_established_no_events、生命周期检查 false 和非零退出码；这是没有形成能力证据，不是学习语义失败的自动判卷。真实验收沿用 --live、已核实模型及共享双预算，不能依靠默认开关或脚本退出码保证免费。纠正后的实际召回必须存在新自评且不复活旧证据；最终空库不能掩盖先前把纠正误做撤销。
 
 ## 固定数据 QF-1：全部为虚构验收材料
 

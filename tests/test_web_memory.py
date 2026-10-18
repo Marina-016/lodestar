@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from lodestar.agent.dialogue import gather
-from lodestar.memory import learning, repo
+from lodestar.memory import assistant, learning, repo
 from lodestar.web import memory
 from lodestar.web.server import WebApp, Conflict
 from lodestar.web.tools import assistant_tools
@@ -319,3 +319,100 @@ class SharedMemoryTest(unittest.TestCase):
         self.assertIn('Routing preference', json.dumps(packet['managed_memory']))
         snapshot = self.app.state()['messages'][-1]['metadata']['web_context']['memory']
         self.assertEqual({r['id'] for r in snapshot}, {json.loads(r)['id'] for r in packet['managed_memory']})
+
+    def test_read_memory_no_match_discloses_available_records_and_overview_returns_react(self):
+        note = self.app.note('main', {'content': 'ReAct source-bound preference'})
+        with self.app.workspace() as ws:
+            evidence = learning.record(ws.conn, user_id=memory.USER, technology='ReAct', method='Tool use',
+                event='self_report', evidence='I have read the method, not implemented it.')
+            item = self.app.item(ws, 'main')
+        read = assistant_tools(self.app, item, 'observe', 'Show my learning', lambda: None)['read_memory']['handler']
+        filtered = read({'query': '技术 方法 学习 掌握'})
+        self.assertEqual(filtered['memories'], [])
+        self.assertEqual(filtered['learning'], [])
+        facts = filtered['retrieval']
+        self.assertTrue(facts['filter_applied'])
+        self.assertEqual(facts['query'], '技术 方法 学习 掌握')
+        self.assertEqual(facts['visible_active_notes'], 1)
+        self.assertEqual(facts['user_active_learning_events'], 1)
+        self.assertEqual(facts['returned_memories'], 0)
+        self.assertEqual(facts['returned_learning_profiles'], 0)
+        overview = read({})
+        self.assertFalse(overview['retrieval']['filter_applied'])
+        self.assertEqual(overview['memories'][0]['id'], note['id'])
+        self.assertEqual(overview['learning'][0]['technology'], 'ReAct')
+        self.assertEqual(overview['learning'][0]['evidence'][0]['id'], evidence['evidence_id'])
+        self.assertEqual(overview['learning'][0]['mastery'], 'unknown')
+        self.app.learning({'action': 'revoke', 'id': evidence['evidence_id']})
+        self.app.note('main', {'id': note['id'], 'status': 'deleted'})
+        empty = read({})
+        self.assertEqual(empty['retrieval']['visible_active_notes'], 0)
+        self.assertEqual(empty['retrieval']['user_active_learning_events'], 0)
+        self.assertEqual(empty['memories'], [])
+        self.assertEqual(empty['learning'], [])
+
+    def test_read_memory_counts_only_visible_active_notes_and_current_user_learning(self):
+        p, q = self.project('P retrieval'), self.project('Q retrieval')
+        a, b, c = self.app.create('A', p), self.app.create('B', p), self.app.create('C', q)
+        self.app.note('main', {'content': 'PERSONAL_VISIBLE'})
+        self.app.note(a, {'content': 'PROJECT_P_VISIBLE', 'scope': 'project'})
+        self.app.note(a, {'content': 'TASK_A_ONLY', 'scope': 'task'})
+        self.app.note(c, {'content': 'PROJECT_Q_HIDDEN', 'scope': 'project'})
+        self.app.note(c, {'content': 'TASK_C_HIDDEN', 'scope': 'task'})
+        self.app.note('main', {'content': 'DISABLED_HIDDEN', 'status': 'disabled'})
+        with self.app.workspace() as ws, ws.conn:
+            assistant.save(ws.conn, 'other-user', content='FOREIGN_NOTE_HIDDEN')
+            learning.record(ws.conn, user_id=memory.USER, technology='ReAct', method='Tool use',
+                event='self_report', evidence='Current user evidence')
+            learning.record(ws.conn, user_id='other-user', technology='FOREIGN_TECH_HIDDEN',
+                event='self_report', evidence='Other user evidence')
+        for item_id, visible_count in ((a, 3), (b, 2), ('main', 1)):
+            with self.subTest(item=item_id), self.app.workspace() as ws:
+                item = self.app.item(ws, item_id)
+            read = assistant_tools(self.app, item, 'observe', 'Overview', lambda: None)['read_memory']['handler']
+            result = read({})
+            self.assertEqual(result['retrieval']['visible_active_notes'], visible_count)
+            self.assertEqual(result['retrieval']['user_active_learning_events'], 1)
+            self.assertEqual(result['retrieval']['returned_memories'], visible_count)
+            self.assertEqual(result['retrieval']['returned_learning_profiles'], 1)
+            encoded = json.dumps(result)
+            for hidden in ('PROJECT_Q_HIDDEN', 'TASK_C_HIDDEN', 'FOREIGN_NOTE_HIDDEN',
+                           'FOREIGN_TECH_HIDDEN', 'DISABLED_HIDDEN'):
+                self.assertNotIn(hidden, encoded)
+            if item_id != a:
+                self.assertNotIn('TASK_A_ONLY', encoded)
+
+    def test_read_memory_overview_stays_bounded_and_reports_returned_counts(self):
+        for index in range(20):
+            self.app.note('main', {'content': f'Preference {index} ' + 'x'*1900})
+        with self.app.workspace() as ws:
+            item = self.app.item(ws, 'main')
+        read = assistant_tools(self.app, item, 'observe', 'Overview', lambda: None)['read_memory']['handler']
+        result = read({})
+        facts = result['retrieval']
+        self.assertEqual(facts['visible_active_notes'], 20)
+        self.assertEqual(facts['returned_memories'], len(result['memories']))
+        self.assertLess(facts['returned_memories'], facts['visible_active_notes'])
+        self.assertLessEqual(sum(map(len, assistant.prompt_rows(result['memories']))), 12000)
+
+    def test_read_memory_counts_and_results_share_snapshot_during_revocation(self):
+        self.app.note('main', {'content': 'ReAct preference'})
+        with self.app.workspace() as ws:
+            evidence = learning.record(ws.conn, user_id=memory.USER, technology='ReAct',
+                event='self_report', evidence='Current evidence')
+            item = self.app.item(ws, 'main')
+        read = assistant_tools(self.app, item, 'observe', 'Overview', lambda: None)['read_memory']['handler']
+        original = memory.notes
+
+        def revoke_after_notes(ws, current, **kwargs):
+            rows = original(ws, current, **kwargs)
+            with self.app.workspace() as writer:
+                learning.revoke(writer.conn, evidence['evidence_id'], memory.USER)
+            return rows
+
+        with patch('lodestar.web.tools.memory.notes', side_effect=revoke_after_notes):
+            result = read({})
+        self.assertEqual(result['retrieval']['user_active_learning_events'], 1)
+        self.assertEqual(result['learning'][0]['technology'], 'ReAct')
+        self.assertEqual(result['learning'][0]['evidence'][0]['id'], evidence['evidence_id'])
+        self.assertEqual(read({})['retrieval']['user_active_learning_events'], 0)

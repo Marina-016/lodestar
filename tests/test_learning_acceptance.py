@@ -62,6 +62,35 @@ class _LearningClient:
         return {'role': 'assistant', 'content': [{'type': 'text', 'text': answer}]}
 
 
+class _FilteredLearningScript(_LearningScript):
+    def factory(self, config):
+        phase = self.clients
+        self.clients += 1
+        return _FilteredLearningClient(config, self, phase)
+
+
+class _FilteredLearningClient(_LearningClient):
+    def dialogue_step(self, system, messages, tools, on_text=None):
+        if self.phase != 2:
+            return super().dialogue_step(system, messages, tools, on_text)
+        self.script.observed.append(json.dumps({'system': system, 'messages': messages}, ensure_ascii=False))
+        self.step += 1
+        if self.step == 1:
+            return self._call('read_memory', {'query': '技术 方法 学习 掌握'})
+        if self.step == 2:
+            result = json.loads(messages[-1]['content'][0]['content'])
+            self.script.filtered_result = result
+            if (result['retrieval']['matching_learning_profiles'] == 0 and
+                    result['retrieval']['user_active_learning_profiles'] > 0):
+                return self._call('read_memory', {})
+            raise AssertionError('Scripted recovery requires an observed lexical miss with stored profiles')
+        self.script.readbacks[self.phase] = json.loads(messages[-1]['content'][0]['content'])
+        text = 'Scripted filtered-recall recovery; not a semantic verdict.'
+        if on_text:
+            on_text(text)
+        return {'role': 'assistant', 'content': [{'type': 'text', 'text': text}]}
+
+
 class LearningAcceptanceTests(unittest.TestCase):
     def _run_local(self, config, destination, **kwargs):
         original_connect = socket.socket.connect
@@ -187,3 +216,27 @@ class LearningAcceptanceTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'live search'):
                 eval_workspace.run(Config(llm_mode='mock', search_mode='live'), target, scenario='learning')
             self.assertFalse(target.exists())
+
+    def test_filter_miss_overview_retry_preserves_full_learning_lifecycle(self):
+        script = _FilteredLearningScript()
+        with tempfile.TemporaryDirectory() as directory:
+            report = self._run_local(Config(llm_mode='mock', search_mode='mock'),
+                Path(directory)/'run', llm_factory=script.factory)
+        self.assertTrue(all(report['checks'].values()), report['checks'])
+        self.assertEqual(len(report['turns']), 5)
+        actions = report['turns'][2]['actions']
+        self.assertEqual([a['action'] for a in actions], ['read_memory', 'read_memory'])
+        self.assertEqual(actions[0]['params'], {'query': '技术 方法 学习 掌握'})
+        self.assertEqual(actions[1]['params'], {})
+        self.assertEqual(script.filtered_result['learning'], [])
+        self.assertEqual(script.filtered_result['retrieval']['user_active_learning_profiles'], 1)
+        self.assertEqual(script.filtered_result['retrieval']['matching_learning_profiles'], 0)
+        recalled = script.readbacks[2]['learning'][0]
+        self.assertEqual(recalled['mastery'], 'unknown')
+        self.assertEqual(recalled['method'], '思考与行动交替')
+        replacement = report['turns'][1]['learning_snapshot']['active_event_ids']
+        self.assertEqual([recalled['evidence'][0]['id']], replacement)
+        self.assertEqual(script.readbacks[4]['learning'], [])
+        self.assertEqual(report['turns'][4]['learning_snapshot']['active_event_ids'], [])
+        self.assertEqual(report['semantic_review'], 'pending')
+        self.assertEqual(report['model_attempts'], 0)

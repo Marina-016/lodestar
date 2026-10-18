@@ -56,76 +56,92 @@ def record(conn: sqlite3.Connection, *, technology: str, event: str, evidence: s
     return {'evidence_id': cursor.lastrowid, 'event': event, 'created_at': now}
 
 
-def profile(conn: sqlite3.Connection, user_id: str = 'default',
-            technology: str | None = None, limit: int = 100) -> list[dict]:
-    """Bound returned methods, not the history establishing their mastery.
-
-    Full active history determines mastery and paper relationships. Only recent
-    evidence rows and paper URLs are bounded for display and model context.
-    """
+def _active_groups(conn, user_id, technology=None, limit=None):
     params = [user_id]
     predicate = 'user_id=? AND revoked_at IS NULL'
     if technology:
         predicate += ' AND technology=? COLLATE NOCASE'
         params.append(technology)
-    groups = conn.execute(
-        f'SELECT technology,method,MAX(id) AS latest FROM learning_events WHERE {predicate} '
-        'GROUP BY technology COLLATE NOCASE,method COLLATE NOCASE '
-        'ORDER BY latest DESC LIMIT ?',
-        [*params, max(1, min(int(limit), 500))]).fetchall()
-    result = []
-    for group in groups:
-        group_predicate = ('user_id=? AND revoked_at IS NULL '
-                           'AND technology=? COLLATE NOCASE AND method=? COLLATE NOCASE')
-        group_params = (user_id, group['technology'], group['method'])
-        stats = conn.execute(
-            f"SELECT COUNT(*) AS count, COUNT(DISTINCT NULLIF(paper_url,'')) AS paper_count, MAX(CASE event "
-            "WHEN 'demonstrated_application' THEN 3 WHEN 'demonstrated_implementation' THEN 2 "
-            "WHEN 'demonstrated_explanation' THEN 1 ELSE 0 END) AS level "
-            f"FROM learning_events WHERE {group_predicate}", group_params).fetchone()
-        evidence = [dict(row) for row in conn.execute(
-            f'SELECT * FROM learning_events WHERE {group_predicate} ORDER BY id DESC LIMIT 20',
-            group_params).fetchall()]
-        # Preserve the actual historical support for the level, even when old.
-        mastery = LEVELS[stats['level']]
-        mastery_evidence = None
-        if mastery != 'unknown':
-            event = next(event for event, level in MASTERY.items() if level == mastery)
-            row = conn.execute(f'SELECT * FROM learning_events WHERE {group_predicate} '
-                               'AND event=? ORDER BY id DESC LIMIT 1', (*group_params, event)).fetchone()
-            mastery_evidence = dict(row)
-        papers = conn.execute(f"SELECT paper_url,MAX(id) AS latest FROM learning_events "
-                              f"WHERE {group_predicate} AND paper_url<>'' "
-                              'GROUP BY paper_url ORDER BY latest DESC LIMIT 50', group_params).fetchall()
-        result.append({'technology': group['technology'], 'method': group['method'],
-                       'mastery': mastery, 'mastery_evidence': mastery_evidence,
-                       'evidence': evidence, 'event_count': stats['count'],
-                       'papers': [row['paper_url'] for row in papers],
-                       'paper_count': stats['paper_count'], 'papers_truncated': stats['paper_count'] > 50})
-    return result
+    sql = (f'SELECT technology,method,MAX(id) AS latest FROM learning_events WHERE {predicate} '
+           'GROUP BY technology COLLATE NOCASE,method COLLATE NOCASE ORDER BY latest DESC')
+    if limit is not None:
+        sql += ' LIMIT ?'
+        params.append(limit)
+    return conn.execute(sql, params).fetchall()
+
+
+def _profile_group(conn, user_id, group):
+    """Project one selected identity from its complete active history."""
+    group_predicate = ('user_id=? AND revoked_at IS NULL '
+                       'AND technology=? COLLATE NOCASE AND method=? COLLATE NOCASE')
+    group_params = (user_id, group['technology'], group['method'])
+    stats = conn.execute(
+        f"SELECT COUNT(*) AS count, COUNT(DISTINCT NULLIF(paper_url,'')) AS paper_count, MAX(CASE event "
+        "WHEN 'demonstrated_application' THEN 3 WHEN 'demonstrated_implementation' THEN 2 "
+        "WHEN 'demonstrated_explanation' THEN 1 ELSE 0 END) AS level "
+        f"FROM learning_events WHERE {group_predicate}", group_params).fetchone()
+    evidence = [dict(row) for row in conn.execute(
+        f'SELECT * FROM learning_events WHERE {group_predicate} ORDER BY id DESC LIMIT 20',
+        group_params).fetchall()]
+    # Preserve the actual historical support for the level, even when old.
+    mastery = LEVELS[stats['level']]
+    mastery_evidence = None
+    if mastery != 'unknown':
+        event = next(event for event, level in MASTERY.items() if level == mastery)
+        row = conn.execute(f'SELECT * FROM learning_events WHERE {group_predicate} '
+                           'AND event=? ORDER BY id DESC LIMIT 1', (*group_params, event)).fetchone()
+        mastery_evidence = dict(row)
+    papers = conn.execute(f"SELECT paper_url,MAX(id) AS latest FROM learning_events "
+                          f"WHERE {group_predicate} AND paper_url<>'' "
+                          'GROUP BY paper_url ORDER BY latest DESC LIMIT 50', group_params).fetchall()
+    return {'technology': group['technology'], 'method': group['method'],
+            'mastery': mastery, 'mastery_evidence': mastery_evidence,
+            'evidence': evidence, 'event_count': stats['count'],
+            'papers': [row['paper_url'] for row in papers],
+            'paper_count': stats['paper_count'], 'papers_truncated': stats['paper_count'] > 50,
+            'evidence_truncated': stats['count'] > len(evidence)}
+
+
+def profile(conn: sqlite3.Connection, user_id: str = 'default',
+            technology: str | None = None, limit: int = 100) -> list[dict]:
+    """Bound displayed methods, retaining historical mastery and paper support."""
+    groups = _active_groups(conn, user_id, technology, max(1, min(int(limit), 500)))
+    return [_profile_group(conn, user_id, group) for group in groups]
+
+
+def retrieve(conn, user_id='default', query=None, limit=20):
+    """Count matching identities before projecting a bounded, user-owned result.
+
+    None requests an overview; a supplied string remains a lexical filter.
+    Case-insensitive identities match profile(), so casing cannot duplicate or
+    crowd out methods. A matching old method is projected directly, without
+    applying an unrelated 500-method display limit first.
+    """
+    groups = _active_groups(conn, user_id)
+    matched = groups
+    scores = {}
+    if query is not None:
+        from lodestar.retrieval import terms
+        wanted = terms(query)
+        scores = {g['latest']: len(wanted & terms(g['technology']+' '+g['method'])) for g in groups}
+        matched = sorted((g for g in groups if scores[g['latest']]),
+                         key=lambda g: (-scores[g['latest']], -g['latest']))
+    selected = matched[:max(1, min(int(limit), 20))]
+    profiles = []
+    for group in selected:
+        entry = _profile_group(conn, user_id, group)
+        if query is not None:
+            entry['recall_term_matches'] = scores[group['latest']]
+            entry['evidence'] = entry['evidence'][:5]
+            entry['evidence_truncated'] = entry['event_count'] > len(entry['evidence'])
+        profiles.append(entry)
+    return {'profiles': profiles, 'active_profiles': len(groups),
+            'matching_profiles': len(matched), 'profiles_truncated': len(profiles) < len(matched)}
 
 
 def recall(conn: sqlite3.Connection, query: str, user_id: str = 'default', limit: int = 8) -> list[dict]:
-    """Filter by stored technology/method before projecting a bounded evidence history."""
-    from lodestar.retrieval import terms
-    wanted = terms(query)
-    if not wanted:
-        return []
-    rows = conn.execute('SELECT DISTINCT technology,method FROM learning_events '
-                        'WHERE user_id=? AND revoked_at IS NULL', (user_id,)).fetchall()
-    ranked = []
-    for row in rows:
-        score = len(wanted & terms(row['technology'] + ' ' + row['method']))
-        if score:
-            ranked.append((score, row['technology'], row['method']))
-    results = []
-    for score, technology, method in sorted(ranked, key=lambda r: (-r[0], r[1], r[2]))[:max(1,min(limit,20))]:
-        for entry in profile(conn, user_id, technology, limit=500):
-            if entry['method'].casefold() == method.casefold():
-                entry['recall_term_matches'] = score
-                entry['evidence'] = entry['evidence'][:5]
-                results.append(entry)
-    return results
+    """Match stored technology/method identities before projecting their evidence."""
+    return retrieve(conn, user_id, query, limit)['profiles']
 
 
 def revoke(conn: sqlite3.Connection, evidence_id: int, user_id: str = 'default') -> bool:

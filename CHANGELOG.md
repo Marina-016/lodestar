@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- Deduplicate learning recall with the same NOCASE identities as profiles and project matching methods directly, so 500 newer methods cannot hide an exact older match. Retain full-history mastery support and disclose omitted evidence.
+- Report memory match counts, distinct learning-profile counts, filter fields and truncation independently from event counts or empty query results; preserve the shared read snapshot.
+
 - Count observed body evidence using actual depth, returned text and query matches; disclose abstract fallbacks separately from full-text requests. Preserve incremental coverage before a failed run and exclude unchecked publication snapshots.
 
 - Normalize numbered PDF headings and preserve repeated sections; include Approach and experimental variants in bounded section excerpts, retaining room for method/experiment evidence and reporting truncation.
@@ -27,6 +30,8 @@
 
 ### Added
 
+- Extend the five-turn scripted learning HTTP checks with a lexical miss followed by an explicit overview read, retaining correction IDs, method identity, unknown mastery and post-revocation emptiness. This is not autonomous-model acceptance.
+
 - A public-quality HTTP acceptance scenario with versioned, hashed public PDF snapshots, on-demand body reads and a separate empty human review template. No live-search fallback or automatic semantic score; reuse shared model-budget controls only with explicit live execution.
 
 - A five-turn isolated learning acceptance scenario with per-turn persisted event/source snapshots. Scripted native-tool tests verify correction, recall and revocation; reports retain pending semantic review and do not score generated prose.
@@ -40,11 +45,13 @@
 
 ### Validation
 
+- Learning-recall changes passed 450 Python regressions, 14 frontend tests and a 325-file preflight. The isolated five-turn filter/overview lifecycle uses scripted model decisions; no real-model requests and no semantic acceptance. Prior intermittent HTTP failure remains recorded, not declared fixed.
+
 - Frozen-public-corpus HTTP replay passed with scripted decisions and zero cloud-model/external-network calls. The initial 443-test run had one existing HTTP test abort with Windows 10053; 18 targeted Web tests, five repetitions of the failing test and the full 443-test recheck passed. Preserve the initial failure; its cause remains unestablished.
 
 - Six local reads of the two existing public PDF caches stayed within budget; query spans matched the extracted text. No model or network requests. This checks ingestion, not autonomous research or answer correctness; see docs/v0-pdf-evidence-review-20261018.md.
 
-- Latest full recheck: 443 offline Python regressions and 14 frontend tests passed, with no WMI workaround or skipped tests. Syntax, dependency and release checks passed; test resources were cleaned up. Earlier 384/405/419/420/424/434-test snapshots remain in the historical review.
+- Latest full regression: 450 offline Python regressions and 14 frontend tests passed, with no WMI workaround or skipped tests. Syntax, dependency and release checks passed; test resources were cleaned up. Earlier 384/405/419/420/424/434/443-test snapshots remain in the historical review.
 - Public arXiv retrieval and one query-selected PDF read succeeded. The 24 authorized real-model requests do not establish semantic acceptance; failed answers, budget stops and older hash-mismatch artifacts are retained.
 
 ### Scope

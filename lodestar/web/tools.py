@@ -30,14 +30,22 @@ def assistant_tools(app, item, run_id, message, check_cancel, *, user_authored=T
                 wanted = terms(query)
                 rows = sorted(rows, key=lambda r: -len(wanted & terms(r['content'])))
                 rows = [r for r in rows if wanted & terms(r['content'])]
+            matched_notes = len(rows)
             memories = assistant.select_rows(rows, query, budget=12000, limit=30)
-            recalled = learning.recall(ws.conn, query, memory.USER) if query else learning.profile(ws.conn, memory.USER, limit=20)
+            recall = learning.retrieve(ws.conn, memory.USER, query or None, limit=8 if query else 20)
+            recalled = recall['profiles']
             return {'memories': memories, 'learning': recalled,
                     'retrieval': {'query': query, 'filter_applied': bool(query),
                         'visible_active_notes': visible_notes, 'user_active_learning_events': active_learning,
+                        'matching_memories': matched_notes, 'memories_truncated': len(memories) < matched_notes,
+                        'user_active_learning_profiles': recall['active_profiles'],
+                        'matching_learning_profiles': recall['matching_profiles'],
+                        'learning_profiles_truncated': recall['profiles_truncated'],
+                        'filter_fields': {'memories': ['content'], 'learning': ['technology', 'method']},
                         'returned_memories': len(memories), 'returned_learning_profiles': len(recalled),
                         'note': 'Query filters lexically; no matches does not mean no stored records. '
-                                'Omit query for a bounded overview.'}}
+                                'Omit query for a bounded overview. Truncation flags distinguish matched-but-omitted '
+                                'records from no matches; an overview is not necessarily the whole profile.'}}
 
     def manage_memory(args):
         if not user_authored and args.get('scope', 'personal') == 'personal':
@@ -180,7 +188,7 @@ def assistant_tools(app, item, run_id, message, check_cancel, *, user_authored=T
             return result
 
     tools = {
-        'read_memory': definition('Read visible active personal/project/task facts and your user\'s learning evidence. query is an optional lexical filter; omit it for a bounded overview. Counts cover this space\'s visible notes and the current user\'s active learning events. Empty filtered results do not imply empty memory.',
+        'read_memory': definition('Read visible active personal/project/task facts and your user\'s learning evidence. query is an optional lexical filter; omit it for a bounded overview. Counts cover this space\'s visible notes, the current user\'s events and distinct technology/method profiles. Match counts and truncation flags disclose omitted records. Empty filtered results do not imply empty memory.',
                                  {'query': {'type': 'string'}}, read_memory),
         'manage_memory': definition('Save a durable user preference/fact, or correct/forget an existing memory by ID. Use only user-provided facts or confirmed project decisions. Never store technology definitions, infer mastery, or turn background reading into user exposure. scope defaults to personal; project requires a bound project; task keeps a local note. Read existing IDs before modifying them.',
             {'action': {'type': 'string', 'enum': ['save', 'forget']}, 'id': {'type': 'string'},

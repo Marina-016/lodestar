@@ -507,3 +507,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: non
 .retrieval-records summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--secondary); padding: 6px 0; }
 .retrieval-records summary > span { font-weight: 400; color: var(--muted); margin-left: 8px; }
 .retrieval-records[open] summary { margin-bottom: 12px; }
+.model-unavailable { margin: 12px 0 18px; color: var(--secondary); font-size: 12px; }
+.model-unavailable summary { cursor: pointer; }
+.model-unavailable .detail-row { gap: 12px; align-items: baseline; }
+.model-unavailable .detail-row > span { min-width: 0; overflow-wrap: anywhere; }

@@ -3,6 +3,7 @@ import os
 import requests
 from urllib.parse import urlsplit
 from lodestar.providers.reasoning import dashscope_options
+from lodestar.providers.errors import raise_for_status
 
 class DashScopeClient:
     """Own an injected requests-compatible transport; never close shared requests.
@@ -66,7 +67,7 @@ class DashScopeClient:
             headers={'Authorization': 'Bearer ' + self.key}, json=payload,
             timeout=self.config.llm_timeout_s)
         if not response.ok:
-            response.raise_for_status()
+            raise_for_status(response)
         data = response.json()
         choice = data['choices'][0]
         self.usage.append({'role': role, 'model': data.get('model', model),

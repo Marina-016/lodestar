@@ -30,6 +30,13 @@ lodestar.bat
 *.db
 *.sqlite
 *.sqlite3
+*.db-wal
+*.db-shm
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
+*.db.lock
 .DS_Store
 Thumbs.db
 .vercel

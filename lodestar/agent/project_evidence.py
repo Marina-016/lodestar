@@ -31,15 +31,23 @@ def collect(ws, goal, sources, project_id, *, live=False):
     project=repo.get_project(ws.conn,project_id)
     if project is None:
         raise ValueError('Unknown registered project')
-    if live and not export_allowed(ws.config,project):
+    from lodestar.project_sources import approved_description, approved_readme
+    description = approved_description(ws.conn,project) if live else None
+    readme = approved_readme(ws.conn,project_id) if live else None
+    approved_background = {'project':description} if description else {}
+    configured_export = export_allowed(ws.config,project)
+    if live and not configured_export and not readme:
         return {'status':'needs_export_scope','documents':[],'papers':[],
+                **approved_background,
                 'missing':['No matching repository and explicit file export allowlist.']}
-    allowed=set(ws.config.project_model_allowed_paths) if live else None
+    allowed=(set(ws.config.project_model_allowed_paths) if configured_export else set()) if live else None
     # Search locally; only approved paths can enter a remote context.
     matches=repo.search_project_documents(ws.conn,goal,project_id=project_id,limit=20 if live else 3)
-    documents=[]
+    documents=[readme] if readme else []
     for match in matches:
         if allowed is not None and match['path'] not in allowed:
+            continue
+        if any(d['path']==match['path'] for d in documents):
             continue
         document=repo.get_project_document(ws.conn,match['id'])
         documents.append({'path':document['path'],'content':document.get('content','')[:4000],
@@ -62,4 +70,4 @@ def collect(ws, goal, sources, project_id, *, live=False):
         missing.append('No body-level paper excerpt; full method applicability is unverified.')
     for source in [*documents,*papers]:
         source['quote_candidates']=[line.strip()[:160] for line in source['content'].splitlines() if len(line.strip())>=40][:6]
-    return {'status':'ready','documents':documents,'papers':papers,'missing':missing}
+    return {'status':'ready','documents':documents,'papers':papers,'missing':missing,**approved_background}

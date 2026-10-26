@@ -6,6 +6,7 @@ import re
 import requests
 
 from lodestar.providers.reasoning import anthropic_options, dashscope_options
+from lodestar.providers.errors import classify, raise_for_status
 
 
 def _guard_sse_errors(response):
@@ -35,7 +36,7 @@ def _guard_sse_errors(response):
                         except (ValueError, UnicodeError):
                             event = None
                         if isinstance(event, dict) and event.get('type') == 'error':
-                            raise LLMError('Provider returned an error in its response stream', code='upstream_stream_error')
+                            raise LLMError('Provider returned an error in its response stream', code=classify(event) or 'upstream_stream_error')
                     data, size, oversized = [], 0, False
                 elif value.startswith(b'data:') and not oversized:
                     size += len(value)
@@ -159,7 +160,7 @@ def _openai_step(client, system, messages, tools, on_text):
     with transport.post(adapter.base_url + '/chat/completions',
             headers={'Authorization': 'Bearer ' + adapter.key}, json=payload,
             timeout=client.config.llm_timeout_s, stream=True) as response:
-        response.raise_for_status()
+        raise_for_status(response)
         for line in response.iter_lines():
             line = line.decode('utf-8') if isinstance(line, bytes) else line
             if not line or not line.startswith('data:'):
@@ -171,7 +172,7 @@ def _openai_step(client, system, messages, tools, on_text):
             data = json.loads(raw)
             returned_model = data.get('model') or returned_model
             if data.get('error'):
-                raise LLMError('Provider stream error', code='upstream_stream_error')
+                raise LLMError('Provider stream error', code=classify(data) or 'upstream_stream_error')
             if data.get('usage'):
                 usage = data['usage']
                 adapter.usage.append({'role': 'conversation', **data['usage']})

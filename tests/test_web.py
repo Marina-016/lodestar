@@ -32,6 +32,9 @@ class WebTest(unittest.TestCase):
         self.app = WebApp(self.config,llm_factory=FakeLLM)
 
     def tearDown(self):
+        # A terminal run is visible before its worker closes the DB/client.
+        # Join that owned work before deleting the fixture directory on Windows.
+        self.app.close()
         self.tmp.cleanup()
 
     def wait(self, run):

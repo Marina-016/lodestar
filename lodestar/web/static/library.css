@@ -1,0 +1,55 @@
+/* A durable fact ledger: scope, revision and Git versions carry the visual hierarchy. */
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.library-main .topbar { position: relative; flex-shrink: 0; }
+.library-scroll { overflow-y: auto; padding: 38px clamp(22px,4vw,64px) 36px; }
+.library-heading { display: flex; align-items: start; justify-content: space-between; gap: 24px; margin: 0 0 28px; }
+.library-heading h1 { font-size: 32px; font-weight: 600; letter-spacing: -1px; margin: 0 0 10px; }
+.library-heading p { font-size: 13px; line-height: 1.8; color: var(--muted); margin: 0; max-width: 540px; }
+.library-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.library-actions .primary, .library-actions .secondary { white-space: nowrap; min-height: 38px; font-size: 12px; }
+.library-tools { display: flex; gap: 10px; margin: 0 0 18px; align-items: center; }
+.library-tools input, .library-tools select { background: var(--surface); border: 1px solid transparent; border-radius: 10px; padding: 11px 13px; min-width: 0; font-size: 12px; }
+.library-tools input { flex: 1; width: 100%; }
+.library-tools select { width: auto; max-width: 200px; padding-right: 30px; }
+.library-tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--line-strong); margin: 0 0 24px; overflow-x: auto; }
+.library-tabs button { padding: 12px 14px; color: var(--muted); white-space: nowrap; border-bottom: 2px solid transparent; font-size: 12px; }
+.library-tabs button[aria-pressed="true"] { color: var(--ink); border-bottom-color: var(--ink); font-weight: 600; }
+.library-layout { display: grid; grid-template-columns: minmax(220px,.85fr) minmax(280px,1.15fr); gap: 32px; align-items: start; }
+.list-summary { font-size: 11px; color: var(--muted); margin: 2px 0 13px; }
+.library-row { display: block; text-align: left; width: 100%; padding: 19px 15px; border-bottom: 1px solid var(--line); border-left: 2px solid transparent; border-radius: 0 10px 10px 0; }
+.library-row:hover { background: var(--surface); }
+.library-row.selected { background: var(--surface); border-left-color: var(--ink); }
+.library-row strong { display: block; font-size: 14px; margin-bottom: 8px; overflow-wrap: anywhere; }
+.row-text { font-size: 13px; line-height: 1.85; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; white-space: pre-wrap; }
+.secondary-copy { color: var(--secondary); -webkit-line-clamp: 2; }
+.row-meta { display: flex; align-items: baseline; gap: 7px 16px; flex-wrap: wrap; font-size: 10px; color: var(--muted); margin-top: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.library-detail { min-width: 0; border-left: 1px solid var(--line); padding: 0 0 18px 30px; }
+.detail-heading .eyebrow { font-size: 10px; }
+.detail-heading h2 { font-size: 23px; line-height: 1.45; letter-spacing: -.5px; font-weight: 550; margin: 9px 0 20px; overflow-wrap: anywhere; }
+.memory-body { font-size: 13px; line-height: 1.95; white-space: pre-wrap; overflow-wrap: anywhere; margin: 15px 0; }
+.detail-actions { margin-top: 22px; }
+.detail-section { border-top: 1px solid var(--line); margin-top: 28px; padding-top: 20px; }
+.detail-section h3 { font-size: 12px; margin: 0 0 13px; font-weight: 600; }
+.text-link { color: var(--accent); font-size: 12px; display: inline-block; line-height: 1.7; }
+.repository-link, .workspace-path { overflow-wrap: anywhere; word-break: break-word; }
+.mono, .commit-row code { font-family: "Cascadia Code", Consolas, monospace; font-size: 11px; }
+.workspace-path { line-height: 1.8; padding: 10px 12px; border-radius: 8px; background: var(--surface); }
+.revision-entry { border-top: 1px solid var(--line); padding: 13px 0; font-size: 12px; }
+.revision-entry summary { cursor: pointer; line-height: 1.7; }
+.revision-entry summary > span { font-size: 10px; color: var(--muted); margin-left: 12px; }
+.revision-entry .memory-body { font-size: 12px; }
+.readme-preview { font: 11px/1.8 "Cascadia Code", Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 400px; overflow-y: auto; color: var(--secondary); }
+.commit-row { display: flex; gap: 12px; padding: 10px 0; align-items: baseline; overflow-wrap: anywhere; }
+.commit-row span { flex: 1; min-width: 0; }
+.commit-row small { color: var(--muted); font-size: 10px; }
+.related-task { display: block; font-size: 12px; padding: 10px 0; color: var(--secondary); }
+.related-task:hover { color: var(--accent); }
+.library-placeholder { padding: 45px 12px; color: var(--muted); font-size: 13px; line-height: 1.9; }
+.library-empty { border: 1px dashed var(--line-strong); border-radius: 12px; padding: 30px 22px; margin-top: 20px; font-size: 13px; line-height: 1.9; color: var(--secondary); }
+.library-empty strong { color: var(--ink); display: block; font-weight: 550; margin-bottom: 8px; }
+.library-boundary { color: var(--muted); font-size: 10px; line-height: 1.9; max-width: 800px; margin-top: 35px; }
+.library-pagination { display: flex; justify-content: space-between; margin-top: 18px; font-size: 12px; }
+.library-notice { border-left: 2px solid var(--accent); padding: 12px 15px; background: var(--surface); font-size: 12px; line-height: 1.8; margin-bottom: 20px; overflow-wrap: anywhere; }
+.library-main .fineprint { font-size: 11px; color: var(--muted); line-height: 1.9; }
+@media(max-width:1100px) { .library-layout { grid-template-columns: 1fr; gap: 25px; } .library-detail { border-left: 0; border-top: 1px solid var(--line-strong); padding: 25px 0 0; } .library-heading { flex-direction: column; gap: 17px; } }
+@media(max-width:760px) { .library-scroll { padding: 26px 22px 35px; } .library-heading h1 { font-size: 28px; } .library-tools { flex-wrap: wrap; } .library-tools input { flex-basis: 100%; font-size: 16px; } .library-tools select { flex: 1; max-width: none; font-size: 14px; } .library-tabs button { padding: 12px 10px; } .library-row { padding: 18px 12px; } .commit-row { flex-wrap: wrap; } }

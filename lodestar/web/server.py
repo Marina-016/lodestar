@@ -8,6 +8,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 import secrets
+import os
+import socket
 import threading
 import time
 from urllib.parse import parse_qs, urlparse
@@ -21,7 +23,11 @@ from lodestar.context import Workspace
 from lodestar.llm import LLMClient, LLMError
 from lodestar.memory import learning, repo
 from lodestar.providers.capabilities import apply_reasoning, reasoning_choices
-from lodestar.web import memory
+from lodestar.web import memory, model_health
+from lodestar.web import projects
+from lodestar.project_sources import fetch_snapshot, RepositoryError
+from lodestar import project_workspaces
+from lodestar.web.maintenance import backup_database, workspace_lease
 
 STATIC = Path(__file__).parent / 'static'
 SCHEMA = '''
@@ -61,9 +67,15 @@ class WebApp:
         self.lock = threading.RLock()
         self.catalog_cache = None
         self.cancel_signals = {}
+        self.workers = {}
+        self.project_operations = {}
+        self.project_workers = set()
+        self.closing = False
         with self.workspace() as ws:
             ws.conn.executescript(SCHEMA)
+            ws.conn.executescript(model_health.SCHEMA)
             memory.initialize(ws)
+            projects.initialize(ws)
             index = ws.conn.execute("SELECT sql FROM sqlite_master WHERE name='web_one_active_run'").fetchone()[0]
             if 'cancelling' not in index:
                 ws.conn.execute('DROP INDEX web_one_active_run')
@@ -85,6 +97,13 @@ class WebApp:
         session = ConversationAgent(ws, None).start(user_id=self.user(item_id), project_id=project_id)
         ws.conn.execute('INSERT INTO web_items(id,owner,name,conversation_id,project_id,parent_id,dispatch_key) VALUES(?,?,?,?,?,?,?)',
                         (item_id, 'local', name, session, project_id, parent_id, dispatch_key))
+        if item_id != 'main' and parent_id is None:
+            main = ws.conn.execute("SELECT settings FROM web_items WHERE id='main'").fetchone()
+            if main:
+                preferences = {k:v for k,v in json.loads(main[0]).items()
+                               if k in {'model','profile','thinking','reasoning'}}
+                ws.conn.execute('UPDATE web_items SET settings=? WHERE id=?',
+                                (json.dumps(preferences),item_id))
         return item_id
 
     @staticmethod
@@ -117,13 +136,15 @@ class WebApp:
                                    (item['conversation_id'],)).fetchall()
             messages = [{**dict(r), 'metadata': json.loads(r['metadata'])} for r in reversed(rows)]
             run = ws.conn.execute('SELECT * FROM web_runs WHERE item_id=? ORDER BY rowid DESC LIMIT 1', (item_id,)).fetchone()
+            selection = model_health.view(ws.conn, cfg,
+                [cfg.model, *cfg.model_profiles.values()], last_run=run)
             notes = [dict(r) for r in ws.conn.execute('SELECT * FROM assistant_memories WHERE user_id=? ORDER BY updated_at DESC,id', (self.user(),))]
             return {'item': item, 'items': self.task_list(ws),
                     'messages': messages, 'run': dict(run) if run else None, 'notes': notes,
                     'context_notes': memory.notes(ws, item, active_only=True),
                     'learning': learning.profile(ws.conn, user_id=self.user(item_id)),
                     'projects': repo.list_projects(ws.conn), 'configuration': snapshot(cfg),
-                    'models': list(dict.fromkeys([cfg.model, *cfg.model_profiles.values()])),
+                    'models': selection['models'], 'model_selection': selection,
                     'reasoning': reasoning_choices(cfg, include_current=True),
                     'enabled': not cfg.model_calls_disabled, 'mode': cfg.llm_mode}
 
@@ -142,23 +163,107 @@ class WebApp:
                 finally:
                     client.close()
                 self.catalog_cache = (time.monotonic(), ids)
-        ids = list(dict.fromkeys([cfg.model, *ids, *cfg.model_profiles.values()]))
-        return {'models': ids, 'reasoning': {model: reasoning_choices(
+        with self.workspace() as ws:
+            run = ws.conn.execute('SELECT * FROM web_runs WHERE item_id=? ORDER BY rowid DESC LIMIT 1', (item_id,)).fetchone()
+            selection = model_health.view(ws.conn, cfg, ids, last_run=run)
+        return {**selection, 'reasoning': {model: reasoning_choices(
                     replace(cfg, model=model, llm_thinking=False, llm_thinking_mode='default'))
-                    for model in ids}}
+                    for model in selection['models']}}
+
+    def restore_model(self, item_id, model):
+        with self.lock, self.workspace() as ws, ws.conn:
+            cfg = self.config_for(self.item(ws, item_id))
+            model_health.restore(ws.conn, cfg, model)
+
+    def select_model_default(self, item_id):
+        """Only a fresh matching successful configuration, never a directory guess."""
+        with self.lock, self.workspace() as ws:
+            item = self.item(ws, item_id)
+            cfg = self.config_for(item)
+            run = ws.conn.execute('SELECT * FROM web_runs WHERE item_id=? ORDER BY rowid DESC LIMIT 1', (item_id,)).fetchone()
+            selection = model_health.view(ws.conn, cfg, [cfg.model], last_run=run)
+            target = selection['recommended_model']
+            explicit = json.loads(item['settings']).get('model')
+            if (not target or target == cfg.model or (explicit and not selection['current_blocked'])
+                    or ws.conn.execute("SELECT 1 FROM web_runs WHERE item_id=? AND status IN ('queued','running','cancelling')", (item_id,)).fetchone()):
+                return {'changed': False}
+            self.update(item_id, {'settings': {'model': target}})
+            return {'changed': True, 'model': target}
 
     def task_list(self, ws):
         rows = ws.conn.execute("SELECT i.*,r.status AS run_status,r.id AS run_id,(SELECT data FROM web_events WHERE run_id=r.id AND kind='progress' ORDER BY id DESC LIMIT 1) AS progress FROM web_items i LEFT JOIN web_runs r ON r.rowid=(SELECT MAX(rowid) FROM web_runs WHERE item_id=i.id) WHERE i.owner='local' ORDER BY i.created_at,i.id")
         return [dict(r) for r in rows]
 
     def project(self, data):
-        name, description = data.get('name', ''), data.get('description', '')
-        if not isinstance(name, str) or not 1 <= len(name.strip()) <= 80 or not isinstance(description, str) or len(description) > 4000:
-            raise ValueError('项目信息无效')
-        with self.lock, self.workspace() as ws:
-            if ws.conn.execute('SELECT 1 FROM projects WHERE name=?', (name.strip(),)).fetchone():
-                raise Conflict('已存在同名项目，请选择已有项目')
-            return repo.upsert_project(ws.conn, name.strip(), description=description.strip(), status='active')
+        return self.save_project({'name':data.get('name',''),'description':data.get('description',''),
+                                 'allow_model_description':data.get('allow_model_description',False)})
+
+    def library(self):
+        with self.workspace() as ws:
+            return {'projects':projects.catalog(ws),'items':self.task_list(ws)}
+
+    def save_project(self, data):
+        with self.lock, self.workspace() as ws, ws.conn:
+            if self.closing or f"project:{data.get('id')}" in self.project_operations:
+                raise Conflict('项目正在同步或服务正在关闭，请完成后再修改')
+            return projects.save(ws,data)
+
+    def import_project(self, data):
+        from lodestar.project_sources import repository_url
+        project_id = data.get('id')
+        operation = f'project:{project_id}' if project_id is not None else repository_url(data.get('url')).lower()
+        with self.lock:
+            if self.closing or operation in self.project_operations:
+                raise Conflict('该项目已有导入或同步正在执行，请等待完成')
+            self.project_operations[operation] = threading.current_thread()
+            self.project_workers.add(threading.current_thread())
+        try:
+            return self._import_project(data,project_id)
+        finally:
+            with self.lock:
+                for key,owner in list(self.project_operations.items()):
+                    if owner is threading.current_thread():
+                        del self.project_operations[key]
+                self.project_workers.discard(threading.current_thread())
+
+    def _import_project(self, data, project_id):
+        # Network reads must not hold a DB transaction or block unrelated sends.
+        checkout = None
+        if project_id is not None:
+            if type(project_id) is not int:
+                raise ValueError('项目 ID 无效')
+            with self.workspace() as ws:
+                projects.check_revision(ws,project_id,data.get('revision'))
+                source = ws.conn.execute('SELECT repository,branch FROM web_project_sources WHERE project_id=?',(project_id,)).fetchone()
+                if not source:
+                    raise ValueError('此项目还没有 GitHub 关联')
+                url, branch = source['repository'], source['branch']
+                checkout = ws.conn.execute('SELECT directory FROM web_project_checkouts WHERE project_id=?',(project_id,)).fetchone()
+                if ws.conn.execute("SELECT 1 FROM web_runs r JOIN web_items i ON i.id=r.item_id WHERE i.project_id=? AND r.status IN ('queued','running','cancelling')",(project_id,)).fetchone():
+                    raise Conflict('所属项目仍有任务运行，请等待或停止后再同步')
+        else:
+            url, branch = data.get('url'), data.get('branch','')
+        snapshot = fetch_snapshot(url,branch)
+        new = project_id is None
+        if new:
+            with self.lock, self.workspace() as ws, ws.conn:
+                project_id = projects.apply_snapshot(ws,snapshot)
+                self.project_operations[f'project:{project_id}'] = threading.current_thread()
+            # Keep partial import visible if cloning fails; no rollback claim.
+        try:
+            if checkout:
+                project_workspaces.sync(self.config.workspace_dir,checkout[0],snapshot)
+                key = checkout[0]
+            else:
+                key = project_workspaces.clone(self.config.workspace_dir,snapshot)
+        except RepositoryError as error:
+            error.project_id = project_id
+            raise
+        with self.lock, self.workspace() as ws, ws.conn:
+            if not new:
+                projects.apply_snapshot(ws,snapshot,project_id=project_id,revision=data.get('revision'))
+            ws.conn.execute('INSERT OR REPLACE INTO web_project_checkouts(project_id,directory) VALUES(?,?)',(project_id,key))
+        return project_id
 
     def create(self, name, project_id=None, *, parent_id=None, dispatch_key=None):
         name = str(name).strip()[:80]
@@ -214,6 +319,14 @@ class WebApp:
             memory.edit_learning(ws, data)
 
     def submit(self, item_id, message, key, *, background=False, policy=None):
+        # Shutdown must not release the workspace while a committed queued run
+        # is still between persistence, worker startup and startup-error cleanup.
+        with self.lock:
+            if self.closing:
+                raise Conflict('服务正在关闭；请重启后再发送')
+            return self._submit_locked(item_id, message, key, background=background, policy=policy)
+
+    def _submit_locked(self, item_id, message, key, *, background, policy):
         if not isinstance(message, str) or not message.strip() or len(message) > 24000:
             raise ValueError('请输入 1–24000 字的问题')
         if not isinstance(key, str) or not 1 <= len(key) <= 100:
@@ -228,6 +341,11 @@ class WebApp:
             if ws.conn.execute("SELECT 1 FROM web_runs WHERE item_id=? AND status IN ('queued','running','cancelling')", (item_id,)).fetchone():
                 raise Conflict('当前空间正在回答，请稍后再发送')
             cfg = self.config_for(item)
+            if f"project:{item['project_id']}" in self.project_operations:
+                raise Conflict('所属项目正在同步工作区，请完成后再发送')
+            selection = model_health.view(ws.conn, cfg, [cfg.model])
+            if selection['current_blocked']:
+                raise Conflict('此模型或请求配置已确认不可用，请先在模型设置中选择其他模型；不会自动重试或付费回退')
             if cfg.model_calls_disabled and cfg.llm_mode != 'mock':
                 raise Conflict('模型调用已暂停，请在模型设置中启用后发送')
             run_id = uuid.uuid4().hex
@@ -235,7 +353,19 @@ class WebApp:
                             (run_id,item_id,key,'queued',message,json.dumps(snapshot(cfg)),json.dumps(policy or {},ensure_ascii=False)))
             signal = self.cancel_signals[run_id] = threading.Event()
         try:
-            threading.Thread(target=self.execute, args=(run_id,item,cfg,message,signal,background), daemon=True).start()
+            def work(*worker_args):
+                try:
+                    self.execute(*worker_args)
+                finally:
+                    with self.lock:
+                        self.workers.pop(run_id, None)
+
+            with self.lock:
+                if self.closing:
+                    raise Conflict('服务正在关闭；本轮未启动')
+                worker = threading.Thread(target=work, args=(run_id,item,cfg,message,signal,background), daemon=True)
+                self.workers[run_id] = worker
+                worker.start()
         except Exception:
             # No worker exists to release this queued slot. Keep the failed
             # attempt visible, then propagate the actual startup exception.
@@ -257,8 +387,20 @@ class WebApp:
             finally:
                 with self.lock:
                     self.cancel_signals.pop(run_id, None)
+                    self.workers.pop(run_id, None)
             raise
         return run_id
+
+    def close(self):
+        """Keep the process lease until all cooperative writes/clients have stopped."""
+        with self.lock:
+            self.closing = True
+            for signal in self.cancel_signals.values():
+                signal.set()
+            workers = list(self.workers.values()) + list(self.project_workers)
+        for worker in workers:
+            if worker is not threading.current_thread():
+                worker.join()
 
     def cancel(self, item_id, run_id):
         if not isinstance(run_id, str) or not run_id:
@@ -301,6 +443,7 @@ class WebApp:
             "SELECT data FROM web_events WHERE run_id=? AND kind='action' ORDER BY id", (run_id,))]
 
     def execute(self, run_id, item, cfg, message, signal, background=False):
+        started_at = time.time()
         def check_cancel():
             if signal.is_set():
                 raise LLMError('Run cancelled by user', code='cancelled', role='conversation')
@@ -333,6 +476,8 @@ class WebApp:
                          'memory': [{'id': r['id'], 'scope': r['scope'], 'revision': r['revision']} for r in note_rows]}
                 result['web_context'] = scope
                 result['action_receipts'] = self.action_receipts(ws, run_id)
+                with self.lock, ws.conn:
+                    model_health.observe(ws.conn, cfg, result, llm, started_at)
                 last = ws.conn.execute("SELECT id,metadata FROM messages WHERE conversation_id=? AND role='assistant' ORDER BY id DESC LIMIT 1", (item['conversation_id'],)).fetchone()
                 if last:
                     metadata = {**json.loads(last['metadata']), 'web_context': scope, 'run_id': run_id,
@@ -375,8 +520,24 @@ class WebApp:
 
 def make_server(app, port=8123):
     class Handler(BaseHTTPRequestHandler):
+        timeout = 5  # Bound partial headers/bodies, including rejected local clients.
+
         def log_message(self, *_):
             pass
+
+        def deny(self, message):
+            # Closing with an unread POST body can reset the TCP connection
+            # before Windows clients observe the 403. Drain only a bounded,
+            # declared body; never parse it or call application/model tools.
+            self.close_connection = True
+            if self.command == 'POST' and not self.headers.get('Transfer-Encoding'):
+                try:
+                    length = int(self.headers.get('Content-Length', '0'))
+                    if 0 < length <= 100000:
+                        self.rfile.read(length)
+                except (OSError, ValueError):
+                    pass
+            return self.respond({'error': message}, 403)
 
         def respond(self, data, status=200, mime='application/json; charset=utf-8'):
             body = json.dumps(data,ensure_ascii=False).encode() if mime.startswith('application/json') else data
@@ -391,22 +552,45 @@ def make_server(app, port=8123):
             self.wfile.write(body)
 
         def dispatch(self, write=False):
+            app = self.server.app
             expected = {f'127.0.0.1:{self.server.server_port}',f'localhost:{self.server.server_port}'}
             if self.headers.get('Host') not in expected:
-                return self.respond({'error':'仅支持本机访问'},403)
+                return self.deny('仅支持本机访问')
             if write and (self.headers.get('X-Lodestar-Token') != app.token or self.headers.get('Origin') not in (None,*('http://'+h for h in expected))):
-                return self.respond({'error':'请从本地工作空间提交'},403)
+                return self.deny('请从本地工作空间提交')
             parsed = urlparse(self.path)
             path, query = parsed.path, parse_qs(parsed.query)
             try:
                 if not write:
-                    if path == '/':
-                        return self.respond((STATIC/'index.html').read_text(encoding='utf-8').replace('__TOKEN__',app.token).encode(),mime='text/html; charset=utf-8')
-                    if path in ('/app.mjs','/markdown.mjs','/sources.mjs','/actions.mjs','/style.css','/icon.svg'):
+                    if path in ('/','/memory','/projects'):
+                        template = 'index.html' if path=='/' else 'library.html'
+                        page = (STATIC/template).read_text(encoding='utf-8').replace('__TOKEN__',app.token)
+                        return self.respond(page.encode(),mime='text/html; charset=utf-8')
+                    if path in ('/app.mjs','/markdown.mjs','/sources.mjs','/actions.mjs','/models.mjs','/library.mjs','/library-views.mjs','/library.css','/style.css','/icon.svg'):
                         mime = 'text/css' if path.endswith('.css') else 'image/svg+xml' if path.endswith('.svg') else 'text/javascript'
                         return self.respond((STATIC/path[1:]).read_bytes(),mime=mime+'; charset=utf-8')
                     if path == '/api/state':
                         return self.respond(app.state(query.get('item',['main'])[0]))
+                    if path == '/api/library':
+                        return self.respond(app.library())
+                    if path == '/api/project':
+                        with app.workspace() as ws:
+                            return self.respond(projects.detail(ws,int(query.get('id',['0'])[0])))
+                    if path == '/api/memory-library':
+                        with app.workspace() as ws, ws.conn:
+                            return self.respond(memory.catalog(ws,query=query.get('query',[''])[0],
+                                scope=query.get('scope',[''])[0],status=query.get('status',[''])[0],
+                                project_id=int(query['project'][0]) if query.get('project') else None,
+                                page=int(query.get('page',['1'])[0])))
+                    if path == '/api/memory-history':
+                        with app.workspace() as ws:
+                            return self.respond(memory.history(ws,query.get('id',[''])[0]))
+                    if path == '/api/learning-library':
+                        text = query.get('query',[''])[0]
+                        if len(text)>200:
+                            raise ValueError('查询过长')
+                        with app.workspace() as ws, ws.conn:
+                            return self.respond(learning.retrieve(ws.conn,user_id=memory.USER,query=text or None,limit=20))
                     if path == '/api/tasks':
                         with app.workspace() as ws:
                             return self.respond({'items': app.task_list(ws)})
@@ -423,11 +607,20 @@ def make_server(app, port=8123):
                     return self.respond({'id':app.create(data.get('name',''), data.get('project_id'))},201)
                 if path == '/api/projects':
                     return self.respond({'id': app.project(data)},201)
+                if path == '/api/project-save':
+                    return self.respond({'id':app.save_project(data)})
+                if path == '/api/project-import':
+                    return self.respond({'id':app.import_project(data)})
                 item_id = data.get('item','main')
                 if not isinstance(item_id,str):
                     raise ValueError('空间标识无效')
                 if path == '/api/models':
                     return self.respond(app.models(item_id))
+                if path == '/api/model-restore':
+                    app.restore_model(item_id, data.get('model'))
+                    return self.respond({'ok': True})
+                if path == '/api/model-default':
+                    return self.respond(app.select_model_default(item_id))
                 if path == '/api/reasoning':
                     model = data.get('model', '')
                     if not isinstance(model, str):
@@ -448,12 +641,16 @@ def make_server(app, port=8123):
                 else:
                     return self.respond({'error':'接口不存在'},404)
                 return self.respond({'ok':True})
+            except RepositoryError as error:
+                return self.respond({'error':str(error),'project_id':getattr(error,'project_id',None)},502)
             except (Conflict, memory.MemoryBusy) as error:
                 return self.respond({'error':str(error)},409)
             except LookupError as error:
                 return self.respond({'error':str(error)},404)
             except (ValueError,TypeError):
                 return self.respond({'error':'请求参数无效，请检查输入与模型设置'},400)
+            except TimeoutError:
+                return self.respond({'error':'请求正文读取超时，请重新提交完整请求'},408)
             except Exception:
                 return self.respond({'error':'本地服务暂时无法完成此操作'},500)
 
@@ -463,22 +660,52 @@ def make_server(app, port=8123):
         def do_POST(self):
             self.dispatch(True)
 
-    return ThreadingHTTPServer(('127.0.0.1',port),Handler)
+    class LocalHTTPServer(ThreadingHTTPServer):
+        # Windows SO_REUSEADDR can bind over a live listener, unlike Unix.
+        allow_reuse_address = os.name != 'nt'
+
+        def server_bind(self):
+            if os.name == 'nt' and hasattr(socket, 'SO_EXCLUSIVEADDRUSE'):
+                self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            super().server_bind()
+
+    server = LocalHTTPServer(('127.0.0.1',port),Handler)
+    server.app = app
+    return server
 
 
-def serve(port=8123, open_browser=True, config=None):
+def serve(port=8123, open_browser=True, config=None, data_dir=None):
     cfg = config or load_config()
-    root = Path(__file__).resolve().parents[2] / 'workspace' / 'web'
+    root = Path(data_dir).resolve() if data_dir is not None else Path(__file__).resolve().parents[2] / 'workspace' / 'web'
     cfg = replace(cfg,db_path=root/'web.db',workspace_dir=root,demo_replay=False)
-    server = make_server(WebApp(cfg),port)
-    url = f'http://127.0.0.1:{server.server_port}'
-    print(f'Lodestar 本地工作空间: {url}',flush=True)
-    if open_browser:
-        webbrowser.open(url)
+    # Reserve the port before initialization can recover/migrate any run state.
+    server = make_server(None,port)
+    app = None
     try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
+        with workspace_lease(cfg.db_path):
+            try:
+                if cfg.db_path.exists():
+                    backup = root / 'backups' / f'pre-start-{time.time_ns()}-{uuid.uuid4().hex[:8]}.db'
+                    backup_database(cfg.db_path, backup)
+                    print(f'启动前数据库备份: {backup}', flush=True)
+                app = WebApp(cfg)
+                server.app = app
+                url = f'http://127.0.0.1:{server.server_port}'
+                print(f'Lodestar 本地工作空间: {url}',flush=True)
+                if open_browser:
+                    webbrowser.open(url)
+                try:
+                    server.serve_forever()
+                except KeyboardInterrupt:
+                    pass
+            finally:
+                try:
+                    if app is not None:
+                        if app.workers:
+                            print('正在停止运行；已发出的网络请求可能需等待超时。', flush=True)
+                        app.close()
+                finally:
+                    server.server_close()
     finally:
         server.server_close()
 
@@ -487,5 +714,6 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--port',type=int,default=8123)
     parser.add_argument('--no-browser',action='store_true')
+    parser.add_argument('--data-dir', type=Path, help='独立本地数据目录（默认 workspace/web）')
     args = parser.parse_args()
-    serve(args.port,not args.no_browser)
+    serve(args.port,not args.no_browser,data_dir=args.data_dir)

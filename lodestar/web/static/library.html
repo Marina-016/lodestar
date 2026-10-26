@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="lodestar-token" content="__TOKEN__" /><meta name="theme-color" content="#ffffff" />
+  <title>Lodestar · 项目与记忆</title><link rel="icon" href="/icon.svg" />
+  <link rel="stylesheet" href="/style.css" /><link rel="stylesheet" href="/library.css" />
+</head>
+<body>
+<svg class="symbols" aria-hidden="true"><defs>
+  <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 2 2.6 7.4L22 12l-7.4 2.6L12 22l-2.6-7.4L2 12l7.4-2.6Z" /></symbol>
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 10 9-7 9 7v10H15v-7H9v7H3Z" /></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M12 5C9 3 5 3 3 4v15c3-1 6-1 9 1 3-2 6-2 9-1V4c-2-1-6-1-9 1Zm0 0v15" /></symbol>
+  <symbol id="i-project" viewBox="0 0 24 24"><path d="M3 6h7l2 3h9v12H3Z" /></symbol>
+  <symbol id="i-task" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2" /><path d="M9 8h6M9 12h6M9 16h3" /></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" /></symbol>
+</defs></svg>
+<div class="app">
+  <aside class="sidebar" id="sidebar" aria-label="工作空间导航">
+    <a class="brand" href="/"><span class="brand-mark"><svg><use href="#i-star" /></svg></span><span>Lodestar<span class="brand-caption">个人研究工作台</span></span></a>
+    <nav>
+      <a class="nav-item" href="/?item=main"><svg><use href="#i-home" /></svg><span>主对话</span></a>
+      <a class="nav-item" id="nav-projects" href="/projects"><svg><use href="#i-project" /></svg><span>项目</span></a>
+      <a class="nav-item" id="nav-memory" href="/memory"><svg><use href="#i-book" /></svg><span>记忆</span></a>
+      <div class="nav-section"><span>任务</span><span id="task-count" class="section-count">0</span></div>
+      <div id="task-list" class="task-list"></div>
+      <p id="tasks-empty" class="sidebar-empty">研究任务的对话和来源，各自保留。</p>
+    </nav>
+    <div class="sidebar-bottom"><div class="account"><span class="avatar">L</span><span>我的工作空间<small>本地 · 私人</small></span><span class="local-dot"></span></div></div>
+  </aside>
+  <main id="main" class="library-main">
+    <header class="topbar"><button class="icon-button mobile-menu" id="menu" aria-label="打开导航" aria-expanded="false"><svg><use href="#i-menu" /></svg></button><div class="breadcrumb"><span id="page-name"></span><span class="divider">/</span><span id="space-subtitle">我的工作空间</span></div><a id="return-chat" class="subtle" href="/">回到对话 ↗</a></header>
+    <div class="library-scroll">
+      <div class="library-heading"><div><h1 id="page-title"></h1><p id="page-description"></p></div><div class="library-actions"><button id="import-project" class="secondary" hidden>从 GitHub 导入</button><button id="add-entry" class="primary"></button></div></div>
+      <div id="page-notice" class="library-notice" role="status" hidden></div>
+      <div class="library-tools"><label class="sr-only" for="library-search">搜索</label><input id="library-search" type="search" maxlength="200" placeholder="搜索内容…" /><label class="sr-only" for="status-filter">状态</label><select id="status-filter"></select><label class="sr-only" for="project-filter">所属项目</label><select id="project-filter" hidden></select></div>
+      <div class="library-tabs" id="library-tabs" aria-label="记忆分类" hidden></div>
+      <div class="library-layout"><section aria-label="条目列表"><div id="list-summary" class="list-summary" role="status"></div><div id="entry-list"></div><div id="pagination" class="library-pagination"></div></section><section id="entry-detail" class="library-detail" aria-label="条目详情" aria-live="polite"><div class="library-placeholder">选择一项，查看内容与来历。</div></section></div>
+      <p class="library-boundary" id="library-boundary"></p>
+    </div>
+  </main>
+</div>
+<div class="nav-backdrop" id="nav-backdrop" hidden></div>
+<dialog id="entry-dialog" aria-labelledby="entry-title"><form id="entry-form">
+  <div class="dialog-heading"><h2 id="entry-title">添加记忆</h2><button type="button" class="subtle" data-close="entry-dialog" aria-label="关闭编辑">关闭</button></div>
+  <p>只保留希望长期沿用的事实或偏好，不把一轮回答自动当作事实。</p>
+  <label for="entry-scope">使用范围</label><select id="entry-scope"><option value="personal">个人 · 所有任务可用</option><option value="project">项目 · 同项目任务可用</option><option value="task">任务 · 仅指定任务可用</option></select>
+  <label id="entry-owner-label" for="entry-owner" hidden>归属</label><select id="entry-owner" hidden></select>
+  <label for="entry-content">内容</label><textarea id="entry-content" rows="6" maxlength="2000" required></textarea>
+  <p class="fineprint">编辑会推进受影响任务的后续上下文边界。已有聊天、备份和已外发的信息不会因此删除。</p>
+  <div class="dialog-actions"><button type="button" class="secondary" data-close="entry-dialog">取消</button><button type="submit" class="primary">保存记忆</button></div>
+</form></dialog>
+<dialog id="project-editor" aria-labelledby="project-editor-title"><form id="project-editor-form">
+  <div class="dialog-heading"><h2 id="project-editor-title">新建项目</h2><button type="button" class="subtle" data-close="project-editor">关闭</button></div>
+  <label for="project-name">项目名称</label><input id="project-name" maxlength="80" required />
+  <label for="project-description">项目目标与说明</label><textarea id="project-description" rows="5" maxlength="4000" placeholder="正在做什么、使用什么技术、目前的目标与约束。"></textarea>
+  <label for="project-status">状态</label><select id="project-status"><option value="active">进行中</option><option value="idea">构想中</option><option value="paused">已暂停</option><option value="archived">已归档</option></select>
+  <label class="check-row"><span><strong>允许模型按需使用项目名称和说明</strong><small>仅限绑定这个项目的对话；不授权代码文件。</small></span><input id="project-description-allow" type="checkbox" /></label>
+  <label class="check-row" id="readme-permission" hidden><span><strong>允许模型读取当前 README 快照</strong><small>按需最多 4000 字；同步到新版本后须重新确认。</small></span><input id="project-readme-allow" type="checkbox" /></label>
+  <div class="dialog-actions"><button type="button" class="secondary" data-close="project-editor">取消</button><button type="submit" class="primary">保存项目</button></div>
+</form></dialog>
+<dialog id="import-dialog" aria-labelledby="import-title"><form id="import-form">
+  <div class="dialog-heading"><h2 id="import-title">从 GitHub 建立项目</h2><button type="button" class="subtle" data-close="import-dialog">关闭</button></div>
+  <p>导入项目资料，并在本地建立可编辑、可提交的独立 Git 工作区。</p>
+  <label for="repository-url">仓库首页链接</label><input id="repository-url" type="url" maxlength="300" placeholder="https://github.com/owner/repository" required />
+  <label for="repository-branch">分支（留空使用默认分支）</label><input id="repository-branch" maxlength="200" placeholder="例如：master" />
+  <p class="fineprint">使用服务端 GITHUB_TOKEN 或系统已有 Git 凭据，不在页面输入密钥。不会运行仓库代码、安装依赖、导入子模块或推送。仅克隆该分支最近 50 次提交，Git LFS 内容不自动下载。README 先留在本地，不自动成为个人记忆或发给模型。</p>
+  <p class="fineprint" id="import-status" role="status"></p>
+  <div class="dialog-actions"><button type="button" class="secondary" data-close="import-dialog">取消</button><button type="submit" class="primary">导入并建立工作区</button></div>
+</form></dialog>
+<dialog id="learning-editor" aria-labelledby="learning-title"><form id="learning-form">
+  <div class="dialog-heading"><h2 id="learning-title">纠正学习证据</h2><button type="button" class="subtle" data-close="learning-editor">关闭</button></div>
+  <label for="learning-technology">技术或知识点</label><input id="learning-technology" maxlength="200" required />
+  <label for="learning-method">具体方法</label><input id="learning-method" maxlength="300" />
+  <label for="learning-evidence">纠正说明</label><textarea id="learning-evidence" rows="5" maxlength="2000" required></textarea>
+  <p class="fineprint">旧证据撤销，纠正保存为你的自评，不自动提升掌握程度。</p>
+  <div class="dialog-actions"><button type="button" class="secondary" data-close="learning-editor">取消</button><button type="submit" class="primary">保存纠正</button></div>
+</form></dialog>
+<div id="toast" class="toast" role="alert" hidden></div>
+<script type="module" src="/library.mjs"></script>
+</body></html>

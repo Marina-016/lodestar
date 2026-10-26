@@ -1,6 +1,7 @@
 import { escape as esc, markdown, safeUrl } from "./markdown.mjs";
 import { sourceGroups } from "./sources.mjs";
 import { actionHTML } from "./actions.mjs";
+import { defaultModel, modelOptionsHTML, hiddenModelsHTML } from "./models.mjs";
 const $ = (s) => document.querySelector(s),
   icon = (name) => `<svg aria-hidden="true"><use href="#i-${name}"/></svg>`;
 const token = $('meta[name="lodestar-token"]').content;
@@ -17,6 +18,7 @@ let state = null,
 try {
   itemId = localStorage.getItem("lodestar-item") || "main";
 } catch {}
+itemId = new URLSearchParams(location.search).get('item') || itemId;
 const labels = {
   search_papers: "正在检索论文",
   discover_papers: "正在发现近期论文",
@@ -36,6 +38,7 @@ const runLabels = { queued: "排队中", running: "运行中", cancelling: "停�
 const scopeLabels = {personal: "个人 · 共享", project: "项目", task: "仅当前任务"};
 const masteryLabels = {unknown: "掌握情况未验证", can_explain: "有讲解证据", can_implement: "有实现证据", can_apply: "有应用证据"};
 let learningId = null;
+let restoreDraft = true;
 function projectOptions(value) {
   return '<option value="">未绑定项目</option>' + state.projects.map((p) => `<option value="${p.id}" ${p.id === value ? "selected" : ""}>${esc(p.name)}</option>`).join("");
 }
@@ -87,8 +90,9 @@ function busy() {
 function controls() {
   const inactive = !state || state.item.status !== "active";
   const paused = state && !state.enabled && state.mode !== "mock";
+  const unavailable = state?.model_selection?.current_blocked;
   const stopping = activeRun?.status === "cancelling";
-  $("#send").disabled = activeRun ? stopping : submitting || inactive || paused || !$("#prompt").value.trim();
+  $("#send").disabled = activeRun ? stopping : submitting || inactive || paused || unavailable || !$("#prompt").value.trim();
   $("#prompt").disabled = inactive;
   $("#thinking").disabled = !state;
   $("#model-settings").disabled = !state;
@@ -99,6 +103,7 @@ function controls() {
     : submitting ? "正在提交"
     : inactive ? "请先恢复任务"
       : paused ? "点击模型名称，启用模型调用"
+        : unavailable ? "当前模型不可用，请先选择其他模型"
         : $("#prompt").value.trim() ? "发送问题" : "先输入一个研究问题";
 }
 function renderMessages() {
@@ -132,6 +137,8 @@ function assistant(text, config, error = false, id = "draft", receipts) {
   return `<article class="message message-assistant ${error ? "message-error" : ""}" data-message="${id}"><div class="assistant-meta"><span class="assistant-mark">${icon("star")}</span><span>Lodestar</span><small>${esc(config?.model || state.configuration.model)}</small></div><div class="answer">${answer}</div><div class="execution">${actionHTML(receipts, { pending: id === "draft" })}</div>${actions}</article>`;
 }
 function render() {
+  $('#memory').href='/memory?item='+encodeURIComponent(itemId);
+  $('#projects').href='/projects?item='+encodeURIComponent(itemId);
   $("#space-name").textContent = state.item.name;
   $("#space-subtitle").textContent =
     itemId === "main" ? "持续研究" : "任务";
@@ -168,14 +175,33 @@ async function load(id = itemId) {
   submitting = false;
   setStatus("");
   try {
-    const data = await api("/api/state?item=" + encodeURIComponent(id));
+    let data = await api("/api/state?item=" + encodeURIComponent(id));
     if (epoch !== generation) return;
+    if (defaultModel(data)) {
+      const selected = await api('/api/model-default', {item:id});
+      if (epoch !== generation) return;
+      if (selected.changed) {
+        data = await api('/api/state?item=' + encodeURIComponent(id));
+        if (epoch !== generation) return;
+        toast(`默认使用最近成功模型 ${selected.model}；未自动发送请求`);
+      }
+    }
     state = data;
     itemId = id;
     try {
       localStorage.setItem("lodestar-item", id);
     } catch {}
     render();
+    if(restoreDraft) {
+      restoreDraft=false;
+      try {
+        const draft=sessionStorage.getItem('lodestar-draft:'+itemId);
+        if(draft && !$('#prompt').value) {
+          $('#prompt').value=draft.slice(0,24000);
+          $('#prompt').dispatchEvent(new Event('input'));
+        }
+      } catch {}
+    }
     closeNavigation();
     scrollBottom(true);
     if (state.run && ["queued", "running", "cancelling"].includes(state.run.status))
@@ -187,6 +213,8 @@ async function load(id = itemId) {
     else if (!state.enabled && state.mode !== "mock")
       setStatus("模型调用已暂停 · 点击模型名称可启用");
     else if (state.mode === "mock") setStatus("离线演示模式 · 不调用真实模型");
+    if (!activeRun && state.model_selection?.current_blocked)
+      setStatus('当前模型不可用 · 点击模型名称选择其他模型');
   } catch (error) {
     if (epoch !== generation) return;
     if (id !== "main") return load("main");
@@ -312,6 +340,7 @@ $("#composer").addEventListener("submit", async (event) => {
     if (epoch !== generation) return;
     submitting = false;
     $("#prompt").value = "";
+    try { sessionStorage.removeItem('lodestar-draft:'+id); } catch {}
     $("#prompt").style.height = "auto";
     state.messages.push({ role: "user", content: message });
     renderMessages();
@@ -334,6 +363,10 @@ $("#prompt").addEventListener("input", () => {
   $("#prompt").style.height = "auto";
   $("#prompt").style.height = Math.min($("#prompt").scrollHeight, 190) + "px";
   controls();
+});
+// A full management page must not discard an unsent question when returning.
+window.addEventListener('pagehide',()=>{
+  try { sessionStorage.setItem('lodestar-draft:'+itemId,$('#prompt').value); } catch {}
 });
 $(".suggestions").addEventListener("click", (event) => {
   const button = event.target.closest("[data-prompt]");
@@ -399,16 +432,19 @@ function renderModelControls() {
   $("#thinking span").textContent = (label.startsWith("当前思考预算") ? "预算 · " : "推理 · ") + compact;
   $("#thinking").title = "推理设置 · " + label;
 }
-let modelCatalog = {}, settingsGeneration = 0, catalogGeneration = 0;
+let modelCatalog = {}, modelAvailability = {}, settingsGeneration = 0, catalogGeneration = 0;
 function selectedModel() {
   return $("#model-select").value === "__custom__"
     ? $("#model-id").value.trim() : $("#model-select").value;
 }
 function modelOptions(ids, selected) {
-  $("#model-select").innerHTML = [...new Set([selected, ...ids])]
-    .map((m) => `<option value="${esc(m)}">${esc(m)}</option>`).join("") +
-    '<option value="__custom__">自定义模型 ID…</option>';
-  $("#model-select").value = selected;
+  $("#model-select").innerHTML = modelOptionsHTML(ids, selected, modelAvailability);
+}
+
+function hiddenModels(selection) {
+  const target = $('#hidden-models');
+  target.innerHTML = hiddenModelsHTML(selection?.unavailable);
+  target.hidden = !selection?.unavailable?.length;
 }
 function reasoningOptions(capability, value = capability.value) {
   $("#reasoning-setting").innerHTML = capability.options.map((o) =>
@@ -421,7 +457,9 @@ async function openModelSettings() {
   const currentItem = itemId, revision = ++catalogGeneration;
   $("#model-id").value = state.configuration.model;
   $("#model-id").hidden = true;
+  modelAvailability = state.model_selection?.availability || {};
   modelOptions(state.models, state.configuration.model);
+  hiddenModels(state.model_selection);
   reasoningOptions(state.reasoning);
   $("#enabled-setting").checked = state.enabled;
   $("#catalog-status").textContent = "正在读取服务端模型目录…";
@@ -430,9 +468,11 @@ async function openModelSettings() {
     const catalog = await api("/api/models", { item: currentItem });
     if (revision !== catalogGeneration || currentItem !== itemId || !$("#settings-dialog").open) return;
     modelCatalog = catalog.reasoning;
+    modelAvailability = catalog.availability;
+    hiddenModels(catalog);
     const selected = selectedModel();
     if ($("#model-select").value !== "__custom__") modelOptions(catalog.models, selected);
-    $("#catalog-status").textContent = `已读取 ${catalog.models.length} 个模型；目录不代表免费额度或调用权限。`;
+    $("#catalog-status").textContent = `${catalog.models.length} 个候选，已隐藏 ${catalog.unavailable.length} 个不可用模型。未验证不代表有免费额度。`;
   } catch (error) {
     if (revision === catalogGeneration)
       $("#catalog-status").textContent = "目录读取失败，仍可输入模型 ID。";
@@ -457,9 +497,28 @@ $("#model-settings").onclick = openModelSettings;
 $("#thinking").onclick = openModelSettings;
 $("#model-select").onchange = chooseModel;
 $("#model-id").oninput = chooseModel;
+$('#hidden-models').onclick = async (event) => {
+  const button = event.target.closest('[data-restore-model]');
+  if (!button) return;
+  const targetItem = itemId;
+  button.disabled = true;
+  try {
+    await api('/api/model-restore', {item:targetItem, model:button.dataset.restoreModel});
+    if (targetItem !== itemId) return;
+    const catalog = await api('/api/models', {item:targetItem});
+    if (targetItem !== itemId || !$('#settings-dialog').open) return;
+    modelAvailability = catalog.availability;
+    modelCatalog = catalog.reasoning;
+    modelOptions(catalog.models, selectedModel());
+    hiddenModels(catalog);
+    $('#catalog-status').textContent = '已重新允许手动尝试，未验证额度，也未发起模型请求。';
+  } catch (error) { toast(error.message); }
+  finally { button.disabled = false; }
+};
 $("#settings-form").onsubmit = async (e) => {
   e.preventDefault();
   const targetItem = itemId;
+  if (!selectedModel()) return toast('请先选择模型');
   try {
     const updated = await api("/api/item", {
       item: targetItem,
@@ -477,6 +536,8 @@ $("#settings-form").onsubmit = async (e) => {
     state.reasoning = updated.reasoning;
     state.enabled = updated.enabled;
     state.item.settings = updated.item.settings;
+    state.models = updated.models;
+    state.model_selection = updated.model_selection;
     renderModelControls();
     if (busy()) toast("已保存，下一轮生效");
     else await load();
@@ -663,7 +724,6 @@ $("#messages").onclick = async (e) => {
   }
 };
 $("#context").onclick = () => openDrawer("context");
-$("#memory").onclick = () => openDrawer("memory");
 $("#task-center").onclick = () => openDrawer("tasks");
 function updateNoteScope() {
   $("#note-project").hidden = $("#note-project-label").hidden = $("#note-range").value !== "project";
@@ -672,7 +732,8 @@ $("#note-range").onchange = updateNoteScope;
 $("#project-form").onsubmit = async (e) => {
   e.preventDefault();
   try {
-    const project = await api("/api/projects", {name: $("#project-name").value, description: $("#project-description").value});
+    const project = await api("/api/projects", {name: $("#project-name").value, description: $("#project-description").value,
+      allow_model_description:$('#project-description-allow').checked});
     await api("/api/item", {item: itemId, project_id: project.id});
     $("#project-dialog").close(); $("#project-form").reset(); await load();
   } catch (error) { toast(error.message); }

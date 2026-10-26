@@ -86,6 +86,8 @@
             <svg><use href="#i-home" /></svg><span>主对话</span
             ><kbd class="shortcut" id="home-shortcut">Ctrl 1</kbd>
           </button>
+          <a class="nav-item" id="projects" href="/projects"><svg><use href="#i-project" /></svg><span>项目</span></a>
+          <a class="nav-item" id="memory" href="/memory"><svg><use href="#i-book" /></svg><span>记忆</span></a>
           <button class="new-task-button" id="new-task" title="新建任务" aria-label="新建任务">
             <svg><use href="#i-plus" /></svg><span>新建任务</span>
           </button>
@@ -99,9 +101,6 @@
           </button>
         </nav>
         <div class="sidebar-bottom">
-          <button class="nav-item" id="memory">
-            <svg><use href="#i-book" /></svg><span>记忆</span></button
-          >
           <div class="account">
             <span class="avatar">L</span
             ><span>我的工作空间<small>本地 · 私人</small></span
@@ -293,6 +292,7 @@
         <select id="model-select" autofocus aria-describedby="catalog-status"></select>
         <input id="model-id" aria-label="自定义模型 ID" maxlength="200" placeholder="输入模型 ID" hidden />
         <p class="fineprint" id="catalog-status" role="status"></p>
+        <details class="model-unavailable" id="hidden-models" hidden></details>
         <label for="reasoning-setting">推理强度</label>
         <select id="reasoning-setting" aria-describedby="reasoning-note"></select>
         <p class="fineprint" id="reasoning-note"></p>
@@ -377,7 +377,8 @@
         <p>保存项目名称与说明，供任务归属和记忆使用。</p>
         <label for="project-name">项目名称</label><input id="project-name" maxlength="80" required autofocus />
         <label for="project-description">项目说明</label><textarea id="project-description" maxlength="4000" rows="4"></textarea>
-        <p class="fineprint">填写的说明可用于对话。登记项目不会自动读取本地代码。</p>
+        <label class="check-row"><span><strong>允许模型按需使用项目名称和说明</strong><small>仅限绑定项目的对话；不授权代码文件。</small></span><input id="project-description-allow" type="checkbox" /></label>
+        <p class="fineprint">登记不读取本地代码。GitHub 导入和资料管理请使用左侧项目页。</p>
         <div class="dialog-actions"><button type="button" class="secondary" data-close="project-dialog">取消</button><button type="submit" class="primary">登记并绑定</button></div>
       </form>
     </dialog>

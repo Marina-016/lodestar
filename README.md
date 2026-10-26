@@ -7,17 +7,24 @@
 ## 现在能做什么
 
 - **主对话**：持续交流，用自然语言委派多个研究任务。
+- **项目页**：维护目标、说明、状态及关联任务；从 GitHub 建立真实本地 Git 工作区，查看分支、提交和未提交状态，按需安全拉取。
 - **任务**：各自保存聊天、来源、运行进度和模型设置；可以同时推进、单独停止、完成和归档。
 - **共享记忆**：同一个用户身份，个人偏好跨任务共享；项目事实仅在绑定项目内使用；任务备注保持局部。
-- **记忆管理**：查看、搜索、编辑、停用、恢复、遗忘；查看学习证据、纠正自评或撤销证据；Web聊天可按自然语言请求操作。
+- **独立记忆页**：按个人/项目/任务筛选、搜索和分页；编辑、停用、恢复、遗忘，查看内容修订与来源；学习证据单独维护，支持纠正自评或撤销证据。Web 聊天仍操作同一套记忆。
 - **论文研究**：arXiv 检索、HF 热门信号、论文阅读、连续追问，以及已存在的项目适用性与实验后端。
 - **模型设置**：同服务模型目录与随模型变化的推理选项；运行开始时冻结配置。
+
+已确认免费额度耗尽或模型不存在的项目会从候选列表隐藏，可在折叠区手动恢复尝试。默认优先最近 24 小时同服务、同账户及相同请求配置成功的模型；不会打断运行、覆盖仍未失败的手动选择或自动发请求。目录里的“未验证”不代表有免费余额，普通限流也不判定为额度耗尽。新建独立任务沿用主对话的模型与推理偏好，不回到过期的环境默认项。
 
 可以输入：
 
 > 分别建两个任务，研究 Harness 和 RAG 的近期论文。结合当前项目给出值得验证的方法，先不要改代码。
 
 后台任务共享相关记忆，但不会自动读取其他任务的全部对话。主对话可按需读取任务结果。**后台读过论文，不代表用户接触或掌握了论文方法。** 学习围绕技术、知识点和方法记录，论文只作为关联来源；概念定义由模型组织，不保存成个人学习事实。
+
+项目和记忆分别位于 `/projects`、`/memory`。GitHub 导入使用服务端 GITHUB_TOKEN 或系统已有 Git 凭据，不在网页输入密钥；只克隆所选分支最近 50 次提交，不安装依赖、不执行仓库代码、不拉子模块或 LFS 内容、不自动提交或推送。工作区有未提交改动、分支不符或历史分叉时拒绝自动覆盖。可复制工作区路径，在本地编辑器内修改并用 Git 提交；本版不是内置代码编辑器。
+
+项目名称/说明与 README 外发分别授权，默认关闭；授权仅作用于绑定项目，README 每次最多按需交付 4000 字符，同步到新版本后需重新确认。项目资料不是个人记忆。真实 GitHub 导入和本地 Git 保护验收见 [项目与长期记忆续检](docs/v0-project-memory-20261026.md)。
 
 ## 快速开始
 
@@ -55,6 +62,8 @@ Copy-Item .env.example .env
 
 Web 数据保存在被 Git 忽略的 workspace/web/web.db，与 CLI 研究数据库分开。旧 Web 任务会保留会话和消息，迁移为共享用户身份；旧任务备注仍是任务范围，不会自动变成个人事实。升级前应通过 SQLite backup API 备份数据库。
 
+导入的本地仓库位于当前 Web 数据目录下的 `repositories/<工作区标识>/`。数据库自动备份含记忆和已保存的 README，不含 Git 工作区；未推送提交和未提交文件请另行备份。导入失败保留已登记项目和已创建的文件，不声称全部回滚，也不自动删除现场。
+
 修改、停用或遗忘记忆，会重新建立受影响任务的后续上下文边界，避免旧回答重新带回失效事实。这会暂时减少模型可用的历史上下文；用户可见聊天保留。遗忘会清理该记忆的修订正文，但不会撤回云端已收到的信息，也不清理备份或聊天中原本的文字。
 
 当前服务仅监听 127.0.0.1，针对本地单用户。**本版不是已验收的公网多用户服务。** 公网发布仍需认证、用户数据隔离、HTTPS、持久化备份、限流与真实模型/搜索验收。现有 Vercel 配置服务于旧回放，不应直接作为新版后端部署方案。
@@ -65,14 +74,19 @@ Web 数据保存在被 Git 忽略的 workspace/web/web.db，与 CLI 研究数据
 
 ## 验证与文档
 
+本地单用户内测准备、启动前自动备份及独立目录恢复见 [10-23 本地内测清单](docs/v0-local-release-20261023.md)。重复启动不会再先改写活动运行；已有数据库每次启动先创建完整性验证通过的 SQLite 快照，失败则停止启动。备份不会自动删除，含个人数据，应关注磁盘占用。
+
+安装包或副本试用可指定独立数据目录：`python -m lodestar ui --data-dir workspace/trial-web --port 8124 --no-browser`。这隔离 Web 数据库及备份，不代表使用了另一份模型凭据或获得新的免费额度。未指定时仍使用原来的 workspace/web。
+
 ~~~powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -q
-node --test tests/web_sources.test.mjs tests/web_actions.test.mjs
+node --test tests/web_sources.test.mjs tests/web_actions.test.mjs tests/web_models.test.mjs tests/web_library.test.mjs
 node --check lodestar/web/static/app.mjs
+node --check lodestar/web/static/library.mjs
 .\.venv\Scripts\python.exe scripts/preflight_public_release.py
 ~~~
 
-master 基线的真实证据与未通过项见 [10-15 续检](docs/v0-live-review-20261015.md)，历史功能验收见 [V0 发布验收](docs/v0-release-check.md)。质量分支的最新机制验证与真实检查见 [10-18 记录](docs/v0-quality-review-20261018.md)，此前失败证据见 [10-17 记录](docs/v0-quality-review-20261017.md) 与 [语义审阅](docs/v0-quality-semantic-review-20261017.md)。绿色功能测试不代表模型语义或服务可靠性已全部通过。
+master 已包含 10-18 质量分支的机制改进，当前基础为 `fe46bc4`。本地发布安全检查见 [10-23 清单](docs/v0-local-release-20261023.md)，真实模型证据与未通过项见 [10-18 记录](docs/v0-quality-review-20261018.md)，此前失败见 [10-15 续检](docs/v0-live-review-20261015.md)、[10-17 记录](docs/v0-quality-review-20261017.md) 与 [语义审阅](docs/v0-quality-semantic-review-20261017.md)。绿色功能测试不代表模型语义或服务可靠性已全部通过。
 
 - [产品逻辑与系统架构](docs/agent-prd.md)
 - [Web 使用与数据说明](docs/web-ui.md)
@@ -83,7 +97,7 @@ master 基线的真实证据与未通过项见 [10-15 续检](docs/v0-live-revie
 
 ## V0 质量版开发
 
-2026-10-17 起在 `codex/v0-stability-20261017` 推进质量与可靠性，不改变 master 的发布边界。执行顺序与放行条件见 [开发计划](docs/v0-quality-plan-20261017.md)，人工语义检查见 [八组验收卡](docs/v0-quality-cases.md)，最新验证与剩余边界见 [10-18 验收](docs/v0-quality-review-20261018.md)。
+2026-10-17 起在 `codex/v0-stability-20261017` 推进质量与可靠性，相关提交已进入 master；这不等于质量门或公网发布放行。执行顺序与放行条件见 [开发计划](docs/v0-quality-plan-20261017.md)，人工语义检查见 [八组验收卡](docs/v0-quality-cases.md)，真实模型验证与剩余边界见 [10-18 验收](docs/v0-quality-review-20261018.md)。
 
 本轮移除模型服务的隐式重试/参数降级，修复线程启动失败占住任务槽位和取消竞态；mock/DashScope 不再加载无关 Anthropic SDK。Windows 实验凭证不查询 WMI，但旧系统卡点的根因仍未查明。
 

@@ -40,6 +40,7 @@ class TaskWaitTests(unittest.TestCase):
         self.model = Mock(side_effect=AssertionError('No model may be constructed'))
         self.app = WebApp(Config(llm_mode='mock', search_mode='mock',
             db_path=root/'web.db', workspace_dir=root), llm_factory=self.model)
+        self.addCleanup(self.app.close)
         self.task_id = self.app.create('Delayed child')
         with self.app.workspace() as ws:
             self.child = self.app.item(ws, self.task_id)

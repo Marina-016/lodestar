@@ -343,10 +343,13 @@ def cmd_build(args, cfg):
 
 def _cmd_ui(args, cfg):
     if args.legacy:
+        if args.data_dir is not None:
+            raise SystemExit('--data-dir 只用于新版本地工作空间，不能与 --legacy 同时使用')
         from lodestar.ui import serve
+        serve(port=args.port, open_browser=not args.no_browser)
     else:
         from lodestar.web.server import serve
-    serve(port=args.port, open_browser=not args.no_browser)
+        serve(port=args.port, open_browser=not args.no_browser, config=cfg, data_dir=args.data_dir)
 
 def cmd_demo(args, cfg):
     from lodestar.demo import seed_demo
@@ -652,6 +655,7 @@ def main(argv=None):
     pui.add_argument("--legacy", action="store_true", help="打开历史回放界面")
     pui.add_argument("--port", type=int, default=8123)
     pui.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
+    pui.add_argument('--data-dir', type=Path, help='独立本地数据目录（默认 workspace/web）')
     pui.set_defaults(fn=lambda a, c: _cmd_ui(a, c))
 
     pd = sub.add_parser("demo", help="准备录屏用的 Lodestar 示例数据")

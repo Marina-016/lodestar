@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased · Projects and durable memory — 2026-10-26
+
+- Add independent project and memory management pages, shared navigation, scoped search/pagination, content revisions and source links, and separate learning-evidence correction/revocation. Reuse existing owned records and context invalidation rather than maintaining a second memory store.
+- Import GitHub metadata and commit-pinned README snapshots into real local Git workspaces. Show branch/commit/dirty state, preserve local work with ff-only synchronization, disable hooks/filters and implicit code execution, and never automatically commit or push.
+- Require independent approval for project descriptions and current README snapshots; revoke old snapshot approval on version changes. Retain existing code-export allowlists. Preserve partial import receipts, reject concurrent scoped operations and wait for owned Git operations on shutdown.
+- Validate offline local-Git fixtures and one actual read-only import of the existing Lodestar repository without model calls. Preserve the unresolved Windows temporary-directory cleanup failures; details: [project/memory review](docs/v0-project-memory-20261026.md).
+
+## Unreleased · Observed model availability — 2026-10-23
+
+- Hide explicitly exhausted/unavailable models in the current service/account scope; keep ordinary request rejection specific to its thinking/output configuration and distinguish rate limits from free-tier exhaustion. Persist only safe error categories and hashed scope keys.
+- Prefer fresh, configuration-matching successful models on entry without inference, retries, enabling paused calls, interrupting work or overriding a still-unfailed explicit choice. New independent tasks inherit the main model/reasoning preferences.
+- Label unverified candidates honestly, expose an explicit state-only restore action in a quiet collapsed list, and reject known unavailable requests before queueing while retaining idempotent replay.
+- Confirm the user's existing successful `qwen3.5-flash` run without an additional live inference request. Model catalogs do not prove free balance. Validation details and limits: [model selection review](docs/v0-model-selection-20261023.md).
+
+## Unreleased · Local single-user trial safety — 2026-10-23
+
+- Reserve the local port before opening/recovering the database, use exclusive Windows listeners, and hold an OS-backed per-database lease across initialization and shutdown. A different port cannot bypass the same-directory check.
+- Back up an existing Web database with SQLite's online backup API before migration/recovery. Validate integrity, preserve committed WAL data, refuse overwrite and abort startup if backup fails. Keep snapshots locally without automatic deletion.
+- Add standalone read-only database checking/backup commands and `ui --data-dir` for separate trial/restore directories; do not change model defaults, credentials or the default Web directory.
+- Wait for cooperative worker/client shutdown, reject new submissions while closing, and finish queued-startup error persistence before releasing the lease.
+- Drain bounded declared POST bodies before access-denial responses and limit partial request reads. Cover repeated local denials and stalled authenticated requests without weakening Host/Origin/token checks; historical intermittent HTTP failures are not all proven resolved.
+- Ignore SQLite WAL/shared-memory files and local lease files, including for custom data directories. Update the local trial checklist; research semantics remain a separate unpassed quality gate.
+
 ## Unreleased · V0 reliability and quality work — 2026-10-17
 
 ### Fixed

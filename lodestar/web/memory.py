@@ -86,6 +86,11 @@ def edit(ws, item, data, *, allow_run=None, source='user', source_message_id=Non
     scope = data.get('scope', old['scope'] if old else 'personal')
     project_id = data.get('project_id', old['project_id'] if old and old['scope'] == scope else item['project_id']) if catalog else item['project_id']
     target_item = old['item_id'] if old and old['scope'] == scope == 'task' else item['id']
+    if catalog and scope == 'task' and 'item_id' in data:
+        target_item = data['item_id']
+    if scope == 'task' and (not isinstance(target_item,str) or not ws.conn.execute(
+            "SELECT 1 FROM web_items WHERE id=? AND owner='local'",(target_item,)).fetchone()):
+        raise ValueError('请选择有效任务')
     if scope == 'project' and (type(project_id) is not int or not ws.conn.execute('SELECT 1 FROM projects WHERE id=?', (project_id,)).fetchone()):
         raise ValueError('请选择有效项目')
     target = {'scope': scope, 'project_id': project_id, 'item_id': target_item}
@@ -138,3 +143,41 @@ def edit_learning(ws, data, *, allow_run=None, source_message_id=None):
     ws.conn.execute('UPDATE learning_events SET revoked_at=? WHERE id=? AND user_id=?',
                      (datetime.now(timezone.utc).isoformat(), row['id'], USER))
     return result
+
+
+def catalog(ws, *, query='', scope='', status='', project_id=None, page=1):
+    """A bounded management view, not model recall or an automatic summary."""
+    if (not isinstance(query,str) or len(query)>200 or scope not in ('','personal','project','task')
+            or status not in ('','active','disabled') or type(page) is not int or not 1<=page<=100000):
+        raise ValueError('记忆筛选无效')
+    clauses, args = ['m.user_id=?'], [USER]
+    if query.strip():
+        literal = query.strip().replace('\\','\\\\').replace('%','\\%').replace('_','\\_')
+        clauses.append("m.content LIKE ? ESCAPE '\\'")
+        args.append('%'+literal+'%')
+    for column,value in (('scope',scope),('status',status),('project_id',project_id)):
+        if value not in ('',None):
+            clauses.append('m.'+column+'=?')
+            args.append(value)
+    where = ' AND '.join(clauses)
+    total = ws.conn.execute('SELECT COUNT(*) FROM assistant_memories m WHERE '+where,args).fetchone()[0]
+    rows = [dict(r) for r in ws.conn.execute('SELECT m.*,p.name AS project_name,i.name AS task_name '
+        'FROM assistant_memories m LEFT JOIN projects p ON p.id=m.project_id '
+        'LEFT JOIN web_items i ON i.id=m.item_id WHERE '+where+' ORDER BY m.updated_at DESC,m.id LIMIT 40 OFFSET ?',
+        [*args,(page-1)*40])]
+    counts = {r['scope']:r['n'] for r in ws.conn.execute("SELECT scope,COUNT(*) AS n FROM assistant_memories WHERE user_id=? AND status='active' GROUP BY scope",(USER,))}
+    return {'notes':rows,'total':total,'page':page,'page_size':40,'counts':counts}
+
+
+def history(ws, memory_id):
+    note = ws.conn.execute('SELECT * FROM assistant_memories WHERE id=? AND user_id=?',(memory_id,USER)).fetchone()
+    if not note:
+        raise LookupError('找不到这条记忆，可能已被遗忘')
+    revisions = [dict(r) for r in ws.conn.execute('SELECT revision,action,content,created_at FROM assistant_memory_revisions '
+        'WHERE memory_id=? ORDER BY revision DESC,id DESC LIMIT 40',(memory_id,))]
+    source = None
+    if note['source_message_id']:
+        row = ws.conn.execute("SELECT i.id AS item_id,m.id AS message_id FROM messages m JOIN web_items i ON i.conversation_id=m.conversation_id WHERE m.id=? AND i.owner='local'",(note['source_message_id'],)).fetchone()
+        source = dict(row) if row else None
+    return {'id':memory_id,'revision':note['revision'],'revisions':revisions,'source':source,
+            'truncated':ws.conn.execute('SELECT COUNT(*) FROM assistant_memory_revisions WHERE memory_id=?',(memory_id,)).fetchone()[0]>40}

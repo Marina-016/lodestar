@@ -38,8 +38,11 @@ def error_details(error):
     if status is None and getattr(cause, 'response', None) is not None:
         status = cause.response.status_code
     cause_type = type(cause).__name__ if cause else None
-    code = error.code
-    if status in (401, 403):
+    from lodestar.providers.errors import from_exception
+    code = from_exception(cause) or error.code
+    if code in ('quota_exhausted', 'model_unavailable'):
+        pass
+    elif status in (401, 403):
         code = 'authentication'
     elif status == 429:
         code = 'rate_limit'

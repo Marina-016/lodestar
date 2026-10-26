@@ -38,14 +38,14 @@ def _version(source):
     return int(match.group(1)) if match else 0
 
 
-def tick(ws, *, now=None, discovery=discover, limit=10):
+def tick(ws, *, now=None, discovery=discover, limit=10, project_id=None):
     fixed_clock = now is not None
     now = now or datetime.now(timezone.utc)
     stamp = _iso(now)
     rows = ws.conn.execute("""SELECT w.* FROM paper_watches w JOIN projects p ON p.id=w.project_id
         WHERE w.enabled=1 AND p.status='active' AND w.next_run<=?
-        AND (w.lease_until IS NULL OR w.lease_until<=?) ORDER BY w.next_run,w.id LIMIT ?""",
-        (stamp, stamp, max(1,min(limit,20)))).fetchall()
+        AND (w.lease_until IS NULL OR w.lease_until<=?) AND (? IS NULL OR w.project_id=?) ORDER BY w.next_run,w.id LIMIT ?""",
+        (stamp, stamp, project_id, project_id, max(1,min(limit,20)))).fetchall()
     output = []
     for row in rows:
         lease_now = now if fixed_clock else datetime.now(timezone.utc)

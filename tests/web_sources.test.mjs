@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { sourceGroups } from "../lodestar/web/static/sources.mjs";
+import { sourceGroups, evidenceHTML } from "../lodestar/web/static/sources.mjs";
 import { linkedUrls, markdown } from "../lodestar/web/static/markdown.mjs";
 
 const paper = { url: "https://arxiv.org/abs/2601.00001v1", title: "Useful paper" };
@@ -76,4 +76,43 @@ test("future observations cannot retroactively verify an earlier answer", () => 
   const future = { id: 2, role: "assistant", metadata: { candidates: [paper] } };
   const groups = sourceGroups(earlier, [earlier, future]);
   assert.equal(groups.references[0].observed, false);
+});
+
+
+test("saved excerpts keep their own depth when later reads return abstract", () => {
+  const message = { id: 7, content: `[paper](${paper.url})`, metadata: {dialogue_events: [
+    {action:"read_paper",params:{url:paper.url,query:"experiments"},result:{text:"Measured evidence",read_depth:"full",coverage:"query_excerpt",truncated:true,evidence_spans:[{start:40,end:57}],sections:["experiments"]}},
+    {action:"read_paper",params:{url:paper.url},result:{text:"Short abstract",read_depth:"abstract"}}
+  ]}};
+  const source = sourceGroups(message).references[0];
+  assert.equal(source.evidence_readings.length,2);
+  assert.equal(source.evidence_readings[0].text,"Measured evidence");
+  assert.equal(source.evidence_readings[0].read_depth,"full");
+  assert.equal(source.evidence_readings[0].message_id,7);
+  assert.equal(source.evidence_readings[1].read_depth,"abstract");
+});
+test("evidence is bounded to the selected answer history and exact paper version", () => {
+  const make=(id,url,text)=>({id,role:"assistant",content:`[paper](${url})`,metadata:{dialogue_events:[{action:"read_paper",params:{url},result:{text,read_depth:"full"}}]}});
+  const old=make(1,paper.url,"Old body"), current=make(2,paper.url.replace("v1","v2"),"New body"),future=make(3,paper.url,"Future body");
+  assert.deepEqual(sourceGroups(old,[old,current,future]).references[0].evidence_readings.map(r=>r.text),["Old body"]);
+  assert.deepEqual(sourceGroups(current,[old,current,future]).references[0].evidence_readings.map(r=>r.text),["New body"]);
+});
+test("metadata-only child provenance never creates an original excerpt", () => {
+  const groups=sourceGroups({content:`[paper](${paper.url})`,metadata:{source_details:[{...paper,read_depth:"full",linked_task_source:{task_id:"child"}}]}});
+  assert.deepEqual(groups.references[0].evidence_readings,[]);
+});
+
+test("saved evidence escapes source content and labels missing text honestly",()=>{
+ const html=evidenceHTML({url:paper.url,evidence_readings:[{text:'<img src=x onerror=alert(1)>',query:'<script>',read_depth:'full',truncated:true,evidence_spans:[{start:5,end:20}]}]});
+ assert.ok(!html.includes('<img'));
+ assert.ok(html.includes('&lt;img'));
+ assert.ok(html.includes('不是此处字符位置或 PDF 页码'));
+ assert.ok(html.includes('截断'));
+ assert.ok(evidenceHTML({...paper,read_depth:'full'}).includes('没有保存可展示的原文片段'));
+});
+
+test("original-message links allow only the owned history route",()=>{
+ assert.ok(markdown('[old](/history?item=task_1&message=123)').includes('href="/history?item=task_1&amp;message=123"'));
+ assert.ok(!markdown('[bad](/history?item=x&message=1&redirect=https://evil.example)').includes('<a'));
+ assert.deepEqual(linkedUrls('[old](/history?item=main&message=1)'),[]);
 });

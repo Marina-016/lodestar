@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased · Research workflow — 2026-10-27
+
+- Inspect saved citation excerpts with original version/query/coverage and explicit missing-body state; preserve selected-answer history boundaries.
+- Preview and explicitly authorize version-bound project file excerpts. Revalidate file/README permissions and evidence snapshots before drafting plans.
+- Connect the existing paper inbox, public-query watches, reads, applicability assessments and plan/experiment lineage to the local Web workspace. Preserve durable scoped operation receipts, startup failures and idempotency.
+- Add literal history search with original-message links and a model tool restricted to current task/project, excluding retired context.
+- Keep manual hypotheses, experiment observations and adoption decisions distinct from measured execution and user mastery.
+- Add opt-in model-free background subscription checks, deduplicated local notices and an owned hidden service controller. Login autostart XML is available but not registered or verified on login.
+- Frozen regression: 560 Python / 29 frontend passed. Retain initial startup-notification regression and historical cleanup failures; no new cloud-model calls or research semantic clearance. See [delivery review](docs/v0-next-features-20261026.md).
+
 ## Unreleased · Projects and durable memory — 2026-10-26
 
 - Add independent project and memory management pages, shared navigation, scoped search/pagination, content revisions and source links, and separate learning-evidence correction/revocation. Reuse existing owned records and context invalidation rather than maintaining a second memory store.

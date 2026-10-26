@@ -1,5 +1,5 @@
 import { escape as esc, markdown, safeUrl } from "./markdown.mjs";
-import { sourceGroups } from "./sources.mjs";
+import { sourceGroups, evidenceHTML } from "./sources.mjs";
 import { actionHTML } from "./actions.mjs";
 import { defaultModel, modelOptionsHTML, hiddenModelsHTML } from "./models.mjs";
 const $ = (s) => document.querySelector(s),
@@ -556,7 +556,7 @@ function sourceHTML(source, index = 0) {
   const url = safeUrl(source.url);
   const host = url ? new URL(url).hostname.replace(/^www\./, "") : "";
   const depth = source.observed === false ? "未关联检索记录" : source.read_depth === "full" ? "正文片段" : source.read_depth === "web" ? "网页片段" : source.read_depth === "abstract" ? "已读摘要" : "检索候选";
-  return `<article class="source-item"><span class="source-index">${index + 1}</span><div class="source-body">${url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(source.title || source.url)}${icon("out")}</a>` : esc(source.title || "来源")}<div class="source-host">${esc(host)}</div><div class="source-meta"><span class="source-depth">${depth}</span><span>${esc(source.date?.slice(0, 10) || "日期未标注")}</span>${source.venue ? `<span>${esc(source.venue)}</span>` : ""}</div></div></article>`;
+  return `<article class="source-item"><span class="source-index">${index + 1}</span><div class="source-body">${url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(source.title || source.url)}${icon("out")}</a>` : esc(source.title || "来源")}<div class="source-host">${esc(host)}</div><div class="source-meta"><span class="source-depth">${depth}</span><span>${esc(source.date?.slice(0, 10) || "日期未标注")}</span>${source.venue ? `<span>${esc(source.venue)}</span>` : ""}</div>${evidenceHTML(source)}</div></article>`;
 }
 function openDrawer(kind) {
   drawerFocus = $("#sidebar").classList.contains("open") ? $("#menu") : document.activeElement;
@@ -702,6 +702,17 @@ $("#drawer-content").onclick = async (e) => {
   }
 };
 $("#messages").onclick = async (e) => {
+  const link = e.target.closest(".answer a");
+  if (link) {
+    const article = link.closest("[data-message]");
+    const source = article && sourcesFor(article.dataset.message).references.find(s=>safeUrl(s.url)===safeUrl(link.href));
+    if (source) {
+      e.preventDefault(); openDrawer("context"); sourceMessage=article.dataset.message; renderDrawer();
+      const evidence=[...document.querySelectorAll("[data-evidence-url]")].find(el=>el.dataset.evidenceUrl===source.url);
+      if(evidence) { evidence.open=true; evidence.querySelector("summary").focus(); evidence.scrollIntoView({block:"nearest"}); }
+      return;
+    }
+  }
   const b = e.target.closest("button");
   if (!b) return;
   if (b.dataset.receiptItem) return load(b.dataset.receiptItem);

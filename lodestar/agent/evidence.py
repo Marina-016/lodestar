@@ -154,7 +154,7 @@ def answer_context(context):
             **{k: result[k] for k in ('error', 'query_results', 'effective_query', 'time_window',
                 'failure_kind', 'recovery', 'skipped_queries', 'read_depth', 'coverage',
                 'query_matched', 'truncated', 'full_text_ok', 'note', 'repeat_of', 'previous_source_count') if k in result},
-            **({'result': result} if event['action'] in {'project_context', 'read_memory', 'manage_memory', 'record_learning', 'list_tasks', 'read_task', 'create_task'} else {})})
+            **({'result': result} if event['action'] in {'search_history', 'project_context', 'read_memory', 'manage_memory', 'record_learning', 'list_tasks', 'read_task', 'create_task'} else {})})
     from lodestar.memory.learning import model_context
     learning_packet = model_context(context.get('learning', []))
     return {'current_time': context['current_time'], 'sources': sources,

@@ -168,6 +168,7 @@ $('#entry-detail').onclick=async event=>{
   const action=button.dataset.action;
   if(action==='edit-note') return editNote(detail);
   if(action==='edit-project') return editProject(detail);
+  if(action==='project-files') return openFiles();
   if(button.dataset.correct) {
     const evidence=detail.evidence.find(e=>e.id===Number(button.dataset.correct)); learningEditing=evidence.id;
     $('#learning-technology').value=evidence.technology; $('#learning-method').value=evidence.method;
@@ -240,5 +241,36 @@ $('#import-project').hidden=!isProjects; $('#library-tabs').hidden=isProjects; $
 $('#nav-'+(isProjects ? 'projects' : 'memory')).classList.add('active');
 $('#nav-'+(isProjects ? 'projects' : 'memory')).setAttribute('aria-current','page');
 $('#status-filter').innerHTML=isProjects ? '<option value="">所有状态</option><option value="active">进行中</option><option value="idea">构想中</option><option value="paused">已暂停</option><option value="archived">已归档</option>' : '<option value="">启用与停用</option><option value="active">已启用</option><option value="disabled">已停用</option>';
-$('#library-boundary').textContent=isProjects ? 'Git 工作区与项目资料不是个人记忆。导入不会运行代码或自动授予模型读取权限；仅显式批准的说明与 README 快照可按需外发。项目工作区不包含在 Web 数据库备份中，请单独备份本地未推送提交。' : '记忆长期保存在本地数据库。个人事实跨任务，项目事实限同项目，任务备注只用于指定任务。停用可恢复；遗忘不清除聊天、备份或服务商已接收的信息。学习证据与普通事实分开维护。';
+$('#library-boundary').textContent=isProjects ? 'Git 工作区与项目资料不是个人记忆。导入不会运行代码或自动授予模型读取权限；仅显式批准的说明、README 与文件片段可按需外发。项目工作区不包含在 Web 数据库备份中，请单独备份本地未推送提交。' : '记忆长期保存在本地数据库。个人事实跨任务，项目事实限同项目，任务备注只用于指定任务。停用可恢复；遗忘不清除聊天、备份或服务商已接收的信息。学习证据与普通事实分开维护。';
 try { await refreshLibrary(); tabs(); await load(); } catch(error) { notice('本地服务未连接：'+error.message); }
+
+let filePacket=null,fileProject=null;
+async function openFiles() {
+ try {
+  fileProject={id:detail.id,revision:detail.revision};filePacket=null;
+  const result=await api('/api/project-files?id='+fileProject.id);
+  $('#file-path').innerHTML=result.files.map(f=>`<option value="${esc(f.path)}">${esc(f.path)}${f.approved ? ' · 有快照许可（需版本相符）' : ''}</option>`).join('');
+  resetFile();$('#files-dialog').showModal();
+ } catch(error){notice(error.message);}
+}
+function resetFile(){filePacket=null;$('#file-preview').textContent='';$('#file-status').textContent='预览不会调用模型或发送文件。';$('#file-approve').checked=false;$('#grant-file').disabled=true;}
+$('#file-path').onchange=resetFile;
+$('#preview-file').onclick=async()=>{
+ resetFile();const path=$('#file-path').value;
+ try {
+  const value=await api('/api/project-file-preview?id='+fileProject.id+'&path='+encodeURIComponent(path));
+  if($('#file-path').value!==path)return;
+  filePacket=value;$('#file-preview').textContent=value.content;
+  $('#file-status').textContent='Git '+value.commit_sha.slice(0,10)+' · '+value.original_chars+' 字符'+(value.truncated ? ' · 仅预览前4000字符' : '');
+ } catch(error){$('#file-status').textContent=error.message;}
+};
+$('#file-approve').onchange=()=>$('#grant-file').disabled=!filePacket || !$('#file-approve').checked;
+$('#files-form').onsubmit=e=>save($('#files-form'),e,async()=>{
+ if(!filePacket || !$('#file-approve').checked) return;
+ await api('/api/project-file',{...fileProject,...filePacket,approved:true});
+ $('#files-dialog').close();await openProject(fileProject.id);toast('已批准此版本片段；未发送模型请求');
+});
+$('#revoke-file').onclick=async()=>{
+ try {await api('/api/project-file',{...fileProject,path:$('#file-path').value,approved:false});$('#files-dialog').close();await openProject(fileProject.id);toast('文件许可已撤销，已外发信息无法撤回');}
+ catch(error){$('#file-status').textContent=error.message;}
+};

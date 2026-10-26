@@ -511,3 +511,12 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: non
 .model-unavailable summary { cursor: pointer; }
 .model-unavailable .detail-row { gap: 12px; align-items: baseline; }
 .model-unavailable .detail-row > span { min-width: 0; overflow-wrap: anywhere; }
+
+/* Saved evidence remains plain text, scoped to the inspected answer. */
+.source-evidence { margin-top:12px; font-size:13px; }
+.source-evidence summary { cursor:pointer; color:var(--accent); padding:8px 0; }
+.evidence-reading { border-top:1px solid var(--line-strong); margin-top:16px; padding-top:12px; }
+.evidence-reading h4 { margin:0 0 8px; font-size:13px; }
+.evidence-text { white-space:pre-wrap; overflow-wrap:anywhere; font-family:inherit; font-size:13px; line-height:1.7; margin:12px 0; padding:14px; background:var(--surface); border-radius:8px; }
+.evidence-warning { font-size:12px; line-height:1.6; color:#8b5600; }
+.source-body { min-width:0; }

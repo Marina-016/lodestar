@@ -658,6 +658,12 @@ def main(argv=None):
     pui.add_argument('--data-dir', type=Path, help='独立本地数据目录（默认 workspace/web）')
     pui.set_defaults(fn=lambda a, c: _cmd_ui(a, c))
 
+    pbg=sub.add_parser('background',help='管理独立本地后台服务（不自动开启订阅或模型调用）')
+    pbg.add_argument('action',choices=['start','stop','status','run','autostart-on','autostart-off'])
+    pbg.add_argument('--data-dir',type=Path,required=True)
+    pbg.add_argument('--port',type=int,default=8124)
+    pbg.add_argument('--offline',action='store_true')
+
     pd = sub.add_parser("demo", help="准备录屏用的 Lodestar 示例数据")
     dsub = pd.add_subparsers(dest="action", required=True)
     dsub.add_parser("seed", help="向当前 workspace 幂等写入示例数据").set_defaults(fn=cmd_demo)
@@ -784,6 +790,10 @@ def main(argv=None):
     if args.cmd == 'agent-pipeline-demo':
         from lodestar.agent.pipeline_demo import run
         print(json.dumps(run(args.out), ensure_ascii=False, indent=2))
+        return
+    if args.cmd=='background':
+        from lodestar.web.background import main as background_main
+        background_main([args.action,'--data-dir',str(args.data_dir),'--port',str(args.port),*(['--offline'] if args.offline else [])])
         return
     cfg = _make_config(args)
     args.fn(args, cfg)

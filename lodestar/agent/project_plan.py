@@ -40,7 +40,7 @@ def _generate(ws,llm,goal,project_id,context_evidence,assessment=None):
     missing=context_evidence['missing']
     mode='not_called' if llm is None else ('live' if getattr(llm,'mode',None)=='live' else 'mock' if getattr(llm,'mode',None)=='mock' else 'test')
     result={'mode':mode,'status':'draft','project_id':project_id,'project_documents':[
-        {k:d[k] for k in ('id','path','indexed_at')} for d in documents],
+        {k:d[k] for k in ('id','path','indexed_at','commit_sha','digest','approval','source') if k in d} for d in documents],
         'paper_urls':[p['url'] for p in papers],'missing_evidence':missing,
         'semantic_review':'pending','execution_status':'not_run'}
     if context_evidence['status']=='needs_export_scope':

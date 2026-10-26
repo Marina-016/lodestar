@@ -9,6 +9,12 @@ from lodestar.web import memory
 
 def initialize(ws):
     ws.conn.executescript(SCHEMA)
+    from lodestar.web.project_files import SCHEMA as FILE_SCHEMA
+    ws.conn.executescript(FILE_SCHEMA)
+    from lodestar.web.research import SCHEMA as RESEARCH_SCHEMA
+    ws.conn.executescript(RESEARCH_SCHEMA)
+    from lodestar.web.background import SCHEMA as BACKGROUND_SCHEMA
+    ws.conn.executescript(BACKGROUND_SCHEMA)
     ws.conn.executescript(project_workspaces.SCHEMA)
     ws.conn.execute('INSERT OR IGNORE INTO web_project_revisions(project_id) SELECT id FROM projects')
 

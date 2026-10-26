@@ -36,15 +36,18 @@ def collect(ws, goal, sources, project_id, *, live=False):
     readme = approved_readme(ws.conn,project_id) if live else None
     approved_background = {'project':description} if description else {}
     configured_export = export_allowed(ws.config,project)
-    if live and not configured_export and not readme:
+    from lodestar.web.project_files import approved
+    selected_files=approved(ws,project_id,goal,limit=2 if readme else 3)
+    if live and not configured_export and not readme and not selected_files:
         return {'status':'needs_export_scope','documents':[],'papers':[],
                 **approved_background,
                 'missing':['No matching repository and explicit file export allowlist.']}
     allowed=(set(ws.config.project_model_allowed_paths) if configured_export else set()) if live else None
     # Search locally; only approved paths can enter a remote context.
     matches=repo.search_project_documents(ws.conn,goal,project_id=project_id,limit=20 if live else 3)
-    documents=[readme] if readme else []
+    documents=([readme] if readme else [])+selected_files
     for match in matches:
+        if len(documents)>=3: break
         if allowed is not None and match['path'] not in allowed:
             continue
         if any(d['path']==match['path'] for d in documents):

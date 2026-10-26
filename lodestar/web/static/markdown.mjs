@@ -15,6 +15,11 @@ export function safeUrl(value) {
     return "";
   }
 }
+function localHistoryUrl(value) {
+  if(typeof value!=="string" || !value.startsWith("/history?")) return "";
+  const params=new URLSearchParams(value.slice(9));
+  return [...params.keys()].every(k=>["item","message"].includes(k)) && /^[a-zA-Z0-9_-]+$/.test(params.get("item") || "") && /^[1-9][0-9]*$/.test(params.get("message") || "") ? value : "";
+}
 function inline(text, links) {
   const token =
     /(`[^`\n]+`|\*\*[^*\n]+\*\*|\[[^\]\n]+\]\([^\s)]+\)|https?:\/\/[^\s<>]+)/g;
@@ -35,8 +40,8 @@ function inline(text, links) {
         label = part.slice(1, p);
         url = part.slice(p + 2, -1);
       }
-      const safe = safeUrl(url);
-      if (safe) links?.push(safe);
+      const safe = safeUrl(url) || localHistoryUrl(url);
+      if (safeUrl(safe)) links?.push(safe);
       out += safe
         ? `<a href="${escape(safe)}" target="_blank" rel="noopener noreferrer">${escape(label)}</a>`
         : escape(label);

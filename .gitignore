@@ -40,3 +40,8 @@ lodestar.bat
 .DS_Store
 Thumbs.db
 .vercel
+
+# Per-instance background control token and owned service artifacts
+.lodestar-service.json
+background-service.log
+background-task.xml

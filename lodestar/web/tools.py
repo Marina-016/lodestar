@@ -235,7 +235,16 @@ def assistant_tools(app, item, run_id, message, check_cancel, *, user_authored=T
             result['managed_memory'] = assistant.prompt_rows(assistant.select_rows(memory.notes(ws, current, active_only=True), message))
             return result
 
+    def search_history(args):
+        from lodestar.web.history import search
+        check_cancel()
+        with app.workspace() as ws,ws.conn:
+            current=app.item(ws,item['id'])
+            return search(ws,args['query'],model_item=current)
+
     tools = {
+        'search_history': definition('Search literal text in non-retired prior messages of this task, or tasks bound to its current project. Returns original message links and bounded excerpts. Historical assistant text is not verified evidence. No result does not prove no history exists.',
+            {'query':{'type':'string','minLength':1,'maxLength':200}},search_history,['query']),
         'read_memory': definition('Read visible active personal/project/task facts and your user\'s learning evidence. query is an optional lexical filter; omit it for a bounded overview. Counts cover this space\'s visible notes, the current user\'s events and distinct technology/method profiles. Match counts and truncation flags disclose omitted records. Long evidence may be returned as an explicit omitted-text reference. Empty filtered results do not imply empty memory.',
                                  {'query': {'type': 'string'}}, read_memory),
         'manage_memory': definition('Save a durable user preference/fact, or correct/forget an existing memory by ID. Use only user-provided facts or confirmed project decisions. Never store technology definitions, infer mastery, or turn background reading into user exposure. scope defaults to personal; project requires a bound project; task keeps a local note. Read existing IDs before modifying them.',

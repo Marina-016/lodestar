@@ -28,6 +28,7 @@ jobs:
       - run: node --test tests/web_sources.test.mjs tests/web_actions.test.mjs tests/web_models.test.mjs tests/web_library.test.mjs
       - run: node --check lodestar/web/static/app.mjs
       - run: node --check lodestar/web/static/library.mjs
+      - run: node --check lodestar/web/static/workbench.mjs
       - run: python -m pip check
       - run: python scripts/preflight_public_release.py
       - run: python -m pip wheel --no-deps --no-build-isolation . --wheel-dir dist

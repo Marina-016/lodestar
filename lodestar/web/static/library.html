@@ -22,6 +22,8 @@
       <a class="nav-item" href="/?item=main"><svg><use href="#i-home" /></svg><span>主对话</span></a>
       <a class="nav-item" id="nav-projects" href="/projects"><svg><use href="#i-project" /></svg><span>项目</span></a>
       <a class="nav-item" id="nav-memory" href="/memory"><svg><use href="#i-book" /></svg><span>记忆</span></a>
+      <a class="nav-item" href="/research"><span>研究收件箱</span></a>
+      <a class="nav-item" href="/history"><span>历史检索</span></a>
       <div class="nav-section"><span>任务</span><span id="task-count" class="section-count">0</span></div>
       <div id="task-list" class="task-list"></div>
       <p id="tasks-empty" class="sidebar-empty">研究任务的对话和来源，各自保留。</p>
@@ -75,6 +77,14 @@
   <label for="learning-evidence">纠正说明</label><textarea id="learning-evidence" rows="5" maxlength="2000" required></textarea>
   <p class="fineprint">旧证据撤销，纠正保存为你的自评，不自动提升掌握程度。</p>
   <div class="dialog-actions"><button type="button" class="secondary" data-close="learning-editor">取消</button><button type="submit" class="primary">保存纠正</button></div>
+</form></dialog>
+<dialog id="files-dialog" aria-labelledby="files-title"><form id="files-form">
+<div class="dialog-heading"><h2 id="files-title">项目文件读取许可</h2><button type="button" class="subtle" data-close="files-dialog">关闭</button></div>
+<p>先在本地预览，再单独授权这份文件片段。仅绑定此项目的对话可按需读取；文件或 Git 提交变化后旧许可不再适用。</p>
+<label for="file-path">已跟踪的文本文件</label><select id="file-path"></select><button type="button" class="secondary" id="preview-file">本地预览</button>
+<p class="fineprint" id="file-status" role="status"></p><pre class="readme-preview" id="file-preview"></pre>
+<label class="check-row"><span>允许模型按需读取上方预览片段（最多4000字符）</span><input type="checkbox" id="file-approve" /></label>
+<div class="dialog-actions"><button type="button" class="secondary" id="revoke-file">撤销所选文件许可</button><button class="primary" id="grant-file" disabled>保存本版本许可</button></div>
 </form></dialog>
 <div id="toast" class="toast" role="alert" hidden></div>
 <script type="module" src="/library.mjs"></script>

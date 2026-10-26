@@ -113,17 +113,31 @@ def plan(ws,llm,project_id,recommendation_id,goal,assessment_id=None):
     else:
         snapshot=assessment['evidence_snapshot']
         stale=False
-        for document in snapshot['documents']:
-            current=repo.get_project_document(ws.conn,document['id'])
-            if not current or current['project_id']!=project_id or current['path']!=document['path'] or current['content'][:4000]!=document['content']:
-                stale=True
-                break
+        from lodestar.web.project_files import approved
+        from lodestar.project_sources import approved_readme
+        approved_files={d['path']:d for d in approved(ws,project_id,limit=50)}
+        readme=approved_readme(ws.conn,project_id)
         live=llm is None or getattr(llm,'mode',None)=='live'
         from lodestar.agent.project_evidence import export_allowed
         project=repo.get_project(ws.conn,project_id)
+        forbidden=False
+        for document in snapshot['documents']:
+            if document.get('approval')=='explicit_file_snapshot':
+                current=approved_files.get(document['path'])
+                same=current and all(current.get(k)==document.get(k) for k in ('path','content','digest','commit_sha'))
+            elif document.get('source')=='github_user_approved_snapshot':
+                current=readme
+                same=current and all(current.get(k)==document.get(k) for k in ('path','content','commit_sha'))
+            else:
+                current=repo.get_project_document(ws.conn,document.get('id'))
+                same=current and current['project_id']==project_id and current['path']==document['path'] and current['content'][:4000]==document['content']
+                forbidden=forbidden or (live and (not export_allowed(ws.config,project) or document['path'] not in ws.config.project_model_allowed_paths))
+            if not same:
+                stale=True
+                break
         if stale:
             result['status']='needs_reassessment'
-        elif live and (not export_allowed(ws.config,project) or any(d['path'] not in ws.config.project_model_allowed_paths for d in snapshot['documents'])):
+        elif forbidden:
             result['status']='needs_export_scope'
         elif live and assessment.get('mode')!='live':
             result['status']='needs_live_assessment'

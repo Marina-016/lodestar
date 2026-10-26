@@ -71,11 +71,19 @@ class WebApp:
         self.project_operations = {}
         self.project_workers = set()
         self.closing = False
+        self.instance_id=uuid.uuid4().hex
+        self.scheduler=None
         with self.workspace() as ws:
             ws.conn.executescript(SCHEMA)
             ws.conn.executescript(model_health.SCHEMA)
             memory.initialize(ws)
             projects.initialize(ws)
+            from lodestar.web.background import notify
+            for pending in ws.conn.execute("SELECT id,project_id FROM web_research_jobs WHERE status IN ('queued','running')").fetchall():
+                notify(ws.conn,'research:'+pending['id'],'research',pending['project_id'],'interrupted')
+            for pending in ws.conn.execute("SELECT id,item_id FROM web_runs WHERE status IN ('queued','running','cancelling')").fetchall():
+                notify(ws.conn,'run:'+pending['id'],'task',pending['item_id'],'interrupted')
+            ws.conn.execute("UPDATE web_research_jobs SET status='interrupted' WHERE status IN ('queued','running')")
             index = ws.conn.execute("SELECT sql FROM sqlite_master WHERE name='web_one_active_run'").fetchone()[0]
             if 'cancelling' not in index:
                 ws.conn.execute('DROP INDEX web_one_active_run')
@@ -265,6 +273,92 @@ class WebApp:
             ws.conn.execute('INSERT OR REPLACE INTO web_project_checkouts(project_id,directory) VALUES(?,?)',(project_id,key))
         return project_id
 
+    def research_job(self,data):
+        with self.lock:
+            return self._research_job_locked(data)
+
+    def _research_job_locked(self,data):
+        from lodestar.web import research
+        project_id,action=data.get('project_id'),data.get('action')
+        if action not in ('read','assess','plan','tick'): raise ValueError('研究操作无效')
+        key=data.get('key')
+        if not isinstance(key,str) or not 1<=len(key)<=100: raise ValueError('请提供操作标识')
+        goal=data.get('goal','')
+        if not isinstance(goal,str) or len(goal)>4000:raise ValueError('研究目标过长')
+        payload={'paper_id':data.get('paper_id'),'goal':goal}
+        with self.lock, self.workspace() as ws, ws.conn:
+            research.project(ws,project_id)
+            previous=ws.conn.execute('SELECT id,payload,action FROM web_research_jobs WHERE project_id=? AND request_key=?',(project_id,key)).fetchone()
+            encoded=json.dumps(payload,ensure_ascii=False,sort_keys=True)
+            if previous:
+                if previous['payload']!=encoded or previous['action']!=action:raise Conflict('操作标识已用于其他请求')
+                return previous['id']
+            if self.closing or f'project:{project_id}' in self.project_operations:raise Conflict('项目操作中，请等待结束')
+            if ws.conn.execute("SELECT 1 FROM web_runs r JOIN web_items i ON i.id=r.item_id WHERE i.project_id=? AND r.status IN ('queued','running','cancelling')",(project_id,)).fetchone():raise Conflict('项目任务仍在运行')
+            if action!='tick':
+                from lodestar.agent.candidate import _recommendation
+                _recommendation(ws,project_id,payload['paper_id'])
+            cfg=self.config_for(self.item(ws,'main'))
+            if action in ('assess','plan'):
+                if cfg.model_calls_disabled and cfg.llm_mode!='mock':raise Conflict('模型调用已暂停；未发请求')
+                if model_health.view(ws.conn,cfg,[cfg.model])['current_blocked']:raise Conflict('当前模型不可用；未自动切换')
+            job_id=uuid.uuid4().hex
+            ws.conn.execute('INSERT INTO web_research_jobs(id,project_id,action,status,request_key,payload,config) VALUES(?,?,?,?,?,?,?)',
+                (job_id,project_id,action,'queued',key,encoded,json.dumps(snapshot(cfg))))
+        worker=None
+        try:
+            worker=threading.Thread(target=self.execute_research,args=(job_id,project_id,action,payload,cfg),daemon=True)
+            self.project_operations[f'project:{project_id}']=worker;self.project_workers.add(worker)
+            worker.start()
+        except Exception:
+            with self.lock,self.workspace() as ws,ws.conn:
+                self.project_workers.discard(worker);self.project_operations.pop(f'project:{project_id}',None)
+                ws.conn.execute("UPDATE web_research_jobs SET status='error',result=? WHERE id=?",(json.dumps({'error':'工作线程未能启动，未自动重试'}),job_id))
+                from lodestar.web.background import notify
+                notify(ws.conn,'research:'+job_id,'research',project_id,'error')
+            raise Conflict('研究操作未能启动；已保留失败记录') from None
+        return job_id
+
+    def execute_research(self,job_id,project_id,action,payload,cfg):
+        from lodestar.agent import candidate,watch
+        llm=None
+        try:
+            with self.workspace(cfg) as ws:
+                with ws.conn:ws.conn.execute("UPDATE web_research_jobs SET status='running' WHERE id=?",(job_id,))
+                if action=='read':result=candidate.read(ws,project_id,payload['paper_id'])
+                elif action=='tick':
+                    result=watch.tick(ws,project_id=project_id)
+                    if any(r['status']!='ok' for r in result['runs']): result['status']='error'
+                else:
+                    from lodestar.agent.project_evidence import collect
+                    saved=candidate.evidence(ws,project_id,payload['paper_id'])
+                    context=collect(ws,payload['goal'],[saved['evidence']] if saved else [],project_id,live=True)
+                    if context['status']!='ready' or not context['documents'] or not context['papers']:
+                        result={'status':'insufficient_evidence','missing':context['missing'],'model_calls':0}
+                    else:
+                        llm=self.llm_factory(cfg)
+                        result=(candidate.assess(ws,llm,project_id,payload['paper_id'],payload['goal']) if action=='assess' else
+                                candidate.plan(ws,llm,project_id,payload['paper_id'],payload['goal']))
+                with ws.conn:ws.conn.execute('UPDATE web_research_jobs SET status=?,result=? WHERE id=?',
+                    ('completed' if (action=='tick' and result.get('status')!='error') or (action=='read' and result.get('status')=='read') or (action=='assess' and result.get('status')=='assessed') or (action=='plan' and result.get('status')=='draft' and result.get('contract_valid')) else 'error',json.dumps(result,ensure_ascii=False),job_id))
+        except Exception:
+            with self.workspace() as ws,ws.conn:ws.conn.execute("UPDATE web_research_jobs SET status='error',result=? WHERE id=?",(json.dumps({'error':'研究操作未完成；已保存的证据保留，未自动重试'}),job_id))
+        finally:
+            try:
+                from lodestar.web.background import notify
+                with self.workspace() as ws,ws.conn:
+                    row=ws.conn.execute('SELECT status,result FROM web_research_jobs WHERE id=?',(job_id,)).fetchone()
+                    result=json.loads(row['result']) if row else {}
+                    # Unchanged successful subscription checks stay quiet.
+                    meaningful=action!='tick' or not row or row['status']!='completed' or any(r.get('new_recommendations',0)>0 for r in result.get('runs',[]))
+                    if row and meaningful:notify(ws.conn,'research:'+job_id,'research',project_id,row['status'])
+            finally:
+                try:
+                    if llm is not None:llm.close()
+                finally:
+                    with self.lock:
+                        self.project_operations.pop(f'project:{project_id}',None);self.project_workers.discard(threading.current_thread())
+
     def create(self, name, project_id=None, *, parent_id=None, dispatch_key=None):
         name = str(name).strip()[:80]
         if not name:
@@ -391,13 +485,23 @@ class WebApp:
             raise
         return run_id
 
+    def start_scheduler(self):
+        from lodestar.web.background import Scheduler
+        with self.lock:
+            if self.scheduler is None and not self.closing:
+                scheduler=Scheduler(self)
+                scheduler.start()
+                self.scheduler=scheduler
+
     def close(self):
         """Keep the process lease until all cooperative writes/clients have stopped."""
         with self.lock:
             self.closing = True
+            if self.scheduler is not None:self.scheduler.stop.set()
             for signal in self.cancel_signals.values():
                 signal.set()
             workers = list(self.workers.values()) + list(self.project_workers)
+        if self.scheduler is not None:self.scheduler.thread.join()
         for worker in workers:
             if worker is not threading.current_thread():
                 worker.join()
@@ -504,10 +608,17 @@ class WebApp:
                     ws.conn.execute("UPDATE web_runs SET status=?,result=? WHERE id=? AND status IN ('queued','running','cancelling')",
                         (status,json.dumps({'answer':answer,'action_receipts':receipts},ensure_ascii=False),run_id))
             finally:
-                with self.lock:
-                    self.cancel_signals.pop(run_id, None)
-                if llm is not None:
-                    llm.close()
+                try:
+                    from lodestar.web.background import notify
+                    with ws.conn:
+                        terminal=ws.conn.execute('SELECT status FROM web_runs WHERE id=?',(run_id,)).fetchone()
+                        if terminal and terminal[0] not in ('queued','running','cancelling'):
+                            notify(ws.conn,'run:'+run_id,'task',item['id'],terminal[0])
+                finally:
+                    with self.lock:
+                        self.cancel_signals.pop(run_id, None)
+                    if llm is not None:
+                        llm.close()
 
     def events(self, run_id, after):
         with self.workspace() as ws:
@@ -562,20 +673,45 @@ def make_server(app, port=8123):
             path, query = parsed.path, parse_qs(parsed.query)
             try:
                 if not write:
-                    if path in ('/','/memory','/projects'):
-                        template = 'index.html' if path=='/' else 'library.html'
+                    if path in ('/','/memory','/projects','/research','/history'):
+                        template = 'index.html' if path=='/' else 'workbench.html' if path in ('/research','/history') else 'library.html'
                         page = (STATIC/template).read_text(encoding='utf-8').replace('__TOKEN__',app.token)
                         return self.respond(page.encode(),mime='text/html; charset=utf-8')
-                    if path in ('/app.mjs','/markdown.mjs','/sources.mjs','/actions.mjs','/models.mjs','/library.mjs','/library-views.mjs','/library.css','/style.css','/icon.svg'):
+                    if path in ('/app.mjs','/markdown.mjs','/sources.mjs','/actions.mjs','/models.mjs','/library.mjs','/library-views.mjs','/workbench.mjs','/library.css','/style.css','/icon.svg'):
                         mime = 'text/css' if path.endswith('.css') else 'image/svg+xml' if path.endswith('.svg') else 'text/javascript'
                         return self.respond((STATIC/path[1:]).read_bytes(),mime=mime+'; charset=utf-8')
+                    if path == '/api/service':
+                        return self.respond({'instance_id':app.instance_id,'pid':os.getpid()})
+                    if path == '/api/background':
+                        from lodestar.web.background import view
+                        with app.workspace() as ws:return self.respond(view(ws))
                     if path == '/api/state':
                         return self.respond(app.state(query.get('item',['main'])[0]))
+                    if path in ('/api/history','/api/history-message'):
+                        from lodestar.web import history
+                        with app.workspace() as ws,ws.conn:
+                            ws.conn.execute('BEGIN')
+                            if path.endswith('message'):return self.respond(history.message(ws,query.get('item',['main'])[0],int(query.get('message',['0'])[0])))
+                            return self.respond(history.search(ws,query.get('query',[''])[0],project_id=int(query['project'][0]) if query.get('project') else None,
+                                item_id=query.get('item',[None])[0],page=int(query.get('page',['1'])[0])))
+                    if path in ('/api/research','/api/research-paper'):
+                        from lodestar.web import research
+                        with app.workspace() as ws,ws.conn:
+                            project_id=int(query.get('project',['0'])[0]);research.project(ws,project_id)
+                            return self.respond(research.detail(ws,project_id,int(query.get('paper',['0'])[0])) if path.endswith('paper') else
+                                research.catalog(ws,project_id,query.get('state',[''])[0],int(query.get('page',['1'])[0])))
                     if path == '/api/library':
                         return self.respond(app.library())
                     if path == '/api/project':
                         with app.workspace() as ws:
                             return self.respond(projects.detail(ws,int(query.get('id',['0'])[0])))
+                    if path in ('/api/project-files','/api/project-file-preview'):
+                        from lodestar.web import project_files
+                        with app.lock, app.workspace() as ws:
+                            project_id=int(query.get('id',['0'])[0])
+                            if not repo.get_project(ws.conn,project_id): raise LookupError('找不到项目')
+                            return self.respond(project_files.catalog(ws,project_id) if path.endswith('files') else
+                                project_files.preview(ws,project_id,query.get('path',[''])[0]))
                     if path == '/api/memory-library':
                         with app.workspace() as ws, ws.conn:
                             return self.respond(memory.catalog(ws,query=query.get('query',[''])[0],
@@ -603,12 +739,58 @@ def make_server(app, port=8123):
                 data = json.loads(self.rfile.read(length))
                 if not isinstance(data,dict):
                     raise ValueError('请求格式无效')
+                if path == '/api/service-stop':
+                    if data.get('instance_id')!=app.instance_id:raise ValueError('实例标识不匹配')
+                    self.respond({'stopping':True})
+                    threading.Thread(target=self.server.shutdown,daemon=True).start()
+                    return
+                if path == '/api/background':
+                    if type(data.get('enabled')) is not bool:raise ValueError('后台状态无效')
+                    with app.lock,app.workspace() as ws,ws.conn:
+                        if app.closing:raise Conflict('服务正在关闭')
+                        ws.conn.execute('UPDATE web_background_settings SET enabled=? WHERE id=1',(int(data['enabled']),))
+                    if data['enabled']:
+                        try:app.start_scheduler()
+                        except RuntimeError:
+                            with app.workspace() as ws,ws.conn:ws.conn.execute('UPDATE web_background_settings SET enabled=0 WHERE id=1')
+                            raise Conflict('后台线程未能启动，开关已关闭；没有自动重试') from None
+                    return self.respond({'ok':True})
+                if path == '/api/notification-read':
+                    with app.workspace() as ws,ws.conn:
+                        if type(data.get('id')) is not int:raise ValueError('通知标识无效')
+                        ws.conn.execute('UPDATE web_notifications SET seen=1 WHERE id=?',(data['id'],))
+                    return self.respond({'ok':True})
+                if path == '/api/research-job':return self.respond({'id':app.research_job(data)},202)
+                if path in ('/api/research-save','/api/research-state','/api/research-watch','/api/plan-note'):
+                    from lodestar.web import research
+                    with app.lock,app.workspace() as ws,ws.conn:
+                        project_id=data.get('project_id');research.project(ws,project_id)
+                        if app.closing or f'project:{project_id}' in app.project_operations:raise Conflict('项目操作中，请稍后')
+                        if path.endswith('save'):return self.respond({'id':research.save_paper(ws,project_id,data)})
+                        if path.endswith('state'):
+                            research.update_state(ws,project_id,data.get('paper_id'),data.get('state'));return self.respond({'ok':True})
+                        if path.endswith('note'):return self.respond(research.plan_note(ws,project_id,data))
+                        if data.get('watch_id'):
+                            if type(data.get('enabled')) is not bool:raise ValueError('订阅状态无效')
+                            changed=ws.conn.execute('UPDATE paper_watches SET enabled=? WHERE id=? AND project_id=?',(int(data['enabled']),data['watch_id'],project_id)).rowcount
+                            if not changed:raise LookupError('订阅不属于此项目')
+                            return self.respond({'ok':True})
+                        from lodestar.agent.watch import subscribe
+                        if not isinstance(data.get('query'),str) or not isinstance(data.get('terms'),list) or not all(isinstance(t,str) for t in data['terms']) or type(data.get('interval_hours')) is not int:raise ValueError('订阅参数无效')
+                        return self.respond(subscribe(ws,project_id,data['query'],data['terms'],data['interval_hours']))
                 if path == '/api/items':
                     return self.respond({'id':app.create(data.get('name',''), data.get('project_id'))},201)
                 if path == '/api/projects':
                     return self.respond({'id': app.project(data)},201)
                 if path == '/api/project-save':
                     return self.respond({'id':app.save_project(data)})
+                if path == '/api/project-file':
+                    from lodestar.web import project_files
+                    with app.lock, app.workspace() as ws, ws.conn:
+                        project_id=data.get('id')
+                        projects.check_revision(ws,project_id,data.get('revision'))
+                        if f'project:{project_id}' in app.project_operations: raise Conflict('项目同步中，请稍后再修改许可')
+                        return self.respond(project_files.save(ws,project_id,data))
                 if path == '/api/project-import':
                     return self.respond({'id':app.import_project(data)})
                 item_id = data.get('item','main')
@@ -674,7 +856,7 @@ def make_server(app, port=8123):
     return server
 
 
-def serve(port=8123, open_browser=True, config=None, data_dir=None):
+def serve(port=8123, open_browser=True, config=None, data_dir=None, background_service=False):
     cfg = config or load_config()
     root = Path(data_dir).resolve() if data_dir is not None else Path(__file__).resolve().parents[2] / 'workspace' / 'web'
     cfg = replace(cfg,db_path=root/'web.db',workspace_dir=root,demo_replay=False)
@@ -690,6 +872,12 @@ def serve(port=8123, open_browser=True, config=None, data_dir=None):
                     print(f'启动前数据库备份: {backup}', flush=True)
                 app = WebApp(cfg)
                 server.app = app
+                app.start_scheduler()
+                if background_service:
+                    from lodestar.web.background import marker
+                    record=marker(root)
+                    record.write_text(json.dumps({'instance_id':app.instance_id,'token':app.token,'port':server.server_port,'pid':os.getpid()}),encoding='utf-8')
+                    if os.name!='nt':record.chmod(0o600)
                 url = f'http://127.0.0.1:{server.server_port}'
                 print(f'Lodestar 本地工作空间: {url}',flush=True)
                 if open_browser:
@@ -704,6 +892,10 @@ def serve(port=8123, open_browser=True, config=None, data_dir=None):
                         if app.workers:
                             print('正在停止运行；已发出的网络请求可能需等待超时。', flush=True)
                         app.close()
+                        if background_service:
+                            from lodestar.web.background import marker,_record
+                            value=_record(root)
+                            if value and value['instance_id']==app.instance_id:marker(root).unlink(missing_ok=True)
                 finally:
                     server.server_close()
     finally:

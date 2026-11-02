@@ -261,7 +261,7 @@ def assistant_tools(app, item, run_id, message, check_cancel, *, user_authored=T
             {'action': {'type': 'string', 'enum': ['record', 'correct', 'revoke']},
              'id': {'type': 'integer', 'minimum': 1},
              'technology': {'type': 'string', 'minLength': 1, 'maxLength': 200},
-             'method': {'type': 'string', 'maxLength': 300},
+             'method': {'type': 'string', 'maxLength': 300, 'description': 'The method identity explicitly named or described by the user, separately from technology. Never append learning depth, exposure, mastery or practice status to this name; those belong to the user evidence. For correct, omit method to keep the existing identity unless the user explicitly renames the method. Do not invent a method when unspecified.'},
              'event': {'type': 'string', 'enum': ['discussed', 'attempted', 'self_report']}},
             record_learning)
     if item['id'] == 'main':

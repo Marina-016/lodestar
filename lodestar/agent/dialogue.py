@@ -71,7 +71,7 @@ DESCRIPTIONS = {
     'search_web': 'Search the web. Returned snippets are not full articles.',
     'read_webpage': 'Read a previously returned webpage URL.',
     'verify_paper': 'Look up publication/venue metadata for a previously returned paper URL. Costs one operation. Unknown means unverified, not unpublished. A publication record alone does not establish authority.',
-    'project_context': 'Read the bound project within its approved export scope.',
+    'project_context': 'Read approved local project documents, not papers. An empty papers list here means no paper was retrieved by this tool, not that paper evidence is absent. Use paper tools for requested method/experiment reading. Project configuration describes intended behavior; it is not a measured result.',
 }
 
 
@@ -153,6 +153,27 @@ def _linked_task_sources(result, context):
     return linked
 
 
+def _arxiv_url(value):
+    if not isinstance(value, str):
+        return None
+    match = re.fullmatch(r'https://arxiv\.org/(?:abs|pdf)/(\d{4}\.\d{4,5}(?:v[1-9]\d*)?)(?:\.pdf)?', value)
+    return 'https://arxiv.org/abs/' + match[1] if match else None
+
+
+def _user_papers(message):
+    # Only the current user request supplies these URLs. Do not authorize links
+    # from assistant history, tool text, lookalike hosts or arbitrary websites.
+    papers = {}
+    for raw in re.findall(r"https://[^\s<>()[\]{}，。；、！？\"'`]+", message):
+        url = _arxiv_url(raw.rstrip('.,;!?:'))
+        if url:
+            papers[url] = {'url':url, 'source_type':'paper', 'read_depth':'metadata',
+                           'coverage':'user_provided_url_only', 'evidence_origin':'current_user_url'}
+        if len(papers) >= MAX_CANDIDATES:
+            break
+    return list(papers.values())
+
+
 def gather(ws, llm, context, project_id=None, max_calls=None, on_progress=None, on_text=None, check_cancel=None, extra_tools=None, execution_policy=None):
     """Return the native conversation's answer and bounded, persistable evidence."""
     max_calls = max_calls if max_calls is not None else ws.config.dialogue_max_operations
@@ -162,7 +183,7 @@ def gather(ws, llm, context, project_id=None, max_calls=None, on_progress=None, 
         'Use existing knowledge/local context, disclose what needs verification. '
         'This does not disable the model API itself.' if blocked else '')
     context = {**context, 'papers': merge_sources(context['papers']),
-               'candidates': merge_sources(context.get('candidates', []))[-MAX_CANDIDATES:],
+               'candidates': merge_sources(context.get('candidates', []) + _user_papers(context['message']))[-MAX_CANDIDATES:],
                'current_time': datetime.now().astimezone().isoformat(),
                'project_available': project_id is not None, 'dialogue_events': [],
                'execution_policy': policy}
@@ -350,6 +371,10 @@ def _execute(ws, context, project_id, allowed_urls, decision):
     # Citations commonly omit the arXiv version. Resolve only this known-paper
     # alias; never turn an arbitrary unseen URL into an authorized read.
     requested_url = decision.get('url')
+    canonical = _arxiv_url(requested_url)
+    if action in ('read_paper', 'verify_paper') and canonical in allowed_urls:
+        decision = {**decision, 'url': canonical}
+        requested_url = canonical
     if (action in ('read_paper', 'verify_paper') and isinstance(requested_url, str)
             and requested_url not in allowed_urls
             and re.fullmatch(r'https://arxiv\.org/abs/\d{4}\.\d{4,5}', requested_url)):

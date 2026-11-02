@@ -315,24 +315,24 @@ def observed_coverage(turns):
 
 
 def run(config, output_dir, *, scenario='direct', max_model_calls=24, max_total_tokens=None, wait_seconds=180, llm_factory=None, source_packet=None):
-    if scenario not in ('direct', 'research', 'workspace', 'quality', 'public-quality', 'learning'):
+    if scenario not in ('direct', 'research', 'workspace', 'quality', 'public-quality', 'learning', 'project'):
         raise ValueError('Unknown acceptance scenario')
     if scenario == 'public-quality' and source_packet is None:
         raise ValueError('public-quality requires a frozen source packet')
-    if scenario != 'public-quality' and source_packet is not None:
-        raise ValueError('source_packet is only supported by public-quality')
+    if scenario not in ('public-quality', 'project') and source_packet is not None:
+        raise ValueError('source_packet is only supported by public-quality or project')
     if scenario == 'public-quality' and config.search_mode != 'mock':
         raise ValueError('Public evidence is frozen; live search is not allowed')
-    if scenario == 'quality' and config.search_mode != 'mock':
+    if scenario in ('quality', 'project') and config.search_mode != 'mock':
         raise ValueError('Quality evidence is fixed and synthetic; live search is not allowed')
     if scenario == 'learning' and config.search_mode != 'mock':
         raise ValueError('Learning uses this isolated conversation; live search is not allowed')
     with ExitStack() as sources:
         fixture = None
-        if scenario == 'public-quality':
+        if scenario == 'public-quality' or (scenario == 'project' and source_packet is not None):
             from scripts.public_paper_fixtures import PublicPaperFixture
             fixture = PublicPaperFixture.load(source_packet)
-        elif scenario == 'quality':
+        elif scenario in ('quality', 'project'):
             from scripts import quality_fixtures as fixture
         if fixture is not None:
             from unittest.mock import patch
@@ -371,7 +371,19 @@ def _run(config, output_dir, *, scenario, max_model_calls, max_total_tokens, wai
         # Review answers stay on disk, never in tool results or model context.
         (root/'human-facts.json').write_text(
             json.dumps(fixture.human_facts(), ensure_ascii=False, indent=2), encoding='utf-8')
-    app = WebApp(cfg, llm_factory=llm_factory or budget.client)
+    observations = []
+    active_phase = ['setup']
+    def observed_client(config):
+        client = (llm_factory or budget.client)(config)
+        original_step = client.dialogue_step
+        phase = active_phase[0]
+        def step(system, messages, tools, on_text=None):
+            observations.append({'phase':phase, 'payload':json.dumps(
+                {'system':system,'messages':messages}, ensure_ascii=False)})
+            return original_step(system, messages, tools, on_text=on_text)
+        client.dialogue_step = step
+        return client
+    app = WebApp(cfg, llm_factory=observed_client if scenario == 'project' else llm_factory or budget.client)
     server = make_server(app, 0)
     try:
         worker = threading.Thread(target=server.serve_forever, daemon=True)
@@ -395,12 +407,12 @@ def _run(config, output_dir, *, scenario, max_model_calls, max_total_tokens, wai
               'scope': 'local HTTP/backend; not browser visual acceptance or public deployment',
               'max_model_attempts': max_model_calls, 'model_attempts': 0, 'turns': [], 'checks': {}}
     if fixture is not None:
-        report['source_fixture'] = {'id': fixture.FIXTURE_ID, 'synthetic': scenario == 'quality',
+        report['source_fixture'] = {'id': fixture.FIXTURE_ID, 'synthetic': scenario == 'quality' or (scenario == 'project' and fixture.FIXTURE_ID == 'QF-1'),
             'fixed_now': fixture.FIXED_NOW, 'sha256': sha256(frozen_sources.encode('utf-8')).hexdigest(),
             'snapshot': 'source-snapshot.json', 'human_review_only': 'human-facts.json'}
         report['quality_cards'] = ['Q02', 'Q03', 'Q04'] if scenario == 'quality' else ['Q03', 'Q04']
         report['scope'] += ('; fixed synthetic evidence, not real discovery or paper correctness'
-            if scenario == 'quality' else '; frozen public PDF corpus, not live discovery or publication verification')
+            if report['source_fixture']['synthetic'] else '; frozen public PDF corpus, not live discovery or publication verification')
 
     if scenario == 'learning':
         report['semantic_review'] = 'pending'
@@ -443,6 +455,8 @@ def _run(config, output_dir, *, scenario, max_model_calls, max_total_tokens, wai
             report['transport_responses'] = json.loads(json.dumps(budget.responses))
         if max_total_tokens is not None:
             report['token_budget'] = budget.token_report()
+        if scenario == 'project':
+            (root/'model-context.json').write_text(json.dumps(observations, ensure_ascii=False, indent=2), encoding='utf-8')
         (root/'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
 
     def get(path, **params):
@@ -468,6 +482,7 @@ def _run(config, output_dir, *, scenario, max_model_calls, max_total_tokens, wai
                     'sources': result.get('source_details', []),
                     'action_receipts': result.get('action_receipts', []),
                     'execution_policy': json.loads(value['run'].get('policy') or '{}'),
+                    'web_context': result.get('web_context'),
                     'learning_exposure_status': result.get('learning_exposure_status'),
                     'warning': result.get('warning'),
                     'text_deltas': deltas, 'first_observed_text_s': first_text,
@@ -495,11 +510,12 @@ def _run(config, output_dir, *, scenario, max_model_calls, max_total_tokens, wai
         app.cancel(item_id, run_id)
         raise TimeoutError('Acceptance observation timed out; isolated runs are being cancelled')
 
-    def turn(phase, message):
-        response = client.post(base+'/api/send', json={'item': 'main', 'message': message,
+    def turn(phase, message, item='main'):
+        active_phase[0] = phase
+        response = client.post(base+'/api/send', json={'item': item, 'message': message,
                                                      'key': uuid.uuid4().hex}, timeout=5)
         response.raise_for_status()
-        return wait(phase, 'main', response.json()['id'])
+        return wait(phase, item, response.json()['id'])
 
     try:
         response = client.get(base+'/', timeout=5)
@@ -516,6 +532,9 @@ def _run(config, output_dir, *, scenario, max_model_calls, max_total_tokens, wai
             turn('compare', '比较这两篇的核心机制、实验支持和适用边界，不要只复述摘要；'
                  '说明哪些是论文结论、哪些是你的推断。')
             turn('concise-followup', '不用检索，用两句话概括这两篇最重要的区别，不要标题。')
+        elif scenario == 'project':
+            from scripts.project_closure import exercise
+            exercise(app, turn, report, observations, fixture)
         elif scenario == 'learning':
             report['learning_initial_snapshot'] = learning_snapshot()
             report['checks']['learning_started_empty'] = not report['learning_initial_snapshot']['events']
@@ -542,6 +561,7 @@ def _run(config, output_dir, *, scenario, max_model_calls, max_total_tokens, wai
                     not forgotten['active_event_ids']),
                 learning_remained_empty_after_forget=bool(recalled_ids and not after['active_event_ids'] and
                     not after['profile']),
+                learning_concrete_method_preserved=bool(first['profile'] and all(p['method'] for p in first['profile']) and {(p['technology'],p['method']) for p in first['profile']} == {(p['technology'],p['method']) for p in corrected['profile']}),
                 learning_no_verified_mastery=all(not value['verified_mastery_event_ids'] for value in observed))
             report['learning_observation'] = ('observed_learning_events' if any(value['events'] for value in observed)
                                               else 'not_established_no_events')
@@ -566,7 +586,7 @@ def _run(config, output_dir, *, scenario, max_model_calls, max_total_tokens, wai
             turn('public-concise-followup', '不用再检索，用两句话保留最重要的区别和证据限制，不要标题。')
         else:
             turn('dispatch', '请分别派发 Agent harness 和 RAG 两个独立研究任务。'
-                 '这里 harness 指模型周围的工具调用、上下文和运行控制。本轮不要联网，'
+                 '这里 harness 指模型周围的工具调用、上下文和运行控制。本轮不要联网，不改代码，'
                  '各用已有知识解释关键机制、适用边界和尚需查证之处。不要把后台研究记成我已经学会了。')
             tasks = [t for t in get('/api/tasks')['items'] if t['id'] != 'main']
             report['checks']['two_tasks_dispatched'] = len(tasks) == 2
@@ -591,7 +611,9 @@ def _run(config, output_dir, *, scenario, max_model_calls, max_total_tokens, wai
             report['checks']['children_did_not_dispatch_external_retrieval'] = len(no_external) == 2 and all(no_external)
             report['checks']['background_did_not_record_user_learning'] = len(tasks) == 2 and not get('/api/state')['learning']
             if tasks:
-                turn('summarize', '读取刚才两个任务的结果，用一小段话说明它们在哪些地方互补；不要重新研究。')
+                summary = turn('summarize', '读取刚才两个任务的结果，用一小段话说明它们在哪些地方互补；不要重新研究。')
+                report['checks']['summary_read_both_real_tasks'] = {a['params'].get('id') for a in summary['actions'] if a['action']=='read_task' and a['executed'] and not a['error']} >= {t['id'] for t in tasks}
+                report['checks']['summary_did_not_research_again'] = not any(a['executed'] and a['action'] in {'create_task','search_papers','discover_papers','search_web','read_paper','read_webpage','verify_paper'} for a in summary['actions'])
             turn('remember', '请记住我的个人研究偏好：先给结论再讲依据，发表状态未知就明确说未知。')
             before = [n for n in get('/api/state')['notes'] if n['status'] == 'active']
             report['checks']['personal_fact_saved'] = bool(before)
@@ -637,7 +659,7 @@ def main():
     parser.add_argument('--live-search', action='store_true')
     parser.add_argument('--model')
     parser.add_argument('--thinking', choices=('on', 'off'))
-    parser.add_argument('--scenario', choices=('direct', 'research', 'workspace', 'quality', 'public-quality', 'learning'), default='direct')
+    parser.add_argument('--scenario', choices=('direct', 'research', 'workspace', 'quality', 'public-quality', 'learning', 'project'), default='direct')
     parser.add_argument('--max-model-calls', type=int, default=24)
     parser.add_argument('--max-total-tokens', type=int,
                         help='Optional local DashScope reservation cap; not an account balance or exact billing limit')
@@ -655,7 +677,7 @@ def main():
         parser.error(str(error))
     if args.scenario == 'public-quality' and args.live_search:
         parser.error('public-quality uses a frozen public corpus; do not combine it with --live-search')
-    if args.scenario == 'quality' and args.live_search:
+    if args.scenario in ('quality','project') and args.live_search:
         parser.error('Quality uses frozen synthetic evidence; do not combine it with --live-search')
     if args.scenario == 'learning' and args.live_search:
         parser.error('Learning uses isolated user evidence; do not combine it with --live-search')

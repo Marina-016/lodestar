@@ -136,21 +136,91 @@ class WebApp:
             cfg = replace(cfg, model_calls_disabled=not settings['enabled'])
         return cfg
 
-    def state(self, item_id='main'):
+    @staticmethod
+    def _source_preview(value):
+        """Keep a source's identity in navigation state, never its saved body."""
+        if not isinstance(value, dict):
+            return {}
+        fields = ('url', 'title', 'date', 'venue', 'read_depth', 'read_query',
+                  'record_url', 'related_paper_url', 'authors', 'year')
+        return {key: value[key] for key in fields if value.get(key) not in (None, '', [], {})}
+
+    @classmethod
+    def _metadata_preview(cls, metadata):
+        """A bounded projection for the main conversation response.
+
+        The complete provenance stays in SQLite and is fetched only when the
+        user opens a reply's source/context panel. Sending the full saved body
+        of every tool read with every navigation makes switching tasks laggy.
+        """
+        preview = {key: metadata[key] for key in ('reference_text', 'model_configuration', 'action_receipts',
+                                                   'run_id', 'status', 'model_error', 'partial_answer')
+                   if key in metadata}
+        candidates = [cls._source_preview(source) for source in metadata.get('candidates', [])]
+        details = [cls._source_preview(source) for source in metadata.get('source_details', [])]
+        if candidates:
+            preview['candidates'] = [source for source in candidates if source]
+        if details:
+            preview['source_details'] = [source for source in details if source]
+        events = []
+        for event in metadata.get('dialogue_events', []):
+            if not isinstance(event, dict):
+                continue
+            result = event.get('result') if isinstance(event.get('result'), dict) else {}
+            params = event.get('params') if isinstance(event.get('params'), dict) else {}
+            item = {'action': event.get('action'),
+                    'params': {key: params[key] for key in ('url', 'query') if key in params},
+                    'result': {key: result[key] for key in ('error', 'record_url', 'read_depth') if key in result}}
+            sources = [cls._source_preview(source) for source in result.get('sources', [])]
+            if sources:
+                item['result']['sources'] = [source for source in sources if source]
+            if item['action'] or item['params'] or item['result']:
+                events.append(item)
+        if events:
+            preview['dialogue_events'] = events
+        preview['inspection_available'] = bool({'candidates', 'source_details', 'dialogue_events', 'web_context'} & metadata.keys())
+        return preview
+
+    def _message_view(self, row, *, compact=False):
+        value = dict(row)
+        metadata = json.loads(value['metadata'])
+        value['metadata'] = self._metadata_preview(metadata) if compact else metadata
+        return value
+
+    def message_inspection(self, item_id, message_id):
+        """Return one reply's owned provenance plus only its preceding window."""
+        if type(message_id) is not int or message_id < 1:
+            raise ValueError('消息标识无效')
+        with self.workspace() as ws:
+            item = self.item(ws, item_id)
+            rows = ws.conn.execute('''SELECT * FROM messages WHERE conversation_id=? AND id<=?
+                                      ORDER BY id DESC LIMIT 200''',
+                                   (item['conversation_id'], message_id)).fetchall()
+            if not rows or rows[0]['id'] != message_id:
+                raise LookupError('找不到这条消息')
+            return {'message_id': message_id,
+                    'messages': [self._message_view(row) for row in reversed(rows)]}
+
+    def state(self, item_id='main', *, compact=False):
         with self.workspace() as ws, ws.conn:
             item = self.item(ws, item_id)
             cfg = self.config_for(item)
             rows = ws.conn.execute('SELECT * FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 200',
                                    (item['conversation_id'],)).fetchall()
-            messages = [{**dict(r), 'metadata': json.loads(r['metadata'])} for r in reversed(rows)]
+            messages = [self._message_view(row, compact=compact) for row in reversed(rows)]
             run = ws.conn.execute('SELECT * FROM web_runs WHERE item_id=? ORDER BY rowid DESC LIMIT 1', (item_id,)).fetchone()
             selection = model_health.view(ws.conn, cfg,
                 [cfg.model, *cfg.model_profiles.values()], last_run=run)
             context_notes = memory.notes(ws, item, active_only=True)
             notes = [dict(r) for r in ws.conn.execute("""SELECT * FROM assistant_memories WHERE user_id=?
                 ORDER BY CASE priority WHEN 'P0' THEN 0 WHEN 'P1' THEN 1 ELSE 2 END,updated_at DESC,id""", (self.user(),))]
+            run_value = dict(run) if run else None
+            if compact and run_value:
+                # Completion payload can contain every stored evidence body; the
+                # polling endpoint is the only caller that needs it.
+                run_value.pop('result', None)
             return {'item': item, 'items': self.task_list(ws),
-                    'messages': messages, 'run': dict(run) if run else None, 'notes': notes,
+                    'messages': messages, 'run': run_value, 'notes': notes,
                     'context_notes': context_notes,
                     'learning': learning.profile(ws.conn, user_id=self.user(item_id)),
                     'projects': repo.list_projects(ws.conn), 'configuration': snapshot(cfg),
@@ -711,7 +781,10 @@ def make_server(app, port=8123):
                         from lodestar.web.background import view
                         with app.workspace() as ws:return self.respond(view(ws))
                     if path == '/api/state':
-                        return self.respond(app.state(query.get('item',['main'])[0]))
+                        return self.respond(app.state(query.get('item',['main'])[0], compact=True))
+                    if path == '/api/message-inspection':
+                        return self.respond(app.message_inspection(query.get('item',['main'])[0],
+                                                                     int(query.get('message',['0'])[0])))
                     if path in ('/api/history','/api/history-message'):
                         from lodestar.web import history
                         with app.workspace() as ws,ws.conn:

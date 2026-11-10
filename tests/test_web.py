@@ -114,6 +114,31 @@ class WebTest(unittest.TestCase):
         self.assertEqual(captured[0]['message'], '这个结论可靠吗？')
         self.assertEqual(captured[0]['reference_text'], 'REFERENCE_CANARY')
 
+    def test_compact_state_defers_large_provenance_until_inspection(self):
+        source = {'url': 'https://example.test/provenance', 'title': 'Provenance',
+                  'content': 'EVIDENCE_BODY_' * 3000, 'read_depth': 'web'}
+        def gathered(ws, llm, context, project_id, **callbacks):
+            callbacks['on_text']('[来源](https://example.test/provenance)')
+            return {**context, 'answer': '[来源](https://example.test/provenance)',
+                    'grounding': {},
+                    'candidates': [source],
+                    'dialogue_events': [{'action': 'read_webpage', 'params': {'url': source['url']},
+                                         'result': {'sources': [source], 'text': source['content'], 'read_depth': 'web'}}]}
+        with patch('lodestar.agent.dialogue.gather', side_effect=gathered):
+            self.wait(self.app.submit('main', 'show source', 'compact-provenance'))
+        full = self.app.state()
+        compact = self.app.state(compact=True)
+        answer = full['messages'][-1]
+        compact_answer = compact['messages'][-1]
+        self.assertIn('web_context', answer['metadata'])
+        self.assertNotIn('web_context', compact_answer['metadata'])
+        self.assertNotIn('EVIDENCE_BODY_', json.dumps(compact, ensure_ascii=False))
+        self.assertLess(len(json.dumps(compact)), len(json.dumps(full)) // 10)
+        detail = self.app.message_inspection('main', answer['id'])
+        inspected = detail['messages'][-1]
+        self.assertIn('web_context', inspected['metadata'])
+        self.assertIn('EVIDENCE_BODY_', json.dumps(inspected, ensure_ascii=False))
+
     def test_per_task_settings_and_custom_profile(self):
         a=self.app.create('A')
         self.app.update(a,{'settings':{'model':'another-model','profile':'custom','thinking':'off','enabled':False}})

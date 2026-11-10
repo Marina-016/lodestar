@@ -297,6 +297,8 @@ async function load(id = itemId) {
       }
     }
     state = data;
+    sourceCache = new Map();
+    inspectedMessages.clear();
     itemId = id;
     try {
       localStorage.setItem("lodestar-item", id);
@@ -392,6 +394,8 @@ function startPoll(run) {
       const follow = nearBottom();
       activeRun = null;
       state = response;
+      sourceCache = new Map();
+      inspectedMessages.clear();
       render();
       if (
         result.answer &&
@@ -692,9 +696,16 @@ function sourcesFor(messageId = null) {
   const message = messageId
     ? state.messages.find((m) => String(m.id) === String(messageId))
     : [...state.messages].reverse().find((m) => m.role === "assistant");
-  return sourceGroups(message, state.messages);
+  const key = String(message?.id || "latest");
+  if (sourceCache.has(key)) return sourceCache.get(key);
+  const sources = sourceGroups(message, state.messages);
+  sourceCache.set(key, sources);
+  return sources;
 }
 let sourceMessage = null;
+const inspectedMessages = new Set();
+let sourceCache = new Map();
+let pendingEvidenceUrl = "";
 function sourceHTML(source, index = 0) {
   const url = safeUrl(source.url);
   const host = displayHost(url);
@@ -712,6 +723,38 @@ function openDrawer(kind) {
   $("#drawer").hidden = false;
   $("#drawer-backdrop").hidden = false;
   $("#close-drawer").focus();
+}
+async function hydrateMessageInspection(messageId) {
+  if (!messageId || inspectedMessages.has(String(messageId))) return;
+  try {
+    const detail = await api(`/api/message-inspection?item=${encodeURIComponent(itemId)}&message=${encodeURIComponent(messageId)}`);
+    const full = new Map(detail.messages.map((message) => [String(message.id), message]));
+    state.messages = state.messages.map((message) => full.get(String(message.id)) || message);
+    inspectedMessages.add(String(messageId));
+    sourceCache = new Map();
+    if (drawerKind === "context" && String(sourceMessage) === String(messageId)) {
+      renderDrawer();
+      if (pendingEvidenceUrl) {
+        const evidence = [...document.querySelectorAll("[data-evidence-url]")]
+          .find((element) => element.dataset.evidenceUrl === pendingEvidenceUrl);
+        pendingEvidenceUrl = "";
+        if (evidence) {
+          evidence.open = true;
+          evidence.querySelector("summary")?.focus();
+          evidence.scrollIntoView({block: "nearest"});
+        }
+      }
+    }
+  } catch (error) {
+    toast("未能加载这条回答的来源详情：" + error.message);
+  }
+}
+function openContext(messageId = null, evidenceUrl = "") {
+  openDrawer("context");
+  sourceMessage = messageId || [...state.messages].reverse().find((message) => message.role === "assistant")?.id || null;
+  pendingEvidenceUrl = evidenceUrl;
+  renderDrawer();
+  void hydrateMessageInspection(sourceMessage);
 }
 function closeDrawer() {
   if (!drawerKind) return;
@@ -739,7 +782,8 @@ function renderDrawer() {
     const config =
       message?.metadata?.model_configuration || state.configuration;
     const web = message?.metadata?.web_context;
-    target.innerHTML = `<section class="drawer-section"><h3>${message ? "所选回答的范围" : "当前任务范围"}</h3><div class="detail-row"><span>当前任务</span><span>${esc(state.item.name)}</span></div><div class="detail-row"><span>对话</span><span>当前任务 · 变更边界后的近期记录</span></div><div class="detail-row"><span>记忆</span><span>${used ? used.length + " 条本轮带入" : state.context_notes.length + " 条当前可用"}</span></div><div class="detail-row"><span>模型</span><span>${esc(config.model)}</span></div>${web?.history_after ? '<p class="panel-info">本轮已跳过记忆变更前的模型上下文，历史聊天仍可查看。</p>' : ""}<p class="panel-info">同一用户共享个人记忆，同项目共享项目记忆。其他任务的结果可由模型按需读取。</p></section><section class="drawer-section"><h3>项目归属 <button class="subtle" id="register-project">＋ 登记</button></h3><select id="bind-project" aria-label="绑定项目">${projectOptions(state.item.project_id)}</select><p class="fineprint">更换项目会重新建立后续上下文；登记与绑定不会自动读取本地代码。</p></section><section class="drawer-section"><h3>参考来源 <span>${sources.length || ""}</span></h3>${sources.length ? sources.map(sourceHTML).join("") : '<div class="empty-state">这条回答没有引用来源。</div>'}<p class="panel-info">仅列出这条回答引用的链接；引用不代表内容已经核实。</p></section>${retrieval.length ? `<details class="retrieval-records drawer-section"><summary>检索记录 <span>${retrieval.length}</span></summary><p class="panel-info">本轮检索或阅读过、但未在回答中引用的页面。</p>${retrieval.map(sourceHTML).join("")}</details>` : ""}`;
+    const loading = message?.metadata?.inspection_available && !inspectedMessages.has(String(message.id));
+    target.innerHTML = `<section class="drawer-section"><h3>${message ? "所选回答的范围" : "当前任务范围"}</h3><div class="detail-row"><span>当前任务</span><span>${esc(state.item.name)}</span></div><div class="detail-row"><span>对话</span><span>当前任务 · 变更边界后的近期记录</span></div><div class="detail-row"><span>记忆</span><span>${used ? used.length + " 条本轮带入" : state.context_notes.length + " 条当前可用"}</span></div><div class="detail-row"><span>模型</span><span>${esc(config.model)}</span></div>${web?.history_after ? '<p class="panel-info">本轮已跳过记忆变更前的模型上下文，历史聊天仍可查看。</p>' : ""}<p class="panel-info">同一用户共享个人记忆，同项目共享项目记忆。其他任务的结果可由模型按需读取。</p></section><section class="drawer-section"><h3>项目归属 <button class="subtle" id="register-project">＋ 登记</button></h3><select id="bind-project" aria-label="绑定项目">${projectOptions(state.item.project_id)}</select><p class="fineprint">更换项目会重新建立后续上下文；登记与绑定不会自动读取本地代码。</p></section><section class="drawer-section"><h3>参考来源 <span>${sources.length || ""}</span></h3>${sources.length ? sources.map(sourceHTML).join("") : '<div class="empty-state">这条回答没有引用来源。</div>'}${loading ? '<p class="panel-info">正在加载本轮保存的证据与上下文…</p>' : ''}<p class="panel-info">仅列出这条回答引用的链接；引用不代表内容已经核实。</p></section>${retrieval.length ? `<details class="retrieval-records drawer-section"><summary>检索记录 <span>${retrieval.length}</span></summary><p class="panel-info">本轮检索或阅读过、但未在回答中引用的页面。</p>${retrieval.map(sourceHTML).join("")}</details>` : ""}`;
     $("#bind-project").onchange = async (e) => {
       try { await api("/api/item", {item: itemId, project_id: Number(e.target.value) || null}); await load(); }
       catch (error) { toast(error.message); renderDrawer(); }
@@ -864,9 +908,7 @@ $("#messages").onclick = async (e) => {
     const article = link.closest("[data-message]");
     const source = article && sourcesFor(article.dataset.message).references.find(s=>safeUrl(s.url)===safeUrl(link.href));
     if (source) {
-      e.preventDefault(); openDrawer("context"); sourceMessage=article.dataset.message; renderDrawer();
-      const evidence=[...document.querySelectorAll("[data-evidence-url]")].find(el=>el.dataset.evidenceUrl===source.url);
-      if(evidence) { evidence.open=true; evidence.querySelector("summary").focus(); evidence.scrollIntoView({block:"nearest"}); }
+      e.preventDefault(); openContext(article.dataset.message, source.url);
       return;
     }
   }
@@ -906,9 +948,7 @@ $("#messages").onclick = async (e) => {
     return;
   }
   if (b.classList.contains("inspect-answer")) {
-    openDrawer("context");
-    sourceMessage = b.dataset.id;
-    renderDrawer();
+    openContext(b.dataset.id);
   }
 };
 function insertQuote(text) {
@@ -941,16 +981,14 @@ function updateQuoteSelection() {
 }
 document.addEventListener("selectionchange", () => requestAnimationFrame(updateQuoteSelection));
 $("#quote-selection").onclick = () => insertQuote(selectedAnswerQuote);
-$("#context").onclick = () => openDrawer("context");
+$("#context").onclick = () => openContext();
 $("#task-center").onclick = () => openDrawer("tasks");
 $("#insight-board").onclick = (event) => {
   const action = event.target.closest("[data-insight]")?.dataset.insight;
   if (action === "sources") {
-    openDrawer("context");
-    sourceMessage = latestCitedMessage(state.messages);
-    return renderDrawer();
+    return openContext(latestCitedMessage(state.messages));
   }
-  if (action === "context") return openDrawer("context");
+  if (action === "context") return openContext();
   if (action === "learning") return openDrawer("memory");
   if (action === "answers") $("#messages").scrollIntoView({ behavior: "smooth", block: "start" });
 };

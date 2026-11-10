@@ -96,6 +96,7 @@ class ConversationAgent:
                       'truncated': '达到输出长度限制，回答尚未完成',
                       'tool_budget': '工具调用预算已耗尽，模型未完成回答',
                       'authentication': '模型服务鉴权失败', 'rate_limit': '模型服务限流',
+                      'request_rejected': '模型服务拒绝了本轮请求；请重试或换一种更具体的说法',
                       'quota_exhausted': '此模型的免费额度已耗尽，请在模型设置中选择其他模型；不会自动付费回退',
                       'model_unavailable': '服务明确返回模型不存在或不可用，请在模型设置中更换模型',
                       'configuration': '模型或思考预算配置不兼容，请检查 /settings 后切换模式重试',

@@ -147,6 +147,8 @@ def _validate(name, arguments, project_id, extra_tools=None, dynamic_search=Fals
 _CURRENT_CUES = re.compile(r'(?:最新|最近|近期|今天|本周|本月|刚刚|新模型|发布|上线|可用|价格|新闻|动态|现状|\b(?:latest|recent|today|this week|new model|release[ds]?|announc(?:e|ed|ement)|available|pricing|news|current)\b)', re.I)
 _PAPER_CUES = re.compile(r'(?:论文|paper|arxiv|研究|research)', re.I)
 _COMMUNITY_CUES = re.compile(r'(?:hacker\s*news|\bhn\b|社区|开发者反应|开发者讨论)', re.I)
+_KNOWN_CURRENT_ENTITY = re.compile(r'\b(?:openai|chatgpt|gpt|anthropic|claude|google|gemini|deepmind|meta|llama|microsoft|copilot|xai|grok|github)\b|github\.com/', re.I)
+_GENERIC_CURRENT_SEARCH = re.compile(r'(?:新闻|动态|新模型|\b(?:news|new model)\b)', re.I)
 
 
 def _dynamic_sources(message):
@@ -157,7 +159,11 @@ def _dynamic_sources(message):
         return ('papers',)
     if _COMMUNITY_CUES.search(message):
         return ('web', 'hn')
-    return ('official', 'github')
+    if _KNOWN_CURRENT_ENTITY.search(message):
+        return ('official', 'github')
+    # "他最近那个" has no search subject. Do not turn it into an unrelated
+    # repository query; the model can ask a clarifying question instead.
+    return ('web',) if _GENERIC_CURRENT_SEARCH.search(message) else ()
 
 
 

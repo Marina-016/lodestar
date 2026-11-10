@@ -773,7 +773,7 @@ def make_server(app, port=8123):
                         template = 'index.html' if path=='/' else 'workbench.html' if path in ('/research','/history') else 'library.html'
                         page = (STATIC/template).read_text(encoding='utf-8').replace('__TOKEN__',app.token)
                         return self.respond(page.encode(),mime='text/html; charset=utf-8')
-                    if path in ('/app.mjs','/markdown.mjs','/sources.mjs','/insights.mjs','/actions.mjs','/quote.mjs','/timeline.mjs','/models.mjs','/library.mjs','/library-views.mjs','/workbench.mjs','/library.css','/style.css','/icon.svg'):
+                    if path in ('/app.mjs','/markdown.mjs','/sources.mjs','/insights.mjs','/actions.mjs','/quote.mjs','/timeline.mjs','/followups.mjs','/models.mjs','/library.mjs','/library-views.mjs','/workbench.mjs','/library.css','/style.css','/icon.svg'):
                         mime = 'text/css' if path.endswith('.css') else 'image/svg+xml' if path.endswith('.svg') else 'text/javascript'
                         return self.respond((STATIC/path[1:]).read_bytes(),mime=mime+'; charset=utf-8')
                     if path == '/api/service':

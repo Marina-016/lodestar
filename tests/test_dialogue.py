@@ -94,6 +94,12 @@ class DialogueTests(unittest.TestCase):
             self.run_dialogue(context={'message': 'OpenAI 是做什么的？', 'papers': []})
         tool.assert_not_called()
 
+    def test_ambiguous_freshness_reference_does_not_search_unrelated_repositories(self):
+        self.llm.dialogue_step.return_value = answer('请说明具体对象。')
+        with patch('lodestar.tools.registry.call_tool') as tool:
+            self.run_dialogue(context={'message': '你知道他最近那个事情吗？', 'papers': []})
+        tool.assert_not_called()
+
     def test_user_reference_is_labeled_data_separate_from_the_question(self):
         from lodestar.agent.evidence import answer_context
         packet = answer_context({'current_time': '2026-11-09T00:00:00+00:00',

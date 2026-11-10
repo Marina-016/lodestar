@@ -171,7 +171,15 @@ def _openai_step(client, system, messages, tools, on_text):
     with transport.post(adapter.base_url + '/chat/completions',
             headers=headers, json=payload,
             timeout=min(client.config.llm_timeout_s, conversation_timeout_s), stream=True) as response:
-        raise_for_status(response)
+        try:
+            raise_for_status(response)
+        except LLMError as error:
+            # A valid DianDian key may still see a 403 for one streaming
+            # payload. Keep that distinct from a failed key: callers should
+            # offer retry/rewording, not falsely tell the user to replace it.
+            if client._diandian is not None and response.status_code == 403 and error.code == 'http_error':
+                raise LLMError('DianDian rejected this dialogue payload', code='request_rejected') from error.__cause__
+            raise
         for line in response.iter_lines():
             if time.monotonic() >= deadline:
                 raise LLMError('Dialogue request exceeded configured timeout', code='timeout')

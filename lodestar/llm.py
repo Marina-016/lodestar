@@ -40,7 +40,7 @@ def error_details(error):
     cause_type = type(cause).__name__ if cause else None
     from lodestar.providers.errors import from_exception
     code = from_exception(cause) or error.code
-    if code in ('quota_exhausted', 'model_unavailable'):
+    if code in ('quota_exhausted', 'model_unavailable', 'request_rejected'):
         pass
     elif status in (401, 403):
         code = 'authentication'

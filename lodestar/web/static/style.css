@@ -296,6 +296,16 @@ main.is-empty .scroll-area { display: flex; align-items: safe center; }
 .message-actions button { display: flex; align-items: center; gap: 5px; padding: 5px 8px; border-radius: 8px; font-size: 11px; color: var(--muted); min-height: 27px; }
 .message-actions button:hover { color: var(--ink); background: var(--surface); }
 .message-actions svg { width: 13px; height: 13px; }
+.next-steps { margin: 14px 0 2px; max-width: 620px; }
+.next-steps-label { display: block; margin: 0 0 6px; font-size: 11px; color: var(--tertiary); }
+.next-steps-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.next-step { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 9px 10px; text-align: left; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); }
+.next-step:hover { border-color: #cacacf; background: #f7f7f8; transform: translateY(-1px); }
+.next-step-index { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 5px; background: var(--line); color: var(--secondary); font-size: 10px; font-variant-numeric: tabular-nums; }
+.next-step strong, .next-step small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.next-step strong { font-size: 12px; font-weight: 600; }
+.next-step small { margin-top: 2px; color: var(--muted); font-size: 10px; }
+.next-step-arrow svg { width: 13px; height: 13px; color: var(--tertiary); }
 .source-count { font-size: 10px; background: #ededf0; border-radius: 5px; min-width: 18px; padding: 0 5px; color: var(--muted); line-height: 18px; font-variant-numeric: tabular-nums; }
 .subtle { font-size: 12px; color: var(--muted); padding: 5px 0; line-height: 1.6; }
 .subtle:hover { color: var(--ink); }
@@ -516,6 +526,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: non
   .user-bubble { font-size: 14px; max-width: 90%; padding: 11px 15px; }
   .answer h2 { font-size: 19px; }
   .message-actions button { min-height: 34px; }
+  .next-steps-options { grid-template-columns: 1fr; }
   .memory-form-grid { grid-template-columns: 1fr; gap: 3px; }
   .drawer { border-radius: 22px; }
   .drawer > header { padding: 22px 20px 19px; }

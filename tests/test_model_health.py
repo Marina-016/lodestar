@@ -53,6 +53,13 @@ class ErrorClassificationTests(unittest.TestCase):
             self.assertEqual(error_details(error)['code'], 'model_unavailable')
         self.assertIsNone(classify({'error': {'message': 'The last model said quota is exhausted in the prompt'}}))
 
+    def test_payload_rejection_is_not_misreported_as_a_bad_key(self):
+        cause = requests.HTTPError('forbidden')
+        cause.response = Mock(status_code=403)
+        error = LLMError('safe', code='request_rejected')
+        error.__cause__ = cause
+        self.assertEqual(error_details(error)['code'], 'request_rejected')
+
     def test_stream_error_parser_is_bounded_and_does_not_store_provider_body(self):
         response = requests.Response()
         response.status_code = 403

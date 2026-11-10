@@ -5,6 +5,7 @@ import { actionHTML } from "./actions.mjs";
 import { defaultModel, modelOptionsHTML, hiddenModelsHTML } from "./models.mjs";
 import { quoteMarkdown } from "./quote.mjs";
 import { beginsNewChat, sessionDateLabel, timestampLabel } from "./timeline.mjs";
+import { suggestedPrompts } from "./followups.mjs";
 const $ = (s) => document.querySelector(s),
   icon = (name) => `<svg aria-hidden="true"><use href="#i-${name}"/></svg>`;
 const token = $('meta[name="lodestar-token"]').content;
@@ -235,8 +236,11 @@ function renderInsights() {
 function assistant(text, config, error = false, id = "draft", receipts, message = {}) {
   const count = id === "draft" ? 0 : sourcesFor(id).references.length;
   const answer = text ? markdown(text) : '<div class="typing-dots" aria-hidden="true"><span></span><span></span><span></span></div>';
+  const userPrompt = [...state.messages].slice(0, state.messages.findIndex(m => String(m.id) === String(id))).reverse().find(m => m.role === "user")?.content || "";
+  const nextSteps = id === "draft" ? [] : suggestedPrompts({answer: text, userPrompt, sourceCount: count, error});
+  const followups = nextSteps.length ? `<section class="next-steps" aria-label="推荐的下一步"><span class="next-steps-label">接下来可以</span><div class="next-steps-options">${nextSteps.map((step, index) => `<button type="button" class="next-step" data-id="${esc(id)}" data-next-prompt="${esc(step.prompt)}"><span class="next-step-index">${index + 1}</span><span><strong>${esc(step.title)}</strong><small>${esc(step.detail)}</small></span><span class="next-step-arrow">${icon("arrow")}</span></button>`).join("")}</div></section>` : "";
   const actions = id === "draft" ? "" : `<div class="message-actions">${messageTime(message)}<button class="subtle copy-answer" data-id="${id}" title="复制完整回答">${icon("copy")}<span>复制</span></button><button class="subtle quote-answer" data-id="${id}" title="将整段回答引用到输入框">${icon("paper")}<span>引用整段</span></button><button class="subtle inspect-answer" data-id="${id}" title="查看本轮来源与上下文">${icon("context")}<span>来源与上下文</span>${count ? `<span class="source-count">${count}</span>` : ""}</button></div>`;
-  return `<article class="message message-assistant ${error ? "message-error" : ""}" data-message="${id}"><div class="assistant-meta"><span class="assistant-mark">${icon("star")}</span><span>Lodestar</span></div><div class="answer">${answer}</div><div class="execution">${actionHTML(receipts, { pending: id === "draft" })}</div>${actions}</article>`;
+  return `<article class="message message-assistant ${error ? "message-error" : ""}" data-message="${id}"><div class="assistant-meta"><span class="assistant-mark">${icon("star")}</span><span>Lodestar</span></div><div class="answer">${answer}</div><div class="execution">${actionHTML(receipts, { pending: id === "draft" })}</div>${followups}${actions}</article>`;
 }
 function render() {
   $('#memory').href='/memory?item='+encodeURIComponent(itemId);
@@ -916,6 +920,19 @@ $("#messages").onclick = async (e) => {
   }
   const b = e.target.closest("button");
   if (!b) return;
+  if (b.dataset.nextPrompt) {
+    if (busy()) { toast("当前回答尚未结束，请稍后选择下一步"); return; }
+    const prompt = $("#prompt");
+    if (prompt.value.trim()) {
+      prompt.focus();
+      toast("已保留你正在编辑的内容；可手动替换为这条建议");
+      return;
+    }
+    prompt.value = b.dataset.nextPrompt;
+    prompt.dispatchEvent(new Event("input", { bubbles: true }));
+    $("#composer").requestSubmit();
+    return;
+  }
   if (b.dataset.receiptItem) return load(b.dataset.receiptItem);
   if (b.dataset.receiptMemory) {
     memoryFocusId = b.dataset.receiptMemory;

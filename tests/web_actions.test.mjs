@@ -4,8 +4,8 @@ import { actionHTML } from "../lodestar/web/static/actions.mjs";
 
 test("legacy messages are not mislabeled as audited no-ops", () => {
   assert.equal(actionHTML(undefined), "");
-  assert.match(actionHTML([]), /本轮未派发任务、未更新记忆/);
-  assert.match(actionHTML([], { pending: true }), /尚无.*回执/);
+  assert.equal(actionHTML([]), "");
+  assert.equal(actionHTML([], { pending: true }), "");
 });
 test("submission is not completion, and partial creation is not a dispatch", () => {
   const submitted = actionHTML([{ action: "create_task", id: "a", name: "Harness", status: "submitted", external_retrieval: "blocked" }]);
@@ -14,9 +14,10 @@ test("submission is not completion, and partial creation is not a dispatch", () 
   assert.doesNotMatch(submitted, /研究完成/);
   assert.match(actionHTML([{ action: "create_task", id: "b", name: "RAG", status: "created_not_submitted" }]), /未启动/);
 });
-test("receipts escape task identifiers and names, never show memory content", () => {
+test("receipts escape task identifiers and never embed memory content", () => {
   const html = actionHTML([{ action: "create_task", id: '\"><script>', name: "<img src=x>", status: "submitted" }, { action: "manage_memory", id: "m", revision: 2, content: "PRIVATE_CANARY" }]);
   assert.doesNotMatch(html, /<script>|<img|PRIVATE_CANARY/);
-  assert.match(html, /修订 2/);
+  assert.match(html, /已新增记忆.*查看详情/);
+  assert.match(actionHTML([{ action: "manage_memory", id: "m", change: "updated" }]), /已更新记忆/);
   assert.match(actionHTML([{ action: "manage_memory", deleted: true }]), /已遗忘记忆/);
 });

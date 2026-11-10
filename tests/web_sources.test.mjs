@@ -116,3 +116,31 @@ test("original-message links allow only the owned history route",()=>{
  assert.ok(!markdown('[bad](/history?item=x&message=1&redirect=https://evil.example)').includes('<a'));
  assert.deepEqual(linkedUrls('[old](/history?item=main&message=1)'),[]);
 });
+
+test("external URLs render as compact source actions instead of exposed URLs", () => {
+  const url = "https://papers.example/path/to/paper?private-looking-query=1";
+  const html = markdown(url);
+  assert.ok(html.includes("打开来源"));
+  assert.ok(html.includes("papers.example"));
+  assert.ok(!html.includes(`>${url}<`));
+  const evidence = evidenceHTML({ url, evidence_readings: [{ text: "excerpt" }] });
+  assert.ok(evidence.includes("来源 · papers.example"));
+  assert.ok(!evidence.replace(/data-evidence-url="[^"]+"/, "").includes(url));
+});
+test("quoted multi-line prompts preserve headings, dividers and fenced code", () => {
+  const text = `> **任务：重构记忆管理系统**
+>
+> ### 现状
+>
+> ---
+>
+> \`\`\`arduino
+> CueMem locator
+> \`\`\``;
+  const html = markdown(text);
+  assert.ok(html.includes("<blockquote>"));
+  assert.ok(html.includes("<h3>现状</h3>"));
+  assert.ok(html.includes("<hr>"));
+  assert.ok(html.includes("<pre><code>CueMem locator</code></pre>"));
+  assert.ok(!html.includes("### 现状"));
+});

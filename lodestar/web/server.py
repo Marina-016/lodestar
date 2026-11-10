@@ -73,7 +73,7 @@ class WebApp:
         self.closing = False
         self.instance_id=uuid.uuid4().hex
         self.scheduler=None
-        with self.workspace() as ws:
+        with self.workspace() as ws, ws.conn:
             ws.conn.executescript(SCHEMA)
             ws.conn.executescript(model_health.SCHEMA)
             memory.initialize(ws)
@@ -137,7 +137,7 @@ class WebApp:
         return cfg
 
     def state(self, item_id='main'):
-        with self.workspace() as ws:
+        with self.workspace() as ws, ws.conn:
             item = self.item(ws, item_id)
             cfg = self.config_for(item)
             rows = ws.conn.execute('SELECT * FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 200',
@@ -146,10 +146,12 @@ class WebApp:
             run = ws.conn.execute('SELECT * FROM web_runs WHERE item_id=? ORDER BY rowid DESC LIMIT 1', (item_id,)).fetchone()
             selection = model_health.view(ws.conn, cfg,
                 [cfg.model, *cfg.model_profiles.values()], last_run=run)
-            notes = [dict(r) for r in ws.conn.execute('SELECT * FROM assistant_memories WHERE user_id=? ORDER BY updated_at DESC,id', (self.user(),))]
+            context_notes = memory.notes(ws, item, active_only=True)
+            notes = [dict(r) for r in ws.conn.execute("""SELECT * FROM assistant_memories WHERE user_id=?
+                ORDER BY CASE priority WHEN 'P0' THEN 0 WHEN 'P1' THEN 1 ELSE 2 END,updated_at DESC,id""", (self.user(),))]
             return {'item': item, 'items': self.task_list(ws),
                     'messages': messages, 'run': dict(run) if run else None, 'notes': notes,
-                    'context_notes': memory.notes(ws, item, active_only=True),
+                    'context_notes': context_notes,
                     'learning': learning.profile(ws.conn, user_id=self.user(item_id)),
                     'projects': repo.list_projects(ws.conn), 'configuration': snapshot(cfg),
                     'models': selection['models'], 'model_selection': selection,
@@ -209,6 +211,18 @@ class WebApp:
     def library(self):
         with self.workspace() as ws:
             return {'projects':projects.catalog(ws),'items':self.task_list(ws)}
+
+    def paper_library(self, data):
+        from lodestar.memory import papers
+        action = data.get('action', 'save')
+        with self.lock, self.workspace() as ws, ws.conn:
+            if self.closing:
+                raise Conflict('服务正在关闭，请稍后再操作资料库')
+            if action == 'save':
+                return papers.save(ws.conn, data)
+            if action == 'attach_inbox':
+                return papers.attach_inbox(ws.conn, data.get('project_id'), data.get('recommendation_id'))
+            raise ValueError('资料库操作无效')
 
     def save_project(self, data):
         with self.lock, self.workspace() as ws, ws.conn:
@@ -412,17 +426,23 @@ class WebApp:
         with self.lock, self.workspace() as ws, ws.conn:
             memory.edit_learning(ws, data)
 
-    def submit(self, item_id, message, key, *, background=False, policy=None):
+    def submit(self, item_id, message, key, *, reference_text='', background=False, policy=None):
         # Shutdown must not release the workspace while a committed queued run
         # is still between persistence, worker startup and startup-error cleanup.
         with self.lock:
             if self.closing:
                 raise Conflict('服务正在关闭；请重启后再发送')
-            return self._submit_locked(item_id, message, key, background=background, policy=policy)
+            return self._submit_locked(item_id, message, key, reference_text=reference_text,
+                                       background=background, policy=policy)
 
-    def _submit_locked(self, item_id, message, key, *, background, policy):
+    def _submit_locked(self, item_id, message, key, *, reference_text, background, policy):
         if not isinstance(message, str) or not message.strip() or len(message) > 24000:
             raise ValueError('请输入 1–24000 字的问题')
+        if not isinstance(reference_text, str):
+            raise ValueError('参考文本必须是文字')
+        reference_text = reference_text.strip()
+        if len(message) + len(reference_text) > 24000:
+            raise ValueError('问题与参考文本合计不能超过 24000 字')
         if not isinstance(key, str) or not 1 <= len(key) <= 100:
             raise ValueError('提交标识无效')
         with self.lock, self.workspace() as ws, ws.conn:
@@ -457,7 +477,7 @@ class WebApp:
             with self.lock:
                 if self.closing:
                     raise Conflict('服务正在关闭；本轮未启动')
-                worker = threading.Thread(target=work, args=(run_id,item,cfg,message,signal,background), daemon=True)
+                worker = threading.Thread(target=work, args=(run_id,item,cfg,message,reference_text,signal,background), daemon=True)
                 self.workers[run_id] = worker
                 worker.start()
         except Exception:
@@ -475,7 +495,8 @@ class WebApp:
                         (status, json.dumps(failure, ensure_ascii=False), run_id))
                     if updated.rowcount:
                         repo.add_message(ws.conn, item['conversation_id'], 'user', message,
-                                         metadata={'run_id': run_id})
+                                         metadata={'run_id': run_id,
+                                                   **({'reference_text': reference_text} if reference_text else {})})
                         repo.add_message(ws.conn, item['conversation_id'], 'assistant', answer, kind=status,
                                          metadata={'run_id': run_id, 'status': status, **failure})
             finally:
@@ -546,7 +567,7 @@ class WebApp:
         return [json.loads(r['data']) for r in ws.conn.execute(
             "SELECT data FROM web_events WHERE run_id=? AND kind='action' ORDER BY id", (run_id,))]
 
-    def execute(self, run_id, item, cfg, message, signal, background=False):
+    def execute(self, run_id, item, cfg, message, reference_text, signal, background=False):
         started_at = time.time()
         def check_cancel():
             if signal.is_set():
@@ -564,12 +585,16 @@ class WebApp:
                 # A queued cancellation still records its input and stopped answer,
                 # but never constructs a provider client or starts inference.
                 llm = None if signal.is_set() else self.llm_factory(cfg)
-                from lodestar.memory.assistant import prompt_rows, select_rows
+                from lodestar.memory.assistant import mark_accessed, prompt_rows, reconstruct_context, select_rows
                 from lodestar.web.tools import assistant_tools
-                note_rows = select_rows(memory.notes(ws, item, active_only=True), message)
-                notes = prompt_rows(note_rows)
+                with ws.conn:
+                    note_rows = select_rows(memory.notes(ws, item, active_only=True), message)
+                    mark_accessed(ws.conn, note_rows)
+                    note_evidence = reconstruct_context(ws.conn, note_rows, message, item_id=item['id'])
+                notes = prompt_rows(note_rows, note_evidence)
                 result = self.agent_factory(ws,llm).turn(item['conversation_id'],message,
                     user_id=self.user(item['id']), memory_notes=notes, check_cancel=check_cancel,
+                    reference_text=reference_text,
                     history_after=item['context_after'], track_exposure=not background,
                     execution_policy=policy,
                     assistant_tools=assistant_tools(self, item, run_id, message, check_cancel, user_authored=not background, execution_policy=policy),
@@ -677,7 +702,7 @@ def make_server(app, port=8123):
                         template = 'index.html' if path=='/' else 'workbench.html' if path in ('/research','/history') else 'library.html'
                         page = (STATIC/template).read_text(encoding='utf-8').replace('__TOKEN__',app.token)
                         return self.respond(page.encode(),mime='text/html; charset=utf-8')
-                    if path in ('/app.mjs','/markdown.mjs','/sources.mjs','/actions.mjs','/models.mjs','/library.mjs','/library-views.mjs','/workbench.mjs','/library.css','/style.css','/icon.svg'):
+                    if path in ('/app.mjs','/markdown.mjs','/sources.mjs','/insights.mjs','/actions.mjs','/quote.mjs','/timeline.mjs','/models.mjs','/library.mjs','/library-views.mjs','/workbench.mjs','/library.css','/style.css','/icon.svg'):
                         mime = 'text/css' if path.endswith('.css') else 'image/svg+xml' if path.endswith('.svg') else 'text/javascript'
                         return self.respond((STATIC/path[1:]).read_bytes(),mime=mime+'; charset=utf-8')
                     if path == '/api/service':
@@ -702,6 +727,17 @@ def make_server(app, port=8123):
                                 research.catalog(ws,project_id,query.get('state',[''])[0],int(query.get('page',['1'])[0])))
                     if path == '/api/library':
                         return self.respond(app.library())
+                    if path == '/api/paper-library':
+                        from lodestar.memory import papers
+                        with app.workspace() as ws:
+                            if query.get('id'):
+                                return self.respond(papers.detail(ws.conn, int(query['id'][0]),
+                                                                  int(query['project'][0]) if query.get('project') else None))
+                            return self.respond(papers.catalog(ws.conn, query=query.get('query',[''])[0],
+                                                              project_id=query.get('project',[None])[0],
+                                                              status=query.get('status',[''])[0],
+                                                              priority=query.get('priority',[''])[0],
+                                                              page=int(query.get('page',['1'])[0])))
                     if path == '/api/project':
                         with app.workspace() as ws:
                             return self.respond(projects.detail(ws,int(query.get('id',['0'])[0])))
@@ -793,6 +829,8 @@ def make_server(app, port=8123):
                         return self.respond(project_files.save(ws,project_id,data))
                 if path == '/api/project-import':
                     return self.respond({'id':app.import_project(data)})
+                if path == '/api/paper-library':
+                    return self.respond(app.paper_library(data))
                 item_id = data.get('item','main')
                 if not isinstance(item_id,str):
                     raise ValueError('空间标识无效')
@@ -819,7 +857,8 @@ def make_server(app, port=8123):
                 elif path == '/api/cancel':
                     return self.respond({'status':app.cancel(item_id,data.get('run'))})
                 elif path == '/api/send':
-                    return self.respond({'id':app.submit(item_id,data.get('message'),data.get('key'))},202)
+                    return self.respond({'id':app.submit(item_id,data.get('message'),data.get('key'),
+                                                           reference_text=data.get('reference',''))},202)
                 else:
                     return self.respond({'error':'接口不存在'},404)
                 return self.respond({'ok':True})

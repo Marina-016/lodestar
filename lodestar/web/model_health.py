@@ -24,6 +24,8 @@ def service_key(cfg):
     """Separate providers, endpoints, accounts and mock; never persist credentials."""
     if cfg.llm_provider == 'dashscope':
         endpoint, credentials = cfg.llm_base_url, [os.getenv('DASHSCOPE_API_KEY', '')]
+    elif cfg.llm_provider == 'diandian':
+        endpoint, credentials = cfg.llm_base_url, [os.getenv('DIANDIAN_API_KEY', '')]
     else:
         endpoint = cfg.llm_base_url or os.getenv('ANTHROPIC_BASE_URL', 'https://api.anthropic.com')
         credentials = [os.getenv('ANTHROPIC_API_KEY', ''), os.getenv('ANTHROPIC_AUTH_TOKEN', '')]

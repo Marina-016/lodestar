@@ -134,6 +134,7 @@
           </div>
         </header>
         <div class="scroll-area" id="scroll-area">
+          <section class="insight-board" id="insight-board" aria-label="研究概览" hidden></section>
           <section class="welcome" id="welcome">
             <div class="welcome-mark">
               <svg><use href="#i-star" /></svg>
@@ -176,6 +177,13 @@
             aria-live="polite"
           ></div>
           <form class="composer" id="composer">
+            <section class="reference-input" id="reference-input" hidden aria-label="参考文本">
+              <div class="reference-input-head">
+                <label for="reference-text">参考文本</label><span id="reference-count"></span>
+                <button type="button" class="subtle" id="clear-reference">清除</button>
+              </div>
+              <textarea id="reference-text" rows="3" maxlength="24000" placeholder="引用的回答或较长的粘贴内容会放在这里；下方只写你的问题。"></textarea>
+            </section>
             <label class="sr-only" for="prompt">输入研究问题</label
             ><textarea
               id="prompt"
@@ -184,6 +192,7 @@
             ></textarea>
             <div class="composer-toolbar">
               <div class="model-controls">
+                <button type="button" class="reference-button" id="add-reference" title="添加引用或参考文本">＋ 参考文本</button>
                 <button type="button" class="model-button" id="model-settings" aria-haspopup="dialog" title="模型与推理设置">
                   <span class="model-indicator"></span
                   ><span id="model-label">加载模型…</span
@@ -216,6 +225,9 @@
         </div>
       </main>
     </div>
+    <button id="quote-selection" class="quote-selection" type="button" hidden>
+      <svg aria-hidden="true"><use href="#i-paper" /></svg><span>引用选中内容</span>
+    </button>
     <div class="nav-backdrop" id="nav-backdrop" hidden></div>
     <div class="drawer-backdrop" id="drawer-backdrop" hidden></div>
     <aside
@@ -356,6 +368,9 @@
         <p id="note-scope"></p>
         <label for="note-range">使用范围</label><select id="note-range"><option value="personal">个人 · 所有任务可用</option><option value="project">项目 · 同项目任务可用</option><option value="task">仅当前任务</option></select>
         <label for="note-project" id="note-project-label" hidden>所属项目</label><select id="note-project" hidden></select>
+        <div class="memory-form-grid"><label for="note-tier">保留层级</label><label for="note-priority">优先级</label><select id="note-tier"><option value="durable">长期</option><option value="session">短期 · 闲置一天后处理</option></select><select id="note-priority"><option value="P0">P0 · 核心事实</option><option value="P1" selected>P1 · 参考信息</option><option value="P2">P2 · 临时结论</option></select></div>
+        <label for="note-kind">记忆类型</label><select id="note-kind"><option value="preference">偏好</option><option value="fact">事实</option><option value="claim">主张 / 判断</option><option value="reference">参考资料</option><option value="note" selected>普通备注</option></select>
+        <label for="note-reference-date">资料日期（可选）</label><input id="note-reference-date" type="date"><p class="fineprint">论文或网页请填写发布日期；超过其复核时间会提示核验。参考资料只作为检索线索，细节会回到来源确认。</p>
         <label for="note-content">希望保留的偏好或事实</label
         ><textarea
           id="note-content"
@@ -365,7 +380,7 @@
           required
           placeholder="例如：解释新方法时，先给一个具体例子。"
         ></textarea>
-        <p class="fineprint">修改、停用或删除会重新建立受影响任务的后续上下文；历史聊天保留。普通备注不会成为掌握证据。</p>
+        <p class="fineprint">短期 P0/P1 闲置一天后转为长期；短期 P2 会归档。长期 P1 90 天后待核实；长期 P2 30 天后降级、180 天归档。普通备注不会成为掌握证据。</p>
         <div class="dialog-actions">
           <button type="button" class="secondary" data-close="note-dialog">
             取消</button

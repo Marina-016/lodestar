@@ -87,6 +87,7 @@ class LLMClient:
             raise LLMError("Model calls are disabled by LODESTAR_MODEL_CALLS_DISABLED")
         self._client = None
         self._dashscope = None
+        self._diandian = None
         self.last_dialogue_observation = None
         if self.mode == "live" and config.llm_provider == "dashscope":
             from lodestar.providers.dashscope import DashScopeClient
@@ -94,12 +95,20 @@ class LLMClient:
                 self._dashscope = DashScopeClient(config)
             except ValueError as error:
                 raise LLMError(str(error)) from error
-        elif self.mode == "live":
+        elif self.mode == "live" and config.llm_provider == "diandian":
+            from lodestar.providers.diandian import DiandianClient
+            try:
+                self._diandian = DiandianClient(config)
+            except ValueError as error:
+                raise LLMError(str(error)) from error
+        elif self.mode == "live" and config.llm_provider == "anthropic":
             if not (os.getenv('ANTHROPIC_API_KEY') or os.getenv('ANTHROPIC_AUTH_TOKEN')):
                 raise LLMError('Missing ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN; live mode cannot use mock credentials.')
             anthropic = _anthropic_sdk()
             self._client = anthropic.Anthropic(timeout=config.llm_timeout_s, max_retries=0,
                 **({'base_url': config.llm_base_url} if config.llm_base_url else {}))
+        elif self.mode == "live":
+            raise LLMError('Unsupported LLM provider: ' + str(config.llm_provider), code='configuration')
 
     # ---------- 对外接口 ----------
     def close(self):
@@ -107,6 +116,8 @@ class LLMClient:
             self._client.close()
         if self._dashscope is not None:
             self._dashscope.close()
+        if self._diandian is not None:
+            self._diandian.close()
 
     def list_models(self):
         """Optional read-only catalog. A listed ID is not an inference guarantee."""
@@ -117,6 +128,11 @@ class LLMClient:
                 return self._dashscope.list_models()
             except Exception as error:
                 raise LLMError('Model catalog request failed') from error
+        if self._diandian is not None:
+            try:
+                return self._diandian.list_models()
+            except Exception as error:
+                raise LLMError('Model catalog is unavailable on this provider', code='configuration') from error
         if self._client is None:
             raise LLMError('Model catalog is unavailable on this provider', code='configuration')
         try:
@@ -177,6 +193,11 @@ class LLMClient:
                 return self._dashscope.complete(role, self.model, system, user, mt, json_mode=json_mode)
             except (ValueError, KeyError, IndexError, requests.RequestException) as error:
                 raise LLMError(f"DashScope request failed: {type(error).__name__}") from error
+        if self._diandian is not None:
+            try:
+                return self._diandian.complete(role, self.model, system, user, mt, json_mode=json_mode)
+            except (ValueError, KeyError, IndexError, requests.RequestException) as error:
+                raise LLMError(f"DianDian request failed: {type(error).__name__}") from error
         anthropic = _anthropic_sdk()
         from lodestar.providers.reasoning import anthropic_options
         kw = anthropic_options(self.config, structured=json_mode, max_tokens=mt)

@@ -1,5 +1,6 @@
 """Payload-level checks for shared identity, scoped facts and task delegation."""
 import json
+import sqlite3
 import threading
 import unittest
 from unittest.mock import Mock, patch
@@ -11,6 +12,29 @@ from lodestar.web.server import WebApp, Conflict
 from lodestar.web.tools import assistant_tools
 from tests import test_web
 from tests.test_web import FakeLLM
+
+
+class AssistantSchemaMigrationTests(unittest.TestCase):
+    def test_legacy_memory_table_upgrades_before_recall_index_creation(self):
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute('''CREATE TABLE assistant_memories (
+            id TEXT PRIMARY KEY, user_id TEXT NOT NULL, scope TEXT NOT NULL,
+            project_id INTEGER, item_id TEXT, content TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active', revision INTEGER NOT NULL DEFAULT 1,
+            source TEXT NOT NULL DEFAULT 'user', source_message_id INTEGER,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )''')
+        conn.execute("INSERT INTO assistant_memories(id,user_id,scope,content,source_message_id) VALUES('old','u','personal','你的名字叫 Marina',9)")
+        conn.execute("INSERT INTO assistant_memories(id,user_id,scope,content) VALUES('paper','u','personal','CueMem\narXiv: 2609.12354v1 | 2026-09-11\nURL: https://arxiv.org/abs/2609.12354v1')")
+        conn.executescript(assistant.SCHEMA)
+        assistant.migrate(conn)
+        columns = {row['name'] for row in conn.execute('PRAGMA table_info(assistant_memories)')}
+        self.assertTrue({'tier', 'priority', 'kind', 'stale_after', 'archive_after', 'expires_at', 'last_accessed_at', 'reference_date'} <= columns)
+        self.assertEqual(conn.execute("SELECT relation FROM assistant_memory_sources WHERE memory_id='old'").fetchone()['relation'], 'primary')
+        self.assertEqual(tuple(conn.execute("SELECT priority,kind FROM assistant_memories WHERE id='old'").fetchone()), ('P0', 'fact'))
+        self.assertEqual(tuple(conn.execute("SELECT kind,reference_date FROM assistant_memories WHERE id='paper'").fetchone()), ('reference', '2026-09-11'))
 
 
 class SharedMemoryTest(unittest.TestCase):
@@ -319,6 +343,72 @@ class SharedMemoryTest(unittest.TestCase):
         self.assertIn('Routing preference', json.dumps(packet['managed_memory']))
         snapshot = self.app.state()['messages'][-1]['metadata']['web_context']['memory']
         self.assertEqual({r['id'] for r in snapshot}, {json.loads(r)['id'] for r in packet['managed_memory']})
+
+    def test_core_facts_are_p0_and_return_before_relevance_ranked_memories(self):
+        core = self.app.note('main', {'content': '你的名字叫 Marina'})
+        self.app.note('main', {'content': 'A P1 reference about unrelated routing', 'priority': 'P1'})
+        saved = next(n for n in self.app.state()['notes'] if n['id'] == core['id'])
+        self.assertEqual((saved['priority'], saved['kind']), ('P0', 'fact'))
+        packet = self.context('main', 'Explain unrelated routing')
+        recalled = [json.loads(row) for row in packet['managed_memory']]
+        self.assertEqual(recalled[0]['id'], core['id'])
+        self.assertEqual(recalled[0]['priority'], 'P0')
+
+    def test_reference_memory_injects_locator_and_freshness_not_saved_summary(self):
+        saved = self.app.note('main', {'content': 'CueMem: Cue-Guided Context Reconstruction\n'
+                                                  'arXiv: 2609.12354v1 | 2026-09-11\n'
+                                                  'URL: https://arxiv.org/abs/2609.12354v1\n'
+                                                  '核心思想：把记忆视为检索线索而不是证据摘要。'})
+        note = next(n for n in self.app.state()['notes'] if n['id'] == saved['id'])
+        self.assertEqual((note['kind'], note['reference_date']), ('reference', '2026-09-11'))
+        packet = self.context('main', 'CueMem 的架构是什么？')
+        recalled = next(json.loads(row) for row in packet['managed_memory'] if json.loads(row)['id'] == saved['id'])
+        self.assertEqual(recalled['reference_date'], '2026-09-11')
+        self.assertGreater(recalled['reference_age_days'], 0)
+        self.assertEqual(recalled['locator']['url'], 'https://arxiv.org/abs/2609.12354v1')
+        self.assertIn('检索线索', recalled['evidence_rule'])
+        self.assertNotIn('核心思想', recalled['content'])
+
+    def test_memory_metadata_lifecycle_and_source_anchors_are_preserved(self):
+        self.context('main', 'SOURCE_ANCHOR_MESSAGE')
+        with self.app.workspace() as ws:
+            item = self.app.item(ws, 'main')
+            source = ws.conn.execute("SELECT id FROM messages WHERE conversation_id=? AND role='user' ORDER BY id DESC LIMIT 1",
+                                     (item['conversation_id'],)).fetchone()['id']
+        saved = self.app.note('main', {'content': 'CueMem reference anchor', 'tier': 'session',
+                                       'priority': 'P1', 'kind': 'reference',
+                                       'source_message_ids': [source]})
+        state = self.app.state()
+        note = next(n for n in state['notes'] if n['id'] == saved['id'])
+        self.assertEqual((note['tier'], note['priority'], note['kind']), ('session', 'P1', 'reference'))
+        with self.app.workspace() as ws, ws.conn:
+            ws.conn.execute("UPDATE assistant_memories SET expires_at='2000-01-01T00:00:00+00:00' WHERE id=?", (saved['id'],))
+        promoted = next(n for n in self.app.state()['notes'] if n['id'] == saved['id'])
+        self.assertEqual(promoted['tier'], 'durable')
+        self.assertIsNotNone(promoted['stale_after'])
+        temporary = self.app.note('main', {'content': 'Temporary session conclusion', 'tier': 'session', 'priority': 'P2'})
+        with self.app.workspace() as ws, ws.conn:
+            ws.conn.execute("UPDATE assistant_memories SET expires_at='2000-01-01T00:00:00+00:00' WHERE id=?", (temporary['id'],))
+        archived = next(n for n in self.app.state()['notes'] if n['id'] == temporary['id'])
+        self.assertEqual(archived['status'], 'archived')
+        self.assertNotIn(temporary['id'], {n['id'] for n in self.app.state()['context_notes']})
+        with self.app.workspace() as ws:
+            details = memory.history(ws, saved['id'])
+        self.assertEqual(details['sources'][0]['message_id'], source)
+        self.assertEqual(details['sources'][0]['relation'], 'primary')
+        self.assertIn('SOURCE_ANCHOR_MESSAGE', json.dumps(details['source_context'], ensure_ascii=False))
+
+    def test_raw_anchor_context_never_crosses_task_scope(self):
+        a, b = self.app.create('Source task'), self.app.create('Other task')
+        self.context(a, 'PRIVATE_SOURCE_CONTEXT_SHOULD_NOT_LEAK')
+        with self.app.workspace() as ws:
+            item = self.app.item(ws, a)
+            source = ws.conn.execute("SELECT id FROM messages WHERE conversation_id=? AND role='user' ORDER BY id DESC LIMIT 1",
+                                     (item['conversation_id'],)).fetchone()['id']
+        self.app.note(a, {'content': 'Shared memory cue', 'scope': 'personal', 'source_message_ids': [source]})
+        packet = self.context(b, 'What is the shared memory cue?')
+        self.assertIn('Shared memory cue', json.dumps(packet))
+        self.assertNotIn('PRIVATE_SOURCE_CONTEXT_SHOULD_NOT_LEAK', json.dumps(packet))
 
     def test_read_memory_no_match_discloses_available_records_and_overview_returns_react(self):
         note = self.app.note('main', {'content': 'ReAct source-bound preference'})

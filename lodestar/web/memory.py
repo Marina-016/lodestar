@@ -15,6 +15,7 @@ class MemoryBusy(ValueError):
 
 def initialize(ws):
     ws.conn.executescript(assistant.SCHEMA)
+    assistant.migrate(ws.conn)
     columns = {r['name'] for r in ws.conn.execute('PRAGMA table_info(web_items)')}
     for name, declaration in {'project_id': 'INTEGER', 'parent_id': 'TEXT',
                               'context_after': 'INTEGER NOT NULL DEFAULT 0',
@@ -93,6 +94,17 @@ def edit(ws, item, data, *, allow_run=None, source='user', source_message_id=Non
         raise ValueError('请选择有效任务')
     if scope == 'project' and (type(project_id) is not int or not ws.conn.execute('SELECT 1 FROM projects WHERE id=?', (project_id,)).fetchone()):
         raise ValueError('请选择有效项目')
+    source_message_ids = data.get('source_message_ids')
+    if source_message_ids is not None:
+        if (not isinstance(source_message_ids, list) or len(source_message_ids) > 8
+                or any(type(value) is not int or value < 1 for value in source_message_ids)):
+            raise ValueError('记忆来源无效')
+        if source_message_ids:
+            marks = ','.join('?' * len(source_message_ids))
+            owned = ws.conn.execute(f'''SELECT COUNT(*) FROM messages m JOIN web_items i ON i.conversation_id=m.conversation_id
+                                        WHERE i.owner='local' AND m.id IN ({marks})''', source_message_ids).fetchone()[0]
+            if owned != len(set(source_message_ids)):
+                raise ValueError('记忆来源不属于当前本地工作空间')
     target = {'scope': scope, 'project_id': project_id, 'item_id': target_item}
     impacted = {r['id']: r for row in ([old] if old else []) + [target] for r in affected(ws, row)}
     # Additions also invalidate prior model assumptions, but do not discard history.
@@ -106,10 +118,15 @@ def edit(ws, item, data, *, allow_run=None, source='user', source_message_id=Non
         # Retire duplicate legacy storage too; migration never runs a second time.
         ws.conn.execute('DELETE FROM web_notes WHERE id=?', (old['id'],))
         return {'id': old['id'], 'deleted': True, 'context_reset': True}
+    kind = data.get('kind', old['kind'] if old else 'note')
+    priority = data.get('priority', old['priority'] if old else None)
+    reference_date = data.get('reference_date', old['reference_date'] if old else None)
     saved = assistant.save(ws.conn, USER, content=data.get('content', old['content'] if old else ''),
         scope=scope, project_id=project_id, item_id=target_item, memory_id=old['id'] if old else None,
         status=data.get('status', old['status'] if old else 'active'), source=source,
-        source_message_id=source_message_id)
+        source_message_id=source_message_id, source_message_ids=source_message_ids,
+        tier=data.get('tier', old['tier'] if old else 'durable'),
+        priority=priority, kind=kind, reference_date=reference_date)
     return {'id': saved['id'], 'revision': saved['revision'], 'context_reset': bool(old)}
 
 
@@ -147,8 +164,9 @@ def edit_learning(ws, data, *, allow_run=None, source_message_id=None):
 
 def catalog(ws, *, query='', scope='', status='', project_id=None, page=1):
     """A bounded management view, not model recall or an automatic summary."""
+    assistant.advance_lifecycle(ws.conn, USER)
     if (not isinstance(query,str) or len(query)>200 or scope not in ('','personal','project','task')
-            or status not in ('','active','disabled') or type(page) is not int or not 1<=page<=100000):
+            or status not in ('','active','disabled','stale','archived') or type(page) is not int or not 1<=page<=100000):
         raise ValueError('记忆筛选无效')
     clauses, args = ['m.user_id=?'], [USER]
     if query.strip():
@@ -163,7 +181,10 @@ def catalog(ws, *, query='', scope='', status='', project_id=None, page=1):
     total = ws.conn.execute('SELECT COUNT(*) FROM assistant_memories m WHERE '+where,args).fetchone()[0]
     rows = [dict(r) for r in ws.conn.execute('SELECT m.*,p.name AS project_name,i.name AS task_name '
         'FROM assistant_memories m LEFT JOIN projects p ON p.id=m.project_id '
-        'LEFT JOIN web_items i ON i.id=m.item_id WHERE '+where+' ORDER BY m.updated_at DESC,m.id LIMIT 40 OFFSET ?',
+        '''LEFT JOIN web_items i ON i.id=m.item_id WHERE '''+where+''' ORDER BY
+        CASE m.priority WHEN 'P0' THEN 0 WHEN 'P1' THEN 1 ELSE 2 END,
+        CASE m.status WHEN 'active' THEN 0 WHEN 'stale' THEN 1 WHEN 'disabled' THEN 2 ELSE 3 END,
+        m.updated_at DESC,m.id LIMIT 40 OFFSET ?''',
         [*args,(page-1)*40])]
     counts = {r['scope']:r['n'] for r in ws.conn.execute("SELECT scope,COUNT(*) AS n FROM assistant_memories WHERE user_id=? AND status='active' GROUP BY scope",(USER,))}
     return {'notes':rows,'total':total,'page':page,'page_size':40,'counts':counts}
@@ -175,9 +196,9 @@ def history(ws, memory_id):
         raise LookupError('找不到这条记忆，可能已被遗忘')
     revisions = [dict(r) for r in ws.conn.execute('SELECT revision,action,content,created_at FROM assistant_memory_revisions '
         'WHERE memory_id=? ORDER BY revision DESC,id DESC LIMIT 40',(memory_id,))]
-    source = None
-    if note['source_message_id']:
-        row = ws.conn.execute("SELECT i.id AS item_id,m.id AS message_id FROM messages m JOIN web_items i ON i.conversation_id=m.conversation_id WHERE m.id=? AND i.owner='local'",(note['source_message_id'],)).fetchone()
-        source = dict(row) if row else None
+    sources = assistant.sources(ws.conn, memory_id)
+    source = sources[0] if sources else None
+    context = assistant.reconstruct_context(ws.conn, [dict(note)], note['content']).get(memory_id)
     return {'id':memory_id,'revision':note['revision'],'revisions':revisions,'source':source,
+            'sources':sources,'source_context':context,
             'truncated':ws.conn.execute('SELECT COUNT(*) FROM assistant_memory_revisions WHERE memory_id=?',(memory_id,)).fetchone()[0]>40}

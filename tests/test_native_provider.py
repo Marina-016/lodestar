@@ -314,3 +314,20 @@ class NativeProviderTests(unittest.TestCase):
             with self.assertRaises(LLMError) as error:
                 client.dialogue_step('system', [], [])
         self.assertEqual(error.exception.code, 'stream_interrupted')
+
+    def test_openai_heartbeat_stream_honors_conversation_timeout(self):
+        client = self.client()
+        client.config.conversation_timeout_s = 15
+        client._dashscope = SimpleNamespace(base_url='https://dashscope.aliyuncs.com', key='fixture', usage=[])
+        response = MagicMock()
+        response.__enter__.return_value = response
+        # A valid SSE heartbeat avoids a socket-level timeout, so it proves the
+        # wall-clock guard rather than the requests read timeout.
+        response.iter_lines.return_value = iter(['data: {"choices": []}'])
+        with patch('lodestar.providers.dialogue.requests.post', return_value=response) as request, \
+                patch('lodestar.providers.dialogue.time.monotonic', side_effect=[10, 26]):
+            with self.assertRaises(LLMError) as error:
+                client.dialogue_step('system', [], [])
+        self.assertEqual(error.exception.code, 'timeout')
+        self.assertEqual(error.exception.role, 'conversation')
+        self.assertEqual(request.call_args.kwargs['timeout'], 15)

@@ -15,6 +15,19 @@ export function safeUrl(value) {
     return "";
   }
 }
+export function displayHost(value) {
+  const safe = safeUrl(value);
+  if (!safe) return "";
+  return new URL(safe).hostname.replace(/^www\./, "");
+}
+function isRawUrl(value) {
+  return /^https?:\/\/\S+$/i.test(String(value || "").trim());
+}
+function externalLink(url, label) {
+  const host = displayHost(url);
+  const visible = !label || isRawUrl(label) ? "打开来源" : label;
+  return `<a class="inline-source-link" href="${escape(url)}" target="_blank" rel="noopener noreferrer" aria-label="打开外部来源：${escape(host)}"><span>${escape(visible)}</span><span class="link-host">${escape(host)}</span><span aria-hidden="true">↗</span></a>`;
+}
 function localHistoryUrl(value) {
   if(typeof value!=="string" || !value.startsWith("/history?")) return "";
   const params=new URLSearchParams(value.slice(9));
@@ -43,7 +56,9 @@ function inline(text, links) {
       const safe = safeUrl(url) || localHistoryUrl(url);
       if (safeUrl(safe)) links?.push(safe);
       out += safe
-        ? `<a href="${escape(safe)}" target="_blank" rel="noopener noreferrer">${escape(label)}</a>`
+        ? safeUrl(safe)
+          ? externalLink(safe, label)
+          : `<a href="${escape(safe)}">${escape(isRawUrl(label) ? "查看记录" : label)}</a>`
         : escape(label);
     }
     cursor = match.index + part.length;
@@ -121,7 +136,15 @@ export function markdown(source, links = null) {
       out += `</${tag}>`;
     } else if (/^>\s?/.test(line)) {
       flush();
-      out += `<blockquote>${renderInline(line.replace(/^>\s?/, ""))}</blockquote>`;
+      const quoted = [];
+      while (i < lines.length && /^>\s?/.test(lines[i])) {
+        quoted.push(lines[i].replace(/^>\s?/, ""));
+        i++;
+      }
+      i--;
+      // A copied prompt is often one multi-line quote. Reparse its contents so
+      // headings, dividers and fenced code remain structural rather than raw text.
+      out += `<blockquote>${markdown(quoted.join("\n"), links)}</blockquote>`;
     } else if (!line.trim()) flush();
     else p.push(line);
   }

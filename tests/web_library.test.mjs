@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { noteRow, noteDetail, projectRow, projectDetail, stamp } from '../lodestar/web/static/library-views.mjs';
+import { noteRow, noteDetail, paperRow, paperDetail, projectRow, projectDetail, stamp } from '../lodestar/web/static/library-views.mjs';
 const note={id:'m1',content:'<script>untrusted</script>',scope:'project',revision:2,status:'active',source:'user'};
 test('memory content and identifiers are escaped, not executable HTML',()=>{
   const html=noteRow({...note,id:'" onclick="bad'},null);
@@ -30,6 +30,12 @@ test('unsafe repository links and remote commit subjects cannot inject markup',(
     workspace:{path:'C:/fixture',branch:'master',commit_sha:'a'.repeat(40),commits:[{sha:'b'.repeat(40),subject:'<svg onload=bad>',date:'2026-10-23'}]}},'主对话');
   assert.ok(!html.includes('href="javascript:')); assert.ok(!html.includes('<svg onload='));
   assert.ok(html.includes('此页不代写代码或自动提交、推送'));
+});
+test('paper cards keep untrusted metadata inert and do not expose unsafe links',()=>{
+  const html=paperDetail({paper:{id:1,title:'<img src=x>',canonical_url:'https://arxiv.org/abs/2601.00001',links:['javascript:bad','https://arxiv.org/abs/2601.00001'],authors:['<svg>'],keywords:['<script>'],metadata_source:'manual'},projects:[],project:null},'main');
+  assert.ok(!html.includes('<img src=x>')); assert.ok(!html.includes('<svg>'));
+  assert.ok(!html.includes('href="javascript:')); assert.ok(html.includes('不会自动读取 PDF'));
+  assert.ok(paperRow({id:1,title:'<script>',authors:[],keywords:['<b>']},null).includes('&lt;script&gt;'));
 });
 test('SQLite UTC timestamps and explicit UTC ISO dates display the same local time',()=>{
   assert.equal(stamp('2026-10-26 01:31:00'),stamp('2026-10-26T01:31:00Z'));

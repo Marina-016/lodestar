@@ -89,6 +89,9 @@ class Config:
 def load_config() -> Config:
     """从 .env 与环境变量加载覆盖项（仅覆盖有值的键）。"""
     load_dotenv(PROJECT_ROOT / ".env")
+    # A local override is intentional opt-in (for example, a newly selected
+    # provider).  It stays ignored and wins over the shared/default .env.
+    load_dotenv(PROJECT_ROOT / ".env.local", override=True)
 
     c = Config()
     c.llm_mode = os.getenv("LODESTAR_LLM_MODE", c.llm_mode)

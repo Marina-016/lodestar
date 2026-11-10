@@ -99,6 +99,21 @@ class WebTest(unittest.TestCase):
         self.assertEqual(self.app.events(run,result['events'][-1]['id'])['events'],[])
         self.assertEqual(len(self.app.state()['messages']),2)
 
+    def test_reference_text_is_stored_separately_and_sent_to_dialogue_context(self):
+        captured = []
+        def capture(ws, llm, context, project_id, **callbacks):
+            captured.append(context)
+            return self.gather(ws, llm, context, project_id, **callbacks)
+        with patch('lodestar.agent.dialogue.gather', side_effect=capture):
+            run = self.wait(self.app.submit('main', '这个结论可靠吗？', 'reference-text',
+                                            reference_text='REFERENCE_CANARY'))
+        self.assertEqual(run['run']['status'], 'completed')
+        question = self.app.state()['messages'][0]
+        self.assertEqual(question['content'], '这个结论可靠吗？')
+        self.assertEqual(question['metadata']['reference_text'], 'REFERENCE_CANARY')
+        self.assertEqual(captured[0]['message'], '这个结论可靠吗？')
+        self.assertEqual(captured[0]['reference_text'], 'REFERENCE_CANARY')
+
     def test_per_task_settings_and_custom_profile(self):
         a=self.app.create('A')
         self.app.update(a,{'settings':{'model':'another-model','profile':'custom','thinking':'off','enabled':False}})
@@ -203,6 +218,15 @@ class WebTest(unittest.TestCase):
             actions = client.get(url+'/actions.mjs',timeout=3)
             self.assertEqual(actions.status_code,200)
             self.assertIn('javascript',actions.headers['Content-Type'])
+            insights = client.get(url+'/insights.mjs',timeout=3)
+            self.assertEqual(insights.status_code,200)
+            self.assertIn('workspaceMetrics', insights.text)
+            quotes = client.get(url+'/quote.mjs',timeout=3)
+            self.assertEqual(quotes.status_code,200)
+            self.assertIn('quoteMarkdown', quotes.text)
+            timeline = client.get(url+'/timeline.mjs',timeout=3)
+            self.assertEqual(timeline.status_code,200)
+            self.assertIn('beginsNewChat', timeline.text)
         finally:
             client.close();server.shutdown();server.server_close();worker.join()
 

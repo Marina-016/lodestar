@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -47,6 +48,13 @@ class ConversationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.agent.turn(session,'Use it in my project',user_id='alice',intent='plan')
         self.assertEqual(self.agent.history(session,'alice'),[])
+
+    def test_reference_text_is_persisted_as_user_material_not_question_content(self):
+        session = self.agent.start('alice')
+        self.agent.turn(session, '请解释这段引用', user_id='alice', reference_text='REFERENCE_CANARY')
+        question = self.agent.history(session, 'alice')[0]
+        self.assertEqual(question['content'], '请解释这段引用')
+        self.assertEqual(json.loads(question['metadata'])['reference_text'], 'REFERENCE_CANARY')
 
     def test_synthesis_failure_is_error_with_recoverable_evidence(self):
         from unittest.mock import patch

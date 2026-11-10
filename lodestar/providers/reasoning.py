@@ -38,3 +38,13 @@ def dashscope_options(config, *, structured=False):
     if config.llm_thinking_mode != 'enabled':
         raise LLMError('Unsupported DashScope thinking mode', code='configuration')
     return {'enable_thinking': True, 'thinking_budget': config.llm_thinking_budget}
+
+
+def diandian_options(config, *, structured=False):
+    """Only send DianDian's documented thinking field when it is requested."""
+    from lodestar.llm import LLMError
+    if structured or not config.llm_thinking:
+        return {}
+    if config.llm_thinking_mode != 'enabled':
+        raise LLMError('Unsupported DianDian thinking mode', code='configuration')
+    return {'chat_template_kwargs': {'enable_thinking': True}}

@@ -24,6 +24,13 @@ class DashScopeClient:
             raise ValueError('DashScope requires an official HTTPS endpoint')
         self.usage = []
 
+    @property
+    def headers(self):
+        return {'Authorization': 'Bearer ' + self.key}
+
+    def openai_options(self, *, structured=False):
+        return dashscope_options(self.config, structured=structured)
+
     def close(self):
         if self._closed:
             return
@@ -64,7 +71,7 @@ class DashScopeClient:
         if json_mode:
             payload['response_format'] = {'type': 'json_object'}
         response = self.http.post(self.base_url + '/chat/completions',
-            headers={'Authorization': 'Bearer ' + self.key}, json=payload,
+            headers=self.headers, json=payload,
             timeout=self.config.llm_timeout_s)
         if not response.ok:
             raise_for_status(response)

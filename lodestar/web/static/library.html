@@ -43,13 +43,31 @@
   </main>
 </div>
 <div class="nav-backdrop" id="nav-backdrop" hidden></div>
+<dialog id="paper-editor" aria-labelledby="paper-editor-title"><form id="paper-editor-form">
+  <div class="dialog-heading"><h2 id="paper-editor-title">添加论文</h2><button type="button" class="subtle" data-close="paper-editor">关闭</button></div>
+  <p>资料仅保存在本地。保存链接不会下载 PDF、读取网页或调用模型。</p>
+  <label for="paper-title">标题</label><input id="paper-title" maxlength="300" required />
+  <label for="paper-url">论文链接</label><input id="paper-url" type="url" maxlength="2000" placeholder="https://arxiv.org/abs/...、DOI 或论文页" required />
+  <label for="paper-authors">作者</label><input id="paper-authors" maxlength="2000" placeholder="用逗号分隔（可选）" />
+  <div class="paper-form-grid"><label for="paper-year">年份</label><label for="paper-venue">会议或期刊</label><input id="paper-year" type="number" min="1000" max="3000" placeholder="可选" /><input id="paper-venue" maxlength="240" placeholder="可选" /></div>
+  <label for="paper-keywords">关键词</label><input id="paper-keywords" maxlength="2000" placeholder="用逗号分隔（可选）" />
+  <label for="paper-project">关联项目</label><select id="paper-project"></select>
+  <div class="paper-form-grid"><label for="paper-status">阅读状态</label><label for="paper-priority">优先级</label><select id="paper-status"><option value="inbox">收件箱</option><option value="later">稍后读</option><option value="reading">在读</option><option value="read">已读</option><option value="archived">归档</option></select><select id="paper-priority"><option value="high">高</option><option value="normal" selected>普通</option><option value="low">低</option></select></div>
+  <label for="paper-relevance">项目相关性</label><select id="paper-relevance"><option value="unassessed">待判断</option><option value="high">高</option><option value="medium">中</option><option value="low">低</option><option value="adopted">已采用</option><option value="rejected">不采用</option></select>
+  <label for="paper-tags">项目标签</label><input id="paper-tags" maxlength="2000" placeholder="用逗号分隔（可选）" />
+  <label for="paper-note">项目笔记</label><textarea id="paper-note" rows="4" maxlength="6000" placeholder="为什么收藏、想验证什么、与项目有什么关系（可选）"></textarea>
+  <div class="dialog-actions"><button type="button" class="secondary" data-close="paper-editor">取消</button><button type="submit" class="primary">保存论文</button></div>
+</form></dialog>
 <dialog id="entry-dialog" aria-labelledby="entry-title"><form id="entry-form">
   <div class="dialog-heading"><h2 id="entry-title">添加记忆</h2><button type="button" class="subtle" data-close="entry-dialog" aria-label="关闭编辑">关闭</button></div>
   <p>只保留希望长期沿用的事实或偏好，不把一轮回答自动当作事实。</p>
   <label for="entry-scope">使用范围</label><select id="entry-scope"><option value="personal">个人 · 所有任务可用</option><option value="project">项目 · 同项目任务可用</option><option value="task">任务 · 仅指定任务可用</option></select>
   <label id="entry-owner-label" for="entry-owner" hidden>归属</label><select id="entry-owner" hidden></select>
+  <div class="memory-form-grid"><label for="entry-tier">保留层级</label><label for="entry-priority">优先级</label><select id="entry-tier"><option value="durable">长期</option><option value="session">短期 · 闲置一天后处理</option></select><select id="entry-priority"><option value="P0">P0 · 核心事实</option><option value="P1" selected>P1 · 参考信息</option><option value="P2">P2 · 临时结论</option></select></div>
+  <label for="entry-kind">记忆类型</label><select id="entry-kind"><option value="preference">偏好</option><option value="fact">事实</option><option value="claim">主张 / 判断</option><option value="reference">参考资料</option><option value="note" selected>普通备注</option></select>
+  <label for="entry-reference-date">资料日期（可选）</label><input id="entry-reference-date" type="date"><p class="fineprint">论文或网页请填写发布日期；参考资料只作为检索线索，细节需回到来源确认。</p>
   <label for="entry-content">内容</label><textarea id="entry-content" rows="6" maxlength="2000" required></textarea>
-  <p class="fineprint">编辑会推进受影响任务的后续上下文边界。已有聊天、备份和已外发的信息不会因此删除。</p>
+  <p class="fineprint">短期 P0/P1 闲置一天后转为长期；短期 P2 会归档。长期 P1 90 天后待核实；长期 P2 30 天后降级、180 天归档。编辑会推进受影响任务的后续上下文边界；已有聊天、备份和已外发的信息不会因此删除。</p>
   <div class="dialog-actions"><button type="button" class="secondary" data-close="entry-dialog">取消</button><button type="submit" class="primary">保存记忆</button></div>
 </form></dialog>
 <dialog id="project-editor" aria-labelledby="project-editor-title"><form id="project-editor-form">

@@ -2,6 +2,7 @@
 import importlib
 import json
 import re
+import time
 
 import requests
 
@@ -75,7 +76,7 @@ def _guard_sse_errors(response):
 def step(client, system, messages, tools, on_text=None):
     from lodestar.llm import LLMError
     try:
-        if client._dashscope is not None:
+        if client._dashscope is not None or getattr(client, '_diandian', None) is not None:
             return _openai_step(client, system, messages, tools, on_text)
         options = {'tools': tools} if tools else {'tool_choice': {'type': 'none'}}
         options.update(anthropic_options(client.config))
@@ -143,10 +144,15 @@ def _openai_messages(messages):
 
 def _openai_step(client, system, messages, tools, on_text):
     from lodestar.llm import LLMError
-    adapter = client._dashscope
+    adapter = client._dashscope or client._diandian
+    # Older tests inject a minimal DashScope fixture; retain the public
+    # transport shape while letting real adapters own their header semantics.
+    openai_options = (adapter.openai_options() if hasattr(adapter, 'openai_options')
+                      else dashscope_options(client.config))
+    headers = adapter.headers if hasattr(adapter, 'headers') else {'Authorization': 'Bearer ' + adapter.key}
     payload = {'model': client.model, 'messages': [{'role': 'system', 'content': system}]
                + _openai_messages(messages), 'max_tokens': client.config.max_tokens,
-               'temperature': client.config.temperature, **dashscope_options(client.config),
+               'temperature': client.config.temperature, **openai_options,
                'stream': True, 'stream_options': {'include_usage': True}}
     if tools:
         payload['tools'] = [{'type': 'function', 'function': {
@@ -157,11 +163,18 @@ def _openai_step(client, system, messages, tools, on_text):
     text, reasoning, calls, finished, done = [], [], {}, False, False
     usage, returned_model = {}, None
     transport = getattr(adapter, 'http', requests)
+    # ``requests`` applies its timeout to an individual socket operation. An
+    # upstream SSE heartbeat can therefore keep an otherwise stalled dialogue
+    # alive indefinitely. Conversation timeout is an end-to-end UI budget.
+    conversation_timeout_s = client.config.conversation_timeout_s
+    deadline = time.monotonic() + conversation_timeout_s
     with transport.post(adapter.base_url + '/chat/completions',
-            headers={'Authorization': 'Bearer ' + adapter.key}, json=payload,
-            timeout=client.config.llm_timeout_s, stream=True) as response:
+            headers=headers, json=payload,
+            timeout=min(client.config.llm_timeout_s, conversation_timeout_s), stream=True) as response:
         raise_for_status(response)
         for line in response.iter_lines():
+            if time.monotonic() >= deadline:
+                raise LLMError('Dialogue request exceeded configured timeout', code='timeout')
             line = line.decode('utf-8') if isinstance(line, bytes) else line
             if not line or not line.startswith('data:'):
                 continue

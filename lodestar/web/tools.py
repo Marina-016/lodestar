@@ -77,10 +77,12 @@ def assistant_tools(app, item, run_id, message, check_cancel, *, user_authored=T
                 rows = [r for r in rows if wanted & terms(r['content'])]
             matched_notes = len(rows)
             memories = assistant.select_rows(rows, query, budget=12000, limit=30)
+            memory_evidence = assistant.reconstruct_context(ws.conn, memories, query, char_budget=3000,
+                                                            max_memories=3, item_id=current['id'])
             recall = learning.retrieve(ws.conn, memory.USER, query or None, limit=8 if query else 20)
             learning_packet = learning.model_context(recall['profiles'])
             recalled = learning_packet['profiles']
-            return {'memories': memories, 'learning': recalled,
+            return {'memories': memories, 'memory_evidence': memory_evidence, 'learning': recalled,
                     'learning_context': learning_packet['coverage'],
                     'retrieval': {'query': query, 'filter_applied': bool(query),
                         'visible_active_notes': visible_notes, 'user_active_learning_events': active_learning,
@@ -115,8 +117,13 @@ def assistant_tools(app, item, run_id, message, check_cancel, *, user_authored=T
             result = memory.edit(ws, current, data, allow_run=run_id,
                                  source='conversation', source_message_id=user_message['id'] if user_message else None)
             app.record_action(ws, run_id, {'action': 'manage_memory', 'id': result['id'],
-                'operation': args['action'], **{k: result[k] for k in ('revision', 'deleted') if k in result}})
-            result['managed_memory'] = assistant.prompt_rows(assistant.select_rows(memory.notes(ws, current, active_only=True), message))
+                'operation': args['action'],
+                'change': 'deleted' if result.get('deleted') else ('updated' if result.get('context_reset') else 'created'),
+                **{k: result[k] for k in ('revision', 'deleted') if k in result}})
+            visible = assistant.select_rows(memory.notes(ws, current, active_only=True), message)
+            assistant.mark_accessed(ws.conn, visible)
+            result['managed_memory'] = assistant.prompt_rows(visible, assistant.reconstruct_context(
+                ws.conn, visible, message, item_id=current['id']))
             return result
 
     def list_tasks(args):
@@ -247,10 +254,13 @@ def assistant_tools(app, item, run_id, message, check_cancel, *, user_authored=T
             {'query':{'type':'string','minLength':1,'maxLength':200}},search_history,['query']),
         'read_memory': definition('Read visible active personal/project/task facts and your user\'s learning evidence. query is an optional lexical filter; omit it for a bounded overview. Counts cover this space\'s visible notes, the current user\'s events and distinct technology/method profiles. Match counts and truncation flags disclose omitted records. Long evidence may be returned as an explicit omitted-text reference. Empty filtered results do not imply empty memory.',
                                  {'query': {'type': 'string'}}, read_memory),
-        'manage_memory': definition('Save a durable user preference/fact, or correct/forget an existing memory by ID. Use only user-provided facts or confirmed project decisions. Never store technology definitions, infer mastery, or turn background reading into user exposure. scope defaults to personal; project requires a bound project; task keeps a local note. Read existing IDs before modifying them.',
+        'manage_memory': definition('Save a user-confirmed memory, or correct/forget one by ID. tier=session expires into a durable P0/P1 note or archives P2 after one inactive day; durable is for cross-session facts. P0 is a core preference/fact, P1 is a reference that becomes stale after 90 days, P2 is a temporary conclusion that becomes stale after 30 days and archives after 180 days. Use only user-provided facts or confirmed project decisions. Never store technology definitions, infer mastery, or turn background reading into user exposure. scope defaults to personal; project requires a bound project; task keeps a local note. Read existing IDs before modifying them.',
             {'action': {'type': 'string', 'enum': ['save', 'forget']}, 'id': {'type': 'string'},
              'content': {'type': 'string', 'maxLength': 2000},
-             'scope': {'type': 'string', 'enum': ['personal', 'project', 'task']}}, manage_memory, ['action']),
+             'scope': {'type': 'string', 'enum': ['personal', 'project', 'task']},
+             'tier': {'type': 'string', 'enum': ['session', 'durable']},
+             'priority': {'type': 'string', 'enum': ['P0', 'P1', 'P2']},
+             'kind': {'type': 'string', 'enum': ['preference', 'fact', 'claim', 'reference', 'note']}}, manage_memory, ['action']),
         'list_tasks': definition('List task names and current execution states without loading their transcripts.', {}, list_tasks),
         'read_task': definition('Read a selected task\'s recent results and source metadata when relevant to the user request. If active, wait up to wait_seconds (default 10, maximum 20) without another model call; 0 returns immediately. The wait outcome and run state are host observations, not a promise of completion. A timeout does not cancel the task. Message run links, kind and truncation are disclosed; source metadata does not mean you read the original bodies. Old context retired by memory corrections is excluded.',
                                 {'id': {'type': 'string'},

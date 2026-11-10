@@ -1,7 +1,10 @@
-import { escape as esc, markdown, safeUrl } from "./markdown.mjs";
+import { displayHost, escape as esc, markdown, safeUrl } from "./markdown.mjs";
 import { sourceGroups, evidenceHTML } from "./sources.mjs";
+import { latestCitedMessage, workspaceMetrics } from "./insights.mjs";
 import { actionHTML } from "./actions.mjs";
 import { defaultModel, modelOptionsHTML, hiddenModelsHTML } from "./models.mjs";
+import { quoteMarkdown } from "./quote.mjs";
+import { beginsNewChat, sessionDateLabel, timestampLabel } from "./timeline.mjs";
 const $ = (s) => document.querySelector(s),
   icon = (name) => `<svg aria-hidden="true"><use href="#i-${name}"/></svg>`;
 const token = $('meta[name="lodestar-token"]').content;
@@ -15,10 +18,17 @@ let state = null,
   showArchived = false,
   noteId = null,
   toastTimer;
+let memoryFocusId = null,
+  selectedAnswerQuote = "";
+const REFERENCE_PASTE_THRESHOLD = 600;
+let referenceExpanded = false;
 try {
   itemId = localStorage.getItem("lodestar-item") || "main";
 } catch {}
-itemId = new URLSearchParams(location.search).get('item') || itemId;
+const initialQuery = new URLSearchParams(location.search);
+itemId = initialQuery.get('item') || itemId;
+let requestedPaperId = Number(initialQuery.get('paper')) || null;
+let requestedMessageId = Number(initialQuery.get('message')) || null;
 const labels = {
   search_papers: "正在检索论文",
   discover_papers: "正在发现近期论文",
@@ -36,6 +46,8 @@ const labels = {
 };
 const runLabels = { queued: "排队中", running: "运行中", cancelling: "停止中", completed: "本轮完成", error: "需要重试", cancelled: "已停止", interrupted: "已中断" };
 const scopeLabels = {personal: "个人 · 共享", project: "项目", task: "仅当前任务"};
+const memoryStatusLabels = {active: "已启用", stale: "待核实", disabled: "已停用", archived: "已归档"};
+const memoryTierLabels = {session: "短期", durable: "长期"};
 const masteryLabels = {unknown: "掌握情况未验证", can_explain: "有讲解证据", can_implement: "有实现证据", can_apply: "有应用证据"};
 let learningId = null;
 let restoreDraft = true;
@@ -106,18 +118,95 @@ function controls() {
         : unavailable ? "当前模型不可用，请先选择其他模型"
         : $("#prompt").value.trim() ? "发送问题" : "先输入一个研究问题";
 }
+function messageTime(message) {
+  const label = timestampLabel(message.created_at);
+  return label ? `<time class="message-timestamp" datetime="${esc(message.created_at)}">${esc(label)}</time>` : "";
+}
+function messageReference(message) {
+  const text = message.metadata?.reference_text;
+  if (typeof text !== "string" || !text.trim()) return "";
+  return `<details class="user-reference"><summary>参考文本 · ${text.trim().length} 字</summary><pre>${esc(text.trim())}</pre></details>`;
+}
+function newChatDivider(message) {
+  const date = sessionDateLabel(message.created_at);
+  return `<div class="new-chat-divider" role="separator" aria-label="新对话${date ? " · " + esc(date) : ""}"><span></span><strong>新对话</strong>${date ? `<time datetime="${esc(message.created_at)}">${esc(date)}</time>` : ""}<span></span></div>`;
+}
+function userMessage(message) {
+  return `<article class="message message-user" data-message="${esc(message.id)}">${messageReference(message)}<div class="user-bubble">${esc(message.content)}</div><div class="message-actions user-message-actions">${messageTime(message)}<button class="subtle copy-question" data-id="${esc(message.id)}" title="复制这条问题" aria-label="复制这条问题">${icon("copy")}<span>复制问题</span></button></div></article>`;
+}
+function referenceText() {
+  return $("#reference-text").value.trim();
+}
+function syncReferenceInput() {
+  const text = referenceText();
+  $("#reference-input").hidden = !referenceExpanded && !text;
+  $("#reference-count").textContent = text ? `${text.length} / 24000 字` : "";
+}
+function showReferenceInput() {
+  referenceExpanded = true;
+  syncReferenceInput();
+  $("#reference-text").focus();
+}
+function appendReference(text) {
+  const incoming = String(text || "").trim();
+  if (!incoming) return false;
+  const field = $("#reference-text"), current = field.value.trim();
+  const next = current ? `${current}\n\n${incoming}` : incoming;
+  if (next.length > 24000) {
+    toast("参考文本最多 24000 字，请删减后再添加");
+    return false;
+  }
+  field.value = next;
+  referenceExpanded = true;
+  syncReferenceInput();
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  return true;
+}
+function clearReferenceInput() {
+  $("#reference-text").value = "";
+  referenceExpanded = false;
+  syncReferenceInput();
+  try { sessionStorage.removeItem('lodestar-reference:' + itemId); } catch {}
+}
+async function addRequestedPaperReference() {
+  const paperId = requestedPaperId;
+  requestedPaperId = null;
+  if (!paperId) return;
+  try {
+    const value = await api('/api/paper-library?id=' + encodeURIComponent(paperId));
+    const paper = value.paper;
+    if (!paper?.title || !paper?.canonical_url) throw new Error('论文资料不完整');
+    const metadata = [
+      `标题：${paper.title}`,
+      `链接：${paper.canonical_url}`,
+      paper.authors?.length ? `作者：${paper.authors.join('；')}` : '',
+      paper.published_year ? `年份：${paper.published_year}` : '',
+      paper.venue ? `发表：${paper.venue}` : '',
+      paper.keywords?.length ? `关键词：${paper.keywords.join('；')}` : '',
+      value.project?.reading_depth ? `项目阅读深度：${value.project.reading_depth}` : '',
+    ].filter(Boolean).join('\n');
+    if (appendReference(`论文资料（用户明确引用；以下是元数据，不代表已经阅读全文）\n${metadata}`))
+      toast('论文资料已加入上方参考文本；请再输入你的问题');
+    const url = new URL(location.href);
+    url.searchParams.delete('paper');
+    history.replaceState(null, '', url.pathname + (url.search ? url.search : '') + url.hash);
+  } catch (error) {
+    toast('未能加入论文资料：' + error.message);
+  }
+}
 function renderMessages() {
   $("#messages").innerHTML = state.messages
-    .map((m) =>
-      m.role === "user"
-        ? `<article class="message message-user"><div class="user-bubble">${esc(m.content)}</div></article>`
+    .map((m, index) =>
+      `${beginsNewChat(state.messages[index - 1], m, itemId) ? newChatDivider(m) : ""}${m.role === "user"
+        ? userMessage(m)
         : assistant(
             m.content,
             m.metadata?.model_configuration,
             m.kind === "error",
             m.id,
             m.metadata?.action_receipts,
-          ),
+            m,
+          )}`,
     )
     .join("");
   $("#main").classList.toggle("is-empty", !state.messages.length);
@@ -130,11 +219,23 @@ function renderMessages() {
       ? "发现值得读的论文，理解新方法，<br class=\"mobile-break\">把想法带到正在做的项目中。"
       : "从第一个问题开始，围绕这个课题积累资料、讨论和记忆。";
 }
-function assistant(text, config, error = false, id = "draft", receipts) {
+function renderInsights() {
+  const metrics = workspaceMetrics(state);
+  const cards = [
+    ["answers", "研究回答", metrics.answers, "本空间已完成"],
+    ["sources", "引用来源", metrics.sources, "可追溯链接"],
+    ["context", "当前上下文", metrics.currentContext, "本轮可带入"],
+    ["learning", "学习证据", metrics.learningEvidence, "不等于掌握"],
+  ];
+  const status = metrics.running ? "正在推进" : metrics.activeTasks ? `${metrics.activeTasks} 个任务进行中` : "专注当前对话";
+  $("#insight-board").hidden = false;
+  $("#insight-board").innerHTML = `<div class="insight-heading"><div><span class="eyebrow">RESEARCH PULSE</span><h2>研究概览</h2></div><span class="insight-status ${metrics.running ? "is-live" : ""}">${esc(status)}</span></div><div class="metric-grid">${cards.map(([action, label, value, note]) => `<button type="button" class="metric-card" data-insight="${action}" title="查看${label}"><span>${label}</span><strong>${value}</strong><small>${note}</small></button>`).join("")}</div><p class="insight-note">这些是活动与来源信号，不是答案质量、结论可信度或掌握程度的评分。</p>`;
+}
+function assistant(text, config, error = false, id = "draft", receipts, message = {}) {
   const count = id === "draft" ? 0 : sourcesFor(id).references.length;
   const answer = text ? markdown(text) : '<div class="typing-dots" aria-hidden="true"><span></span><span></span><span></span></div>';
-  const actions = id === "draft" ? "" : `<div class="message-actions"><button class="subtle copy-answer" data-id="${id}" title="复制完整回答">${icon("copy")}<span>复制</span></button><button class="subtle inspect-answer" data-id="${id}" title="查看本轮来源与上下文">${icon("paper")}<span>来源与上下文</span>${count ? `<span class="source-count">${count}</span>` : ""}</button></div>`;
-  return `<article class="message message-assistant ${error ? "message-error" : ""}" data-message="${id}"><div class="assistant-meta"><span class="assistant-mark">${icon("star")}</span><span>Lodestar</span><small>${esc(config?.model || state.configuration.model)}</small></div><div class="answer">${answer}</div><div class="execution">${actionHTML(receipts, { pending: id === "draft" })}</div>${actions}</article>`;
+  const actions = id === "draft" ? "" : `<div class="message-actions">${messageTime(message)}<button class="subtle copy-answer" data-id="${id}" title="复制完整回答">${icon("copy")}<span>复制</span></button><button class="subtle quote-answer" data-id="${id}" title="将整段回答引用到输入框">${icon("paper")}<span>引用整段</span></button><button class="subtle inspect-answer" data-id="${id}" title="查看本轮来源与上下文">${icon("context")}<span>来源与上下文</span>${count ? `<span class="source-count">${count}</span>` : ""}</button></div>`;
+  return `<article class="message message-assistant ${error ? "message-error" : ""}" data-message="${id}"><div class="assistant-meta"><span class="assistant-mark">${icon("star")}</span><span>Lodestar</span></div><div class="answer">${answer}</div><div class="execution">${actionHTML(receipts, { pending: id === "draft" })}</div>${actions}</article>`;
 }
 function render() {
   $('#memory').href='/memory?item='+encodeURIComponent(itemId);
@@ -149,7 +250,16 @@ function render() {
   renderModelControls();
   const project = state.projects.find((p) => p.id === state.item.project_id);
   $("#scope-label").textContent = `共享个人记忆${project ? " · " + project.name : ""} · 当前任务对话`;
+  renderInsights();
   renderMessages();
+  if (requestedMessageId) {
+    const target = document.querySelector(`[data-message="${CSS.escape(String(requestedMessageId))}"]`);
+    if (target) {
+      target.scrollIntoView({ block: "center" });
+      target.classList.add("is-source-target");
+      requestedMessageId = null;
+    }
+  }
   controls();
   if (drawerKind) renderDrawer();
 }
@@ -199,6 +309,12 @@ async function load(id = itemId) {
         if(draft && !$('#prompt').value) {
           $('#prompt').value=draft.slice(0,24000);
           $('#prompt').dispatchEvent(new Event('input'));
+        }
+        const reference=sessionStorage.getItem('lodestar-reference:'+itemId);
+        if(reference && !referenceText()) {
+          $('#reference-text').value=reference.slice(0,24000);
+          referenceExpanded=true;
+          syncReferenceInput();
         }
       } catch {}
     }
@@ -325,6 +441,7 @@ $("#composer").addEventListener("submit", async (event) => {
     return;
   }
   const message = $("#prompt").value.trim();
+  const reference = referenceText();
   if (!message || busy() || !state) return;
   const id = itemId,
     epoch = generation;
@@ -335,14 +452,20 @@ $("#composer").addEventListener("submit", async (event) => {
     const request = await api("/api/send", {
       item: id,
       message,
+      reference,
       key: crypto.randomUUID(),
     });
     if (epoch !== generation) return;
     submitting = false;
     $("#prompt").value = "";
-    try { sessionStorage.removeItem('lodestar-draft:'+id); } catch {}
+    clearReferenceInput();
+    try {
+      sessionStorage.removeItem('lodestar-draft:'+id);
+      sessionStorage.removeItem('lodestar-reference:'+id);
+    } catch {}
     $("#prompt").style.height = "auto";
-    state.messages.push({ role: "user", content: message });
+    state.messages.push({ role: "user", content: message,
+      metadata: reference ? { reference_text: reference } : {} });
     renderMessages();
     startPoll({ id: request.id, status: "queued", config: JSON.stringify(state.configuration) });
   } catch (error) {
@@ -364,9 +487,29 @@ $("#prompt").addEventListener("input", () => {
   $("#prompt").style.height = Math.min($("#prompt").scrollHeight, 190) + "px";
   controls();
 });
+$("#prompt").addEventListener("paste", (event) => {
+  const pasted = event.clipboardData?.getData("text/plain") || "";
+  if (pasted.trim().length < REFERENCE_PASTE_THRESHOLD) return;
+  event.preventDefault();
+  if (appendReference(pasted)) {
+    $("#prompt").focus();
+    toast("长文本已放到参考文本；请在下方写问题");
+  }
+});
+$("#reference-text").addEventListener("input", () => {
+  referenceExpanded = true;
+  syncReferenceInput();
+});
+$("#add-reference").onclick = showReferenceInput;
+$("#clear-reference").onclick = clearReferenceInput;
 // A full management page must not discard an unsent question when returning.
 window.addEventListener('pagehide',()=>{
-  try { sessionStorage.setItem('lodestar-draft:'+itemId,$('#prompt').value); } catch {}
+  try {
+    sessionStorage.setItem('lodestar-draft:'+itemId,$('#prompt').value);
+    const reference = referenceText();
+    if (reference) sessionStorage.setItem('lodestar-reference:'+itemId,reference);
+    else sessionStorage.removeItem('lodestar-reference:'+itemId);
+  } catch {}
 });
 $(".suggestions").addEventListener("click", (event) => {
   const button = event.target.closest("[data-prompt]");
@@ -554,9 +697,10 @@ function sourcesFor(messageId = null) {
 let sourceMessage = null;
 function sourceHTML(source, index = 0) {
   const url = safeUrl(source.url);
-  const host = url ? new URL(url).hostname.replace(/^www\./, "") : "";
+  const host = displayHost(url);
+  const title = source.title && !/^https?:\/\//i.test(source.title) ? source.title : "打开来源";
   const depth = source.observed === false ? "未关联检索记录" : source.read_depth === "full" ? "正文片段" : source.read_depth === "web" ? "网页片段" : source.read_depth === "abstract" ? "已读摘要" : "检索候选";
-  return `<article class="source-item"><span class="source-index">${index + 1}</span><div class="source-body">${url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(source.title || source.url)}${icon("out")}</a>` : esc(source.title || "来源")}<div class="source-host">${esc(host)}</div><div class="source-meta"><span class="source-depth">${depth}</span><span>${esc(source.date?.slice(0, 10) || "日期未标注")}</span>${source.venue ? `<span>${esc(source.venue)}</span>` : ""}</div>${evidenceHTML(source)}</div></article>`;
+  return `<article class="source-item"><span class="source-index">${index + 1}</span><div class="source-body">${url ? `<a class="source-link" href="${esc(url)}" target="_blank" rel="noopener noreferrer" aria-label="打开外部来源：${esc(host)}"><span>${esc(title)}</span><span class="source-action">打开 ${icon("out")}</span></a>` : esc(source.title || "来源")}<div class="source-host">${esc(host)}</div><div class="source-meta"><span class="source-depth">${depth}</span><span>${esc(source.date?.slice(0, 10) || "日期未标注")}</span>${source.venue ? `<span>${esc(source.venue)}</span>` : ""}</div>${evidenceHTML(source)}</div></article>`;
 }
 function openDrawer(kind) {
   drawerFocus = $("#sidebar").classList.contains("open") ? $("#menu") : document.activeElement;
@@ -620,12 +764,17 @@ function renderNotes() {
     ? notes
         .map(
           (n) =>
-            `<article class="note-item ${n.status === "disabled" ? "disabled" : ""}"><p>${esc(n.content)}</p><div class="source-meta"><span>${n.status === "active" ? "已启用" : "已停用"}</span><span>${esc(scopeLabels[n.scope])}${n.project_id ? " · " + esc(state.projects.find((p) => p.id === n.project_id)?.name || "") : n.item_id ? " · " + esc(state.items.find((t) => t.id === n.item_id)?.name || "") : ""}</span><span>修订 ${n.revision}</span><span>${n.source === "conversation" ? "来自对话" : n.source === "legacy" ? "旧记录保留" : "手动保存"}</span>${n.source_message_id ? `<span>消息 #${n.source_message_id}</span>` : ""}</div><div class="note-actions"><button class="subtle" data-note="${n.id}" data-action="edit">编辑</button><button class="subtle" data-note="${n.id}" data-action="toggle">${n.status === "active" ? "停用" : "恢复"}</button><button class="subtle" data-note="${n.id}" data-action="delete">遗忘</button></div></article>`,
+            `<article class="note-item ${n.status === "disabled" || n.status === "archived" ? "disabled" : ""}${n.id === memoryFocusId ? " is-focused" : ""}" data-memory-note="${esc(n.id)}"><p>${esc(n.content)}</p><div class="source-meta"><span>${memoryStatusLabels[n.status] || esc(n.status)}</span><span>${memoryTierLabels[n.tier] || "长期"} · ${esc(n.priority || "P1")}</span><span>${esc(scopeLabels[n.scope])}${n.project_id ? " · " + esc(state.projects.find((p) => p.id === n.project_id)?.name || "") : n.item_id ? " · " + esc(state.items.find((t) => t.id === n.item_id)?.name || "") : ""}</span><span>${n.reference_date ? `资料 ${esc(n.reference_date)}` : `记录 ${esc(String(n.created_at || "").slice(0, 10))}`}</span><span>${n.source === "conversation" ? "来自对话" : n.source === "legacy" ? "旧记录保留" : "手动保存"}</span>${n.source_message_id ? `<span>消息 #${n.source_message_id}</span>` : ""}</div><div class="note-actions"><button class="subtle" data-note="${n.id}" data-action="edit">编辑</button><button class="subtle" data-note="${n.id}" data-action="toggle">${n.status === "active" ? "停用" : "恢复"}</button><button class="subtle" data-note="${n.id}" data-action="delete">遗忘</button></div></article>`,
         )
         .join("")
     : '<div class="empty-state">' +
       (q ? "没有找到匹配的记忆。" : "把希望长期沿用的偏好，留在这里。") +
       "</div>";
+  if (memoryFocusId) {
+    const focus = document.querySelector(`[data-memory-note="${CSS.escape(memoryFocusId)}"]`);
+    if (focus) focus.scrollIntoView({ block: "nearest" });
+    memoryFocusId = null;
+  }
 }
 function editNote(id = null) {
   noteId = id;
@@ -634,6 +783,10 @@ function editNote(id = null) {
   $("#note-content").value = n?.content || "";
   $("#note-scope").textContent = "个人记忆共享，项目记忆按项目使用。";
   $("#note-range").value = n?.scope || "personal";
+  $("#note-tier").value = n?.tier || "durable";
+  $("#note-priority").value = n?.priority || "P1";
+  $("#note-kind").value = n?.kind || "note";
+  $("#note-reference-date").value = n?.reference_date || "";
   $("#note-project").innerHTML = projectOptions(n?.project_id || state.item.project_id);
   updateNoteScope();
   $("#note-dialog").showModal();
@@ -647,6 +800,10 @@ $("#note-form").onsubmit = async (e) => {
       revision: state.notes.find((n) => n.id === noteId)?.revision,
       scope: $("#note-range").value,
       project_id: Number($("#note-project").value) || null,
+      tier: $("#note-tier").value,
+      priority: $("#note-priority").value,
+      kind: $("#note-kind").value,
+      reference_date: $("#note-reference-date").value || null,
       content: $("#note-content").value,
     });
     $("#note-dialog").close();
@@ -716,7 +873,22 @@ $("#messages").onclick = async (e) => {
   const b = e.target.closest("button");
   if (!b) return;
   if (b.dataset.receiptItem) return load(b.dataset.receiptItem);
+  if (b.dataset.receiptMemory) {
+    memoryFocusId = b.dataset.receiptMemory;
+    openDrawer("memory");
+    return;
+  }
   const message = state.messages.find((m) => String(m.id) === b.dataset.id);
+  if (!message) return;
+  if (b.classList.contains("copy-question")) {
+    try {
+      await navigator.clipboard.writeText(message.content);
+      toast("已复制问题");
+    } catch {
+      toast("浏览器未允许复制，请手动选择文字");
+    }
+    return;
+  }
   if (b.classList.contains("copy-answer")) {
     try {
       await navigator.clipboard.writeText(message.content);
@@ -727,6 +899,11 @@ $("#messages").onclick = async (e) => {
     } catch {
       toast("浏览器未允许复制，请手动选择文字");
     }
+    return;
+  }
+  if (b.classList.contains("quote-answer")) {
+    insertQuote(message.content);
+    return;
   }
   if (b.classList.contains("inspect-answer")) {
     openDrawer("context");
@@ -734,8 +911,49 @@ $("#messages").onclick = async (e) => {
     renderDrawer();
   }
 };
+function insertQuote(text) {
+  const quote = quoteMarkdown(text);
+  if (!quote) return;
+  if (!appendReference(quote)) return;
+  const prompt = $("#prompt");
+  prompt.focus();
+  prompt.setSelectionRange(prompt.value.length, prompt.value.length);
+  $("#quote-selection").hidden = true;
+  selectedAnswerQuote = "";
+  toast("已加入上方参考文本");
+}
+function updateQuoteSelection() {
+  const selection = window.getSelection();
+  const text = selection?.toString().trim() || "";
+  const node = selection?.anchorNode?.nodeType === Node.ELEMENT_NODE ? selection.anchorNode : selection?.anchorNode?.parentElement;
+  const answer = node?.closest?.(".message-assistant .answer");
+  const button = $("#quote-selection");
+  if (!text || !answer || !selection.rangeCount) {
+    selectedAnswerQuote = "";
+    button.hidden = true;
+    return;
+  }
+  selectedAnswerQuote = text;
+  const rect = selection.getRangeAt(0).getBoundingClientRect();
+  button.style.left = `${Math.max(10, Math.min(rect.left, window.innerWidth - 156))}px`;
+  button.style.top = `${Math.max(10, rect.bottom + 8)}px`;
+  button.hidden = false;
+}
+document.addEventListener("selectionchange", () => requestAnimationFrame(updateQuoteSelection));
+$("#quote-selection").onclick = () => insertQuote(selectedAnswerQuote);
 $("#context").onclick = () => openDrawer("context");
 $("#task-center").onclick = () => openDrawer("tasks");
+$("#insight-board").onclick = (event) => {
+  const action = event.target.closest("[data-insight]")?.dataset.insight;
+  if (action === "sources") {
+    openDrawer("context");
+    sourceMessage = latestCitedMessage(state.messages);
+    return renderDrawer();
+  }
+  if (action === "context") return openDrawer("context");
+  if (action === "learning") return openDrawer("memory");
+  if (action === "answers") $("#messages").scrollIntoView({ behavior: "smooth", block: "start" });
+};
 function updateNoteScope() {
   $("#note-project").hidden = $("#note-project-label").hidden = $("#note-range").value !== "project";
 }
@@ -808,7 +1026,8 @@ document.addEventListener("keydown", (e) => {
     load("main");
   }
 });
-load();
+await load();
+await addRequestedPaperReference();
 // Status-only polling never calls a model, reloads a transcript or interrupts typing.
 setInterval(async () => {
   if (!state || document.hidden) return;

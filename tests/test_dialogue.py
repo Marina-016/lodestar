@@ -74,6 +74,26 @@ class DialogueTests(unittest.TestCase):
         self.llm.complete.assert_not_called()
         self.llm.complete_json.assert_not_called()
 
+    def test_explicit_fresh_request_prefetches_current_sources_without_creating_memory(self):
+        self.llm.dialogue_step.return_value = answer('本轮答案。')
+        source = {'url': 'https://openai.com/news', 'title': 'Official release',
+                  'source_type': 'official_release', 'authority': 'primary'}
+        with patch('lodestar.tools.registry.call_tool', return_value={'sources': [source]}) as tool:
+            result = self.run_dialogue(context={'message': 'OpenAI 最近发布了什么？', 'papers': []})
+        self.assertEqual([call.args[2]['source'] for call in tool.call_args_list], ['official', 'github'])
+        self.assertEqual([event['action'] for event in result['dialogue_events']], ['search_updates', 'search_updates'])
+        self.assertTrue(all(event['host_initiated'] for event in result['dialogue_events']))
+        self.assertTrue(all('manage_memory' not in event['action'] for event in result['dialogue_events']))
+        definitions = self.llm.dialogue_step.call_args.args[2]
+        self.assertIn('search_updates', [item['name'] for item in definitions])
+        self.assertEqual(result['candidates'][0]['authority'], 'primary')
+
+    def test_company_mention_without_freshness_cue_does_not_search(self):
+        self.llm.dialogue_step.return_value = answer('说明。')
+        with patch('lodestar.tools.registry.call_tool') as tool:
+            self.run_dialogue(context={'message': 'OpenAI 是做什么的？', 'papers': []})
+        tool.assert_not_called()
+
     def test_user_reference_is_labeled_data_separate_from_the_question(self):
         from lodestar.agent.evidence import answer_context
         packet = answer_context({'current_time': '2026-11-09T00:00:00+00:00',

@@ -8,6 +8,7 @@ from lodestar.tools import (  # noqa: E402,F401
     learning,
     paper_read,
     project_context,
+    updates,
     web_read,
     web_search,
 )

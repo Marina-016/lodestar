@@ -142,7 +142,8 @@ class WebApp:
         if not isinstance(value, dict):
             return {}
         fields = ('url', 'title', 'date', 'venue', 'read_depth', 'read_query',
-                  'record_url', 'related_paper_url', 'authors', 'year')
+                  'record_url', 'related_paper_url', 'authors', 'year', 'source_type',
+                  'provider', 'authority', 'dynamic_source', 'retrieved_at')
         return {key: value[key] for key in fields if value.get(key) not in (None, '', [], {})}
 
     @classmethod

@@ -33,6 +33,7 @@ const labels = {
   search_papers: "正在检索论文",
   discover_papers: "正在发现近期论文",
   search_web: "正在搜索网页",
+  search_updates: "正在检索近期动态",
   read_paper: "正在阅读论文",
   read_webpage: "正在阅读网页",
   verify_paper: "正在核查发表信息",
@@ -711,7 +712,8 @@ function sourceHTML(source, index = 0) {
   const host = displayHost(url);
   const title = source.title && !/^https?:\/\//i.test(source.title) ? source.title : "打开来源";
   const depth = source.observed === false ? "未关联检索记录" : source.read_depth === "full" ? "正文片段" : source.read_depth === "web" ? "网页片段" : source.read_depth === "abstract" ? "已读摘要" : "检索候选";
-  return `<article class="source-item"><span class="source-index">${index + 1}</span><div class="source-body">${url ? `<a class="source-link" href="${esc(url)}" target="_blank" rel="noopener noreferrer" aria-label="打开外部来源：${esc(host)}"><span>${esc(title)}</span><span class="source-action">打开 ${icon("out")}</span></a>` : esc(source.title || "来源")}<div class="source-host">${esc(host)}</div><div class="source-meta"><span class="source-depth">${depth}</span><span>${esc(source.date?.slice(0, 10) || "日期未标注")}</span>${source.venue ? `<span>${esc(source.venue)}</span>` : ""}</div>${evidenceHTML(source)}</div></article>`;
+  const authority = ({primary:"官方 / 项目", paper:"论文", secondary:"网页报道", signal:"社区线索"})[source.authority] || "";
+  return `<article class="source-item"><span class="source-index">${index + 1}</span><div class="source-body">${url ? `<a class="source-link" href="${esc(url)}" target="_blank" rel="noopener noreferrer" aria-label="打开外部来源：${esc(host)}"><span>${esc(title)}</span><span class="source-action">打开 ${icon("out")}</span></a>` : esc(source.title || "来源")}<div class="source-host">${esc(host)}</div><div class="source-meta"><span class="source-depth">${depth}</span>${authority ? `<span class="source-origin">${authority}</span>` : ""}<span>${esc(source.date?.slice(0, 10) || "日期未标注")}</span>${source.venue ? `<span>${esc(source.venue)}</span>` : ""}</div>${evidenceHTML(source)}</div></article>`;
 }
 function openDrawer(kind) {
   drawerFocus = $("#sidebar").classList.contains("open") ? $("#menu") : document.activeElement;

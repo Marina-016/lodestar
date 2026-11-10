@@ -355,6 +355,7 @@ main.is-empty .scroll-area { display: flex; align-items: safe center; }
 .source-host { font-size: 11px; color: var(--muted); margin-top: 6px; overflow-wrap: anywhere; }
 .source-meta { font-size: 11px; color: var(--muted); margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap; line-height: 1.7; }
 .source-depth { background: var(--surface); color: var(--secondary); border-radius: 5px; padding: 1px 6px; }
+.source-origin { color: var(--accent); }
 .note-item, .project-item { padding: 18px 0; border-bottom: 1px solid var(--line); }
 .note-item p { color: var(--ink); font-size: 14px; white-space: pre-wrap; margin: 0 0 10px; }
 .note-item.disabled p { color: var(--tertiary); }

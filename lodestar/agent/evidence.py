@@ -225,6 +225,7 @@ def verify_publication(ws, source):
 def source_details(sources):
     """Small factual observations for answer inspection, without duplicating bodies."""
     fields = ('url', 'title', 'source_type', 'date', 'date_basis', 'read_depth',
-              'provider', 'venue', 'publication_status', 'record_url')
+              'provider', 'authority', 'dynamic_source', 'retrieved_at', 'venue',
+              'publication_status', 'record_url')
     return [{key: source[key] for key in fields if source.get(key) is not None}
             for source in merge_sources(sources)]

@@ -287,8 +287,8 @@ main.is-empty .scroll-area { display: flex; align-items: safe center; }
 .message-actions { margin-top: 9px; display: flex; align-items: center; gap: 5px; opacity: 0; transform: translateY(-2px); pointer-events: none; transition: opacity .16s var(--ease), transform .16s var(--ease); }
 .message:hover .message-actions, .message:focus-within .message-actions { opacity: 1; transform: none; pointer-events: auto; }
 .message-assistant .message-actions { opacity: 1; transform: none; pointer-events: auto; }
-.user-message-actions { position: absolute; top: 100%; right: 0; justify-content: flex-end; gap: 3px; margin-top: 0; opacity: 0; visibility: hidden; transform: translateY(3px); pointer-events: none; }
-.message-user:hover .user-message-actions, .message-user:focus-within .user-message-actions { opacity: 1; visibility: visible; transform: translateY(3px); pointer-events: auto; }
+.user-message-actions { position: absolute; top: 100%; right: 0; justify-content: flex-end; gap: 3px; margin-top: 0; padding-top: 3px; opacity: 0; visibility: hidden; transform: none; pointer-events: none; }
+.message-user:hover .user-message-actions, .message-user:focus-within .user-message-actions { opacity: 1; visibility: visible; transform: none; pointer-events: auto; }
 .user-message-actions .message-timestamp { margin-right: 1px; font-size: 9px; }
 .user-message-actions .copy-question { min-height: 22px; width: 22px; padding: 4px; border-radius: 6px; justify-content: center; }
 .user-message-actions .copy-question span { display: none; }

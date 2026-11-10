@@ -421,6 +421,22 @@ class DialogueTests(unittest.TestCase):
         self.assertEqual(tool.call_args.args[2]['url'], url)
         self.assertEqual(result['evidence_reused'], 1)
 
+    def test_failed_reply_sources_remain_auditable_but_do_not_pollute_followup_context(self):
+        from lodestar.memory import repo
+        agent = ConversationAgent(self.ws, self.llm)
+        session = agent.start()
+        rejected = {'url': 'https://unrelated.example/retrieval', 'title': 'Unrelated result'}
+        repo.add_message(self.ws.conn, session, 'assistant', '上轮未完成。', kind='error',
+                         metadata={'candidates': [rejected]})
+        captured = {}
+        def gather_stub(ws, llm, context, project_id, **kwargs):
+            captured.update(context)
+            return {**context, 'answer': '正常回答。', 'grounding': {},
+                    'dialogue_events': [], 'papers': [], 'candidates': []}
+        with patch('lodestar.agent.dialogue.gather', side_effect=gather_stub):
+            agent.turn(session, '你好')
+        self.assertEqual(captured['candidates'], [])
+
     def test_failure_keeps_evidence_and_partial_text(self):
         def fail(system, messages, tools, on_text):
             on_text('部分回答')

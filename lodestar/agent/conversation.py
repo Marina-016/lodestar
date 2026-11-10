@@ -209,7 +209,11 @@ class ConversationAgent:
                 candidates = []
                 for previous in reversed(history):
                     metadata = json.loads(previous.get('metadata') or '{}')
-                    if previous['role'] == 'assistant' and 'candidates' in metadata:
+                    # A failed/cancelled reply may retain sources for audit, but
+                    # has not formed a usable answer. Never silently inject its
+                    # stale or off-topic retrieval candidates into the next turn.
+                    if (previous['role'] == 'assistant' and previous.get('kind') not in ('error', 'cancelled')
+                            and 'candidates' in metadata):
                         candidates = metadata['candidates']
                         break
                 context = {'message': message, 'reference_text': reference_text, 'candidates': candidates,

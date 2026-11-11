@@ -1,0 +1,5 @@
+# Generated vendor assets contain whitespace inside bundled source strings.
+# Keep their exact bytes and review the pinned inputs/build script instead.
+lodestar/web/static/mermaid.bundle.js -diff -whitespace linguist-generated=true
+lodestar/web/static/mermaid.bundle.js.LEGAL.txt -whitespace linguist-generated=true
+lodestar/web/static/mermaid-notices.txt -whitespace linguist-generated=true

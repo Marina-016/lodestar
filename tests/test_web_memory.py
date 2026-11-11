@@ -369,6 +369,19 @@ class SharedMemoryTest(unittest.TestCase):
         self.assertIn('检索线索', recalled['evidence_rule'])
         self.assertNotIn('核心思想', recalled['content'])
 
+    def test_reference_memory_is_only_recalled_for_a_matching_question(self):
+        self.app.note('main', {'content': '你的名字叫 Marina'})
+        saved = self.app.note('main', {'content': 'CueMem: Cue-Guided Context Reconstruction\n'
+                                                'https://arxiv.org/abs/2609.12354v1', 'kind': 'reference'})
+        for question in ('你好', '给我介绍一篇论文吧', '推荐些参考资料',
+                         'https://arxiv.org/abs/2611.00001'):
+            packet = self.context('main', question)
+            ids = {json.loads(row)['id'] for row in packet['managed_memory']}
+            self.assertNotIn(saved['id'], ids)
+            self.assertTrue(any(json.loads(row)['priority'] == 'P0' for row in packet['managed_memory']))
+        packet = self.context('main', 'CueMem 的架构是什么？')
+        self.assertIn(saved['id'], {json.loads(row)['id'] for row in packet['managed_memory']})
+
     def test_memory_metadata_lifecycle_and_source_anchors_are_preserved(self):
         self.context('main', 'SOURCE_ANCHOR_MESSAGE')
         with self.app.workspace() as ws:

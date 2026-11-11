@@ -1,15 +1,45 @@
-const FRESH = /(?:最新|最近|近期|今天|本周|本月|新模型|发布|上线|新闻|动态|\b(?:latest|recent|today|this week|new model|release|news|current)\b)/i;
+// Optional response metadata emitted by the model. The host validates and stores
+// it; this copy also keeps an in-progress streaming trailer out of the answer.
+const TRAILER = /(?:\r?\n)?<!--lodestar-followups:(\{[\s\S]*?\})-->\s*$/;
+const INCOMPLETE_TRAILER = /(?:\r?\n)<!--lodestar-followups:/;
 
-// These are optional next-turn choices, not assertions or hidden commands.
-// They avoid another model call and remain visible/editable as normal prompts.
-export function suggestedPrompts({ answer, userPrompt, sourceCount = 0, error = false }) {
-  if (error || typeof answer !== "string" || answer.trim().length < 120) return [];
-  if (sourceCount || FRESH.test(userPrompt || "")) return [
-    { title: "核对关键依据", detail: "区分它支持与不能证明的内容", prompt: "请选出上面最关键的两条来源，分别说明它们支持什么、还不能证明什么。" },
-    { title: "继续落到下一步", detail: "把结论变成最小行动", prompt: "基于上面的内容，给我一个最小的下一步：要验证什么、看什么证据、什么结果会改变判断？" },
-  ];
-  return [
-    { title: "用例子说明", detail: "换成一个具体场景", prompt: "请用一个贴近实际的例子解释上面最关键的机制或判断。" },
-    { title: "比较两条路线", detail: "把取舍讲清楚", prompt: "请给出两条可选的下一步路线，并说明各自的收益、代价和适用条件。" },
-  ];
+function validatedItems(value) {
+  const raw = value?.items;
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set();
+  const items = [];
+  for (const item of raw) {
+    const prompt = typeof item?.prompt === "string" ? item.prompt.trim() : "";
+    const key = prompt.toLocaleLowerCase();
+    if (prompt.length < 4 || prompt.length > 400 || prompt.includes("<!--") || seen.has(key)) continue;
+    seen.add(key);
+    items.push({ prompt });
+    if (items.length === 3) break;
+  }
+  return items;
+}
+
+export function splitModelFollowups(text) {
+  const source = String(text ?? "");
+  const match = source.match(TRAILER);
+  if (!match) return { answer: source, items: [] };
+  try {
+    const items = validatedItems(JSON.parse(match[1]));
+    const answer = source.slice(0, match.index).trimEnd();
+    return answer && items.length ? { answer, items } : { answer: source, items: [] };
+  } catch {
+    return { answer: source, items: [] };
+  }
+}
+
+export function visibleAnswer(text) {
+  const source = String(text ?? "");
+  const parsed = splitModelFollowups(source);
+  if (parsed.answer !== source) return parsed.answer;
+  const start = source.search(INCOMPLETE_TRAILER);
+  return start === -1 ? source : source.slice(0, start).trimEnd();
+}
+
+export function storedFollowups(value) {
+  return validatedItems({ items: value });
 }

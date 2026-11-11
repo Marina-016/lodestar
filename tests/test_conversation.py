@@ -56,6 +56,20 @@ class ConversationTests(unittest.TestCase):
         self.assertEqual(question['content'], '请解释这段引用')
         self.assertEqual(json.loads(question['metadata'])['reference_text'], 'REFERENCE_CANARY')
 
+    def test_retry_reuses_the_original_user_message_without_duplication(self):
+        from unittest.mock import patch
+        session = self.agent.start('alice')
+        with patch.object(self.agent.llm, 'dialogue_step', side_effect=[
+                answer('第一次回答。'), answer('重新生成的回答。')]):
+            self.agent.turn(session, '解释这个机制', user_id='alice')
+            user_id = self.agent.history(session, 'alice')[0]['id']
+            retried = self.agent.turn(session, '解释这个机制', user_id='alice',
+                                      reuse_user_message_id=user_id)
+        transcript = self.agent.history(session, 'alice')
+        self.assertEqual(retried['answer'], '重新生成的回答。')
+        self.assertEqual([message['role'] for message in transcript], ['user', 'assistant', 'assistant'])
+        self.assertEqual(sum(message['role'] == 'user' for message in transcript), 1)
+
     def test_synthesis_failure_is_error_with_recoverable_evidence(self):
         from unittest.mock import patch
         from lodestar.llm import LLMError

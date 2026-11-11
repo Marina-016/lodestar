@@ -55,6 +55,7 @@ export function sourceGroups(message, history = []) {
   for (const previous of history.slice(0, Math.max(0, index)))
     if (previous.role === "assistant") observe(previous.metadata || {}, false, previous.id);
   observe(message?.metadata || {}, true, message?.id);
+  for (const source of message?.metadata?.referenced_papers || []) add(source);
   const used = new Set(), references = [];
   for (const link of linkedUrls(message?.content)) {
     const url = key(link);
@@ -69,12 +70,35 @@ export function sourceGroups(message, history = []) {
     references.push(matched ? { ...known.get(matched), url, observed: true }
       : { url, title: url, observed: false });
   }
+  const body = String(message?.content || '').replace(/\*\*/g, '').toLocaleLowerCase();
+  const attached = new Set((message?.metadata?.referenced_papers || []).map(s => key(s.url)));
+  for (const [url, source] of known) {
+    // Support older answers that named the full paper title but omitted a link.
+    // Do not promote inherited, unused candidates into answer references.
+    const title = String(source.title || '').toLocaleLowerCase();
+    const named = title.length >= 12 && !title.startsWith('http') && body.includes(title);
+    if ((attached.has(url) || named) && !used.has(url)) {
+      used.add(url);
+      references.push({...source, observed: true});
+    }
+  }
   return { references, retrieval: [...observed].filter((url) => !used.has(url)).map((url) => known.get(url)) };
 }
 
 
 export function evidenceHTML(source) {
   const parts = source.evidence_readings || [];
-  const depth = value => ({full:"正文片段",abstract:"摘要",web:"网页片段",search_snippet:"检索片段"}[value] || "范围未标注");
-  return `<details class="source-evidence" data-evidence-url="${esc(source.url)}"><summary>查看已保存证据 · ${parts.length} 段证据</summary><p class="fineprint">仅显示截至这条回答已保存的片段；不重新联网，不代表覆盖全文或结论已核实。</p>${parts.length ? parts.map((r,i)=>`<section class="evidence-reading"><h4>${i+1}. ${depth(r.read_depth)}</h4><div class="source-meta"><span>来源 · ${esc(displayHost(r.source_url || source.url) || "未标注")}</span>${r.message_id!=null ? `<span>消息 #${esc(r.message_id)}</span>` : ""}</div>${r.read_mode === "mock" ? '<p class="evidence-warning">离线夹具，不是真实论文证据。</p>' : ""}${r.note ? `<p class="fineprint">读取说明：${esc(r.note)}</p>` : ""}${r.query ? `<p class="fineprint">查询：${esc(r.query)}</p>` : ""}${r.coverage ? `<p class="fineprint">覆盖：${esc(r.coverage)}</p>` : ""}${r.sections?.length ? `<p class="fineprint">章节：${esc(r.sections.join("、"))}</p>` : ""}${r.truncated || r.context_truncated ? '<p class="evidence-warning">此记录有截断或上下文省略，未显示的内容不能据此判定不存在。</p>' : ""}${r.evidence_spans?.length ? `<p class="fineprint">抽取文本坐标：${r.evidence_spans.map(s=>`${esc(s.start)}–${esc(s.end)}`).join("，")}；是原始抽取坐标，不是此处字符位置或 PDF 页码。</p>` : ""}<pre class="evidence-text">${esc(r.text)}</pre></section>`).join("") : '<p class="empty-state">没有保存可展示的原文片段。引用或阅读深度元数据不能替代正文；早期记录也可能没有保留片段。</p>'}</details>`;
+  const depth = value => ({full:"正文片段",abstract:"论文摘要",web:"网页片段",search_snippet:"检索摘要"}[value] || "原文片段");
+  const readings = parts.map((r, i) => {
+    const technical = [
+      r.message_id != null ? `<p>对应消息：#${esc(r.message_id)}</p>` : "",
+      r.query ? `<p>检索问题：${esc(r.query)}</p>` : "",
+      r.coverage ? `<p>读取范围标识：<code>${esc(r.coverage)}</code></p>` : "",
+      r.note ? `<p>读取说明：${esc(r.note)}</p>` : "",
+      r.sections?.length ? `<p>章节记录：${esc(r.sections.join("、"))}</p>` : "",
+      r.evidence_spans?.length ? `<p>抽取文本坐标：${r.evidence_spans.map(s => `${esc(s.start)}–${esc(s.end)}`).join("，")}；是原始抽取坐标，不是此处字符位置或 PDF 页码。</p>` : "",
+    ].filter(Boolean).join("");
+    return `<section class="evidence-reading"><h4>${parts.length > 1 ? `${i+1}. ` : ""}${depth(r.read_depth)}</h4><div class="source-meta"><span>来源 · ${esc(displayHost(r.source_url || source.url) || "未标注")}</span></div>${r.read_mode === "mock" ? '<p class="evidence-warning">离线夹具，不是真实论文证据。</p>' : ""}<pre class="evidence-text" tabindex="0" aria-label="已读取的原文片段">${esc(r.text)}</pre>${r.truncated || r.context_truncated ? '<p class="evidence-note">此片段已截断，仅展示部分原文。</p>' : ""}${technical ? `<details class="evidence-technical"><summary>技术详情</summary><div>${technical}</div></details>` : ""}</section>`;
+  }).join("");
+  return `<details class="source-evidence" data-evidence-url="${esc(source.url)}"><summary>查看阅读片段${parts.length ? ` · ${parts.length} 段` : ""}</summary>${parts.length ? `<p class="evidence-note">以下是当时读取的原文节选，不代表已阅读全文。</p>${readings}` : '<p class="empty-state">没有保存可展示的原文片段，可点击来源标题查看原文。</p>'}</details>`;
 }

@@ -1,6 +1,8 @@
 import {escape as esc,safeUrl} from './markdown.mjs';
 import {evidenceHTML} from './sources.mjs';
 import {stamp} from './library-views.mjs';
+import {initializeNavigation} from './navigation.mjs';
+initializeNavigation();
 const $=s=>document.querySelector(s),token=$('meta[name="lodestar-token"]').content;
 const params=new URLSearchParams(location.search),isHistory=location.pathname==='/history';
 let projectId=Number(params.get('project'))||0,library,current=null,page=1,total=0,editing=null,epoch=0,pending=false;
@@ -68,13 +70,15 @@ $('#menu').onclick=()=>{if($('#sidebar').classList.contains('open'))return close
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!document.querySelector('dialog[open]'))closeNav(true);if(e.key==='Tab'&&$('#sidebar').classList.contains('open')){const links=[...$('#sidebar').querySelectorAll('a[href]')],first=links[0],last=links.at(-1);if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}});
 $('#research-controls').hidden=isHistory;$('#search-query').hidden=$('#search-button').hidden=isHistory?false:true;
 $('#search-query').previousElementSibling.hidden=!isHistory;
-$('#page-title').textContent=$('#page-name').textContent=isHistory?'历史检索':'项目研究';
+$('#page-title').textContent=$('#page-name').textContent=isHistory?'搜索对话':'项目研究';
 $('#page-description').textContent=isHistory?'找回旧讨论及原消息；助手历史回答仍需核验。':'从论文候选到证据、项目假设和验证记录。';
 try{
  library=await api('/api/library');projectId||=library.projects[0]?.id||0;
  if(isHistory&&!params.get('project'))projectId=0;
  $('#project-filter').innerHTML=(isHistory?'<option value="0">所有项目与未绑定对话</option>':'')+library.projects.map(p=>`<option value="${p.id}" ${p.id===projectId?'selected':''}>${esc(p.name)}</option>`).join('');
- $('#task-list').innerHTML=library.items.filter(i=>i.id!=='main'&&i.status!=='archived').map(i=>`<a class="nav-item" href="/?item=${encodeURIComponent(i.id)}">${esc(i.name)}</a>`).join('');$('#task-count').textContent=library.items.length-1;
+ const tasks=library.items.filter(i=>i.id!=='main'&&i.status!=='archived');
+ $('#task-list').innerHTML=tasks.map(i=>`<a class="nav-item" href="/?item=${encodeURIComponent(i.id)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h14v18H5ZM9 8h6M9 12h6M9 16h3"/></svg><span class="task-name">${esc(i.name)}</span></a>`).join('');
+ $('#task-count').textContent=tasks.length;$('#tasks-empty').hidden=!!tasks.length;
  await load();if(isHistory&&params.get('message'))await openMessage(params.get('item')||'main',Number(params.get('message')));
 }catch(error){notice(error.message);}
 

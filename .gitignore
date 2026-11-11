@@ -22,6 +22,7 @@ experiments/
 
 # 测试缓存
 .pytest_cache/
+node_modules/
 lodestar.bat
 # Deployment and local tooling
 .vercel/

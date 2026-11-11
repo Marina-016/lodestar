@@ -114,6 +114,54 @@ class WebTest(unittest.TestCase):
         self.assertEqual(captured[0]['message'], '这个结论可靠吗？')
         self.assertEqual(captured[0]['reference_text'], 'REFERENCE_CANARY')
 
+    def test_slow_learning_audit_does_not_hold_reply_or_next_turn_open(self):
+        entered, release = threading.Event(), threading.Event()
+        def gathered(ws, llm, context, project_id, **callbacks):
+            context['papers'] = [{'source_type': 'paper', 'url': 'https://arxiv.org/abs/2611.00001',
+                                  'content': 'The method preserves context.'}]
+            return self.gather(ws, llm, context, project_id, **callbacks)
+        def slow_audit(*args, **kwargs):
+            entered.set()
+            if not release.wait(5):
+                raise AssertionError('test audit was not released')
+            return []
+        try:
+            with patch('lodestar.agent.dialogue.gather', side_effect=gathered), \
+                    patch('lodestar.agent.exposure.record_exposure', side_effect=slow_audit):
+                first = self.app.submit('main', '解释论文机制', 'slow-audit')
+                self.assertTrue(entered.wait(3))
+                self.assertEqual(self.app.events(first, 0)['run']['status'], 'completed')
+                first_message = self.app.state()['messages'][-1]['id']
+                second = self.app.submit('main', '继续提问', 'next-during-audit')
+                self.assertEqual(self.wait(second)['run']['status'], 'completed')
+                release.set()
+                self.app.close()
+                messages = self.app.state()['messages']
+                original = next(m for m in messages if m['id'] == first_message)
+                self.assertEqual(original['metadata']['run_id'], first)
+                self.assertEqual(original['metadata']['learning_exposure_status'], 'no_supported_methods')
+                self.assertEqual(messages[-1]['metadata']['run_id'], second)
+        finally:
+            release.set()
+
+    def test_retry_reuses_current_question_and_keeps_the_transcript_linear(self):
+        captured = []
+        def capture(ws, llm, context, project_id, **callbacks):
+            captured.append(context)
+            return self.gather(ws, llm, context, project_id, **callbacks)
+        with patch('lodestar.agent.dialogue.gather', side_effect=capture):
+            first = self.wait(self.app.submit('main', '解释这个机制', 'first', reference_text='SOURCE_NOTE'))
+            first_answer = self.app.state()['messages'][-1]
+            retried = self.wait(self.app.retry('main', first_answer['id'], 'retry'))
+        self.assertEqual(first['run']['status'], 'completed')
+        self.assertEqual(retried['run']['status'], 'completed')
+        transcript = self.app.state()['messages']
+        self.assertEqual([message['role'] for message in transcript], ['user', 'assistant', 'assistant'])
+        self.assertEqual(captured[1]['message'], '解释这个机制')
+        self.assertEqual(captured[1]['reference_text'], 'SOURCE_NOTE')
+        self.assertEqual(captured[1]['history'], [])
+        self.assertEqual(json.loads(retried['run']['result'])['web_context']['retry_user_message_id'], transcript[0]['id'])
+
     def test_compact_state_defers_large_provenance_until_inspection(self):
         source = {'url': 'https://example.test/provenance', 'title': 'Provenance',
                   'content': 'EVIDENCE_BODY_' * 3000, 'read_depth': 'web'}
@@ -252,6 +300,18 @@ class WebTest(unittest.TestCase):
             timeline = client.get(url+'/timeline.mjs',timeout=3)
             self.assertEqual(timeline.status_code,200)
             self.assertIn('beginsNewChat', timeline.text)
+            stream = client.get(url+'/stream.mjs',timeout=3)
+            self.assertEqual(stream.status_code,200)
+            self.assertIn('javascript', stream.headers['Content-Type'])
+            self.assertIn('streamDisplay', stream.text)
+            diagram = client.get(url+'/diagram.html',timeout=3)
+            self.assertEqual(diagram.status_code,200)
+            self.assertIn("connect-src 'none'",diagram.headers['Content-Security-Policy'])
+            self.assertIn("frame-ancestors 'self'",diagram.headers['Content-Security-Policy'])
+            self.assertNotIn(self.app.token,diagram.text)
+            self.assertNotIn("unsafe-inline",response.headers['Content-Security-Policy'])
+            self.assertEqual(client.get(url+'/diagrams.mjs',timeout=3).status_code,200)
+            self.assertEqual(client.get(url+'/mermaid.bundle.js',timeout=3).status_code,200)
         finally:
             client.close();server.shutdown();server.server_close();worker.join()
 

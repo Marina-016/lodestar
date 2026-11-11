@@ -1,0 +1,25 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { streamDisplay } from '../lodestar/web/static/stream.mjs';
+
+test('network batches render progressively without splitting emoji and stop cleanly', () => {
+  let nextId = 0;
+  const frames = new Map(), rendered = [];
+  const display = streamDisplay(text => rendered.push(text), {
+    schedule: cb => { frames.set(++nextId, cb); return nextId; },
+    cancel: id => frames.delete(id),
+  });
+  const text = '新的内容🙂'.repeat(15);
+  display.update(text);
+  for (let time = 40; frames.size && time < 4000; time += 40) {
+    const batch = [...frames.values()]; frames.clear();
+    for (const cb of batch) cb(time);
+  }
+  assert.ok(rendered.length > 1);
+  assert.ok(rendered[0].length < text.length);
+  assert.equal(rendered.at(-1), text);
+  assert.ok(rendered.every(value => text.startsWith(value) && !/[\uD800-\uDBFF]$/.test(value)));
+  display.update(text + '追加');
+  display.stop();
+  assert.equal(frames.size, 0);
+});

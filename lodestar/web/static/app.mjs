@@ -5,7 +5,11 @@ import { actionHTML } from "./actions.mjs";
 import { defaultModel, modelOptionsHTML, hiddenModelsHTML } from "./models.mjs";
 import { quoteMarkdown } from "./quote.mjs";
 import { beginsNewChat, sessionDateLabel, timestampLabel } from "./timeline.mjs";
-import { suggestedPrompts } from "./followups.mjs";
+import { storedFollowups, visibleAnswer } from "./followups.mjs";
+import { streamDisplay } from "./stream.mjs";
+import { initializeNavigation } from "./navigation.mjs";
+import { mountDiagrams } from "./diagrams.mjs";
+initializeNavigation();
 const $ = (s) => document.querySelector(s),
   icon = (name) => `<svg aria-hidden="true"><use href="#i-${name}"/></svg>`;
 const token = $('meta[name="lodestar-token"]').content;
@@ -23,6 +27,8 @@ let memoryFocusId = null,
   selectedAnswerQuote = "";
 const REFERENCE_PASTE_THRESHOLD = 600;
 let referenceExpanded = false;
+let composingPrompt = false;
+let finishAfterComposition = null;
 try {
   itemId = localStorage.getItem("lodestar-item") || "main";
 } catch {}
@@ -82,7 +88,7 @@ function toast(message) {
   toastTimer = setTimeout(() => ($("#toast").hidden = true), 4500);
 }
 function setStatus(text, busy = false) {
-  $("#run-status").textContent = text;
+  if ($("#run-status").textContent !== text) $("#run-status").textContent = text;
   $("#run-status").classList.toggle("busy", busy);
   $("#composer").setAttribute("aria-busy", String(busy));
 }
@@ -107,7 +113,7 @@ function controls() {
   const unavailable = state?.model_selection?.current_blocked;
   const stopping = activeRun?.status === "cancelling";
   $("#send").disabled = activeRun ? stopping : submitting || inactive || paused || unavailable || !$("#prompt").value.trim();
-  $("#prompt").disabled = inactive;
+  if ($("#prompt").disabled !== inactive) $("#prompt").disabled = inactive;
   $("#thinking").disabled = !state;
   $("#model-settings").disabled = !state;
   $("#send").classList.toggle("is-busy", submitting || stopping);
@@ -214,6 +220,7 @@ function renderMessages() {
   $("#main").classList.toggle("is-empty", !state.messages.length);
   $("#welcome").hidden = !!state.messages.length;
   $("#messages").hidden = !state.messages.length;
+  mountDiagrams($("#messages"));
   $("#welcome h1").textContent =
     itemId === "main" ? "今天，想研究什么？" : state.item.name;
   $("#welcome>p").innerHTML =
@@ -235,12 +242,18 @@ function renderInsights() {
 }
 function assistant(text, config, error = false, id = "draft", receipts, message = {}) {
   const count = id === "draft" ? 0 : sourcesFor(id).references.length;
-  const answer = text ? markdown(text) : '<div class="typing-dots" aria-hidden="true"><span></span><span></span><span></span></div>';
-  const userPrompt = [...state.messages].slice(0, state.messages.findIndex(m => String(m.id) === String(id))).reverse().find(m => m.role === "user")?.content || "";
-  const nextSteps = id === "draft" ? [] : suggestedPrompts({answer: text, userPrompt, sourceCount: count, error});
-  const followups = nextSteps.length ? `<section class="next-steps" aria-label="推荐的下一步"><span class="next-steps-label">接下来可以</span><div class="next-steps-options">${nextSteps.map((step, index) => `<button type="button" class="next-step" data-id="${esc(id)}" data-next-prompt="${esc(step.prompt)}"><span class="next-step-index">${index + 1}</span><span><strong>${esc(step.title)}</strong><small>${esc(step.detail)}</small></span><span class="next-step-arrow">${icon("arrow")}</span></button>`).join("")}</div></section>` : "";
-  const actions = id === "draft" ? "" : `<div class="message-actions">${messageTime(message)}<button class="subtle copy-answer" data-id="${id}" title="复制完整回答">${icon("copy")}<span>复制</span></button><button class="subtle quote-answer" data-id="${id}" title="将整段回答引用到输入框">${icon("paper")}<span>引用整段</span></button><button class="subtle inspect-answer" data-id="${id}" title="查看本轮来源与上下文">${icon("context")}<span>来源与上下文</span>${count ? `<span class="source-count">${count}</span>` : ""}</button></div>`;
-  return `<article class="message message-assistant ${error ? "message-error" : ""}" data-message="${id}"><div class="assistant-meta"><span class="assistant-mark">${icon("star")}</span><span>Lodestar</span></div><div class="answer">${answer}</div><div class="execution">${actionHTML(receipts, { pending: id === "draft" })}</div>${followups}${actions}</article>`;
+  const answer = text ? markdown(visibleAnswer(text)) : '<div class="typing-dots" aria-hidden="true"><span></span><span></span><span></span></div>';
+  const index = state.messages.findIndex((entry) => String(entry.id) === String(id));
+  const laterMessages = index < 0 ? [] : state.messages.slice(index + 1);
+  const latestAssistant = [...state.messages].reverse().find((entry) => entry.role === "assistant");
+  const latestResponse = id !== "draft" && !busy() && index >= 0
+    && !laterMessages.some((entry) => entry.role === "user")
+    && String(latestAssistant?.id) === String(id);
+  const nextSteps = latestResponse && !error ? storedFollowups(message.metadata?.suggested_prompts) : [];
+  const followups = nextSteps.length ? `<section class="next-steps" aria-label="推荐的下一步"><span class="next-steps-label">你还可以继续问</span><div class="next-steps-options">${nextSteps.map((step) => `<button type="button" class="next-step" data-id="${esc(id)}" data-next-prompt="${esc(step.prompt)}"><span class="next-step-prompt">${esc(step.prompt)}</span><span class="next-step-arrow">${icon("arrow")}</span></button>`).join("")}</div></section>` : "";
+  const retry = latestResponse ? `<button class="subtle retry-answer" data-id="${id}" title="重新生成这条回答">${icon("retry")}<span>重新生成</span></button>` : "";
+  const actions = id === "draft" ? "" : `<div class="message-actions">${messageTime(message)}${retry}<button class="subtle copy-answer" data-id="${id}" title="复制完整回答">${icon("copy")}<span>复制</span></button><button class="subtle quote-answer" data-id="${id}" title="将整段回答引用到输入框">${icon("paper")}<span>引用整段</span></button><button class="subtle inspect-answer" data-id="${id}" title="查看本轮来源与上下文">${icon("context")}<span>来源与上下文</span>${count ? `<span class="source-count">${count}</span>` : ""}</button></div>`;
+  return `<article class="message message-assistant ${error ? "message-error" : ""}" data-message="${id}"><div class="assistant-meta"><img class="assistant-avatar" src="/lolo-avatar.png" alt="" width="28" height="28" loading="lazy" decoding="async"><span>lolo</span></div><div class="answer">${answer}</div><div class="execution">${actionHTML(receipts, { pending: id === "draft" })}</div>${followups}${actions}</article>`;
 }
 function render() {
   $('#memory').href='/memory?item='+encodeURIComponent(itemId);
@@ -355,6 +368,15 @@ function startPoll(run) {
     text = "",
     receipts = [],
     epoch = generation;
+  const display = streamDisplay((value) => {
+    if (epoch !== generation) { display.stop(); return; }
+    if (composingPrompt) return;
+    const el = $('[data-message="draft"] .answer');
+    if (!el) return;
+    const follow = !composingPrompt && nearBottom();
+    el.innerHTML = markdown(value);
+    if (follow) scrollBottom(true);
+  });
   $("#messages").insertAdjacentHTML(
     "beforeend",
     assistant("", JSON.parse(run.config), false, "draft", []),
@@ -362,12 +384,12 @@ function startPoll(run) {
   setStatus(run.status === "cancelling" ? "正在停止，等待当前请求返回…" : "正在理解问题…", true);
   scrollBottom(true);
   const tick = async () => {
-    if (epoch !== generation) return;
+    if (epoch !== generation) { display.stop(); return; }
     try {
       const data = await api(
         `/api/events?run=${encodeURIComponent(run.id)}&after=${after}`,
       );
-      if (epoch !== generation) return;
+      if (epoch !== generation) { display.stop(); return; }
       activeRun = data.run;
       controls();
       const followStream = nearBottom();
@@ -375,8 +397,6 @@ function startPoll(run) {
         after = event.id;
         if (event.kind === "text") {
           text += event.data;
-          const el = $('[data-message="draft"] .answer');
-          if (el) el.innerHTML = markdown(text);
           setStatus("正在回答…", true);
         } else if (event.kind === "action") {
           receipts.push(event.data);
@@ -385,12 +405,14 @@ function startPoll(run) {
         } else if (event.kind === "progress")
           setStatus((labels[event.data] || "正在准备资料") + "…", true);
       }
+      display.update(visibleAnswer(text));
       if (data.run.status === "cancelling") setStatus("正在停止，等待当前请求返回…", true);
-      scrollBottom(followStream);
+      if (!composingPrompt) scrollBottom(followStream);
       if (["queued", "running", "cancelling"].includes(data.run.status)) {
-        setTimeout(tick, 450);
+        setTimeout(tick, 120);
         return;
       }
+      display.stop();
       const result = JSON.parse(data.run.result || "{}");
       const response = await api(
         "/api/state?item=" + encodeURIComponent(itemId),
@@ -398,6 +420,12 @@ function startPoll(run) {
       if (epoch !== generation) return;
       const follow = nearBottom();
       activeRun = null;
+      if (composingPrompt) {
+        setStatus("");
+        controls();
+        finishAfterComposition = () => { if (epoch === generation) load(itemId); };
+        return;
+      }
       state = response;
       sourceCache = new Map();
       inspectedMessages.clear();
@@ -426,6 +454,7 @@ function startPoll(run) {
       );
       scrollBottom(follow);
     } catch (error) {
+      display.stop();
       if (epoch !== generation) return;
       setStatus("连接中断；后台运行可能仍在继续，刷新可恢复");
       activeRun = null;
@@ -451,7 +480,7 @@ $("#composer").addEventListener("submit", async (event) => {
   }
   const message = $("#prompt").value.trim();
   const reference = referenceText();
-  if (!message || busy() || !state) return;
+  if (!message || busy() || !state || composingPrompt) return;
   const id = itemId,
     epoch = generation;
   submitting = true;
@@ -485,15 +514,57 @@ $("#composer").addEventListener("submit", async (event) => {
     toast(error.message);
   }
 });
+async function retryAnswer(messageId) {
+  if (!state || busy()) {
+    toast("当前回答尚未结束，请稍后再重新生成");
+    return;
+  }
+  const id = itemId;
+  const epoch = generation;
+  submitting = true;
+  setStatus("正在重新生成…", true);
+  renderMessages();
+  try {
+    const request = await api("/api/retry", {
+      item: id,
+      message_id: Number(messageId),
+      key: crypto.randomUUID(),
+    });
+    if (epoch !== generation) return;
+    submitting = false;
+    startPoll({ id: request.id, status: "queued", config: JSON.stringify(state.configuration) });
+  } catch (error) {
+    if (epoch !== generation) return;
+    submitting = false;
+    setStatus(error.message);
+    renderMessages();
+    controls();
+    toast(error.message);
+  }
+}
 $("#prompt").addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing && !composingPrompt && event.keyCode !== 229) {
     event.preventDefault();
     if (!busy()) $("#composer").requestSubmit();
   }
 });
-$("#prompt").addEventListener("input", () => {
-  $("#prompt").style.height = "auto";
-  $("#prompt").style.height = Math.min($("#prompt").scrollHeight, 190) + "px";
+function resizePrompt() {
+  const prompt = $("#prompt");
+  const previous = prompt.style.height;
+  prompt.style.height = "auto";
+  const next = Math.min(prompt.scrollHeight, 190) + "px";
+  prompt.style.height = next === previous ? previous : next;
+}
+$("#prompt").addEventListener("compositionstart", () => { composingPrompt = true; });
+$("#prompt").addEventListener("compositionend", () => {
+  composingPrompt = false;
+  resizePrompt();
+  const finish = finishAfterComposition;
+  finishAfterComposition = null;
+  if (finish) finish();
+});
+$("#prompt").addEventListener("input", (event) => {
+  if (!composingPrompt && !event.isComposing) resizePrompt();
   controls();
 });
 $("#prompt").addEventListener("paste", (event) => {
@@ -933,6 +1004,10 @@ $("#messages").onclick = async (e) => {
     $("#composer").requestSubmit();
     return;
   }
+  if (b.classList.contains("retry-answer")) {
+    await retryAnswer(b.dataset.id);
+    return;
+  }
   if (b.dataset.receiptItem) return load(b.dataset.receiptItem);
   if (b.dataset.receiptMemory) {
     memoryFocusId = b.dataset.receiptMemory;
@@ -1085,6 +1160,13 @@ document.addEventListener("keydown", (e) => {
 });
 await load();
 await addRequestedPaperReference();
+if (initialQuery.has('new-task')) $("#new-task").click();
+if (initialQuery.has('tasks')) openDrawer('tasks');
+if (initialQuery.has('new-task') || initialQuery.has('tasks')) {
+  const url = new URL(location.href);
+  url.searchParams.delete('new-task'); url.searchParams.delete('tasks');
+  history.replaceState(null, '', url.pathname + url.search);
+}
 // Status-only polling never calls a model, reloads a transcript or interrupts typing.
 setInterval(async () => {
   if (!state || document.hidden) return;

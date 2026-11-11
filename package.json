@@ -1,0 +1,12 @@
+{
+  "name": "lodestar-web-assets",
+  "private": true,
+  "scripts": {
+    "build:diagrams": "node scripts/build-diagrams.mjs"
+  },
+  "devDependencies": {
+    "dompurify": "3.4.17",
+    "esbuild": "0.28.2",
+    "mermaid": "12.3.0"
+  }
+}

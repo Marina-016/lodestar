@@ -25,4 +25,5 @@ lodestar = "lodestar.cli:main"
 include = ["lodestar*"]
 
 [tool.setuptools.package-data]
+"lodestar.agent" = ["lolo-persona.md"]
 "lodestar.web" = ["static/*"]

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 
 from lodestar.agent.loop import ResearchAgent
@@ -121,7 +122,8 @@ class ConversationAgent:
 
     def _turn(self, conversation_id, message, *, user_id='default', intent='auto',
              technology=None, method='', feedback='discussed', days=7, on_text=None, on_progress=None, memory_notes=None, check_cancel=None,
-             assistant_tools=None, history_after=0, track_exposure=True, execution_policy=None, reference_text=''):
+             assistant_tools=None, history_after=0, track_exposure=True, execution_policy=None, reference_text='',
+             reuse_user_message_id=None):
         session = self._session(conversation_id, user_id)
         if not message.strip():
             raise ValueError('message is required')
@@ -141,10 +143,33 @@ class ConversationAgent:
             raise ValueError('feedback requires a technology and a non-mastery observation')
         if intent == 'plan' and session['project_id'] is None:
             raise ValueError('select a registered project when starting this session')
-        user_message = repo.add_message(self.ws.conn, conversation_id, 'user', message,
-                                        metadata={'intent': intent, 'technology': technology, 'method': method,
-                                                  **({'reference_text': reference_text} if reference_text else {})})
-        if intent == 'feedback':
+        if reuse_user_message_id is None:
+            user_message = repo.add_message(self.ws.conn, conversation_id, 'user', message,
+                                            metadata={'intent': intent, 'technology': technology, 'method': method,
+                                                      **({'reference_text': reference_text} if reference_text else {})})
+        else:
+            if type(reuse_user_message_id) is not int or reuse_user_message_id < 1:
+                raise ValueError('invalid reusable user message')
+            row = self.ws.conn.execute('SELECT * FROM messages WHERE id=? AND conversation_id=? AND role=?',
+                                       (reuse_user_message_id, conversation_id, 'user')).fetchone()
+            if row is None or row['content'] != message:
+                raise ValueError('reusable user message not found')
+            user_message = dict(row)
+        from lodestar.agent.paper_recommendations import paper_link_request, paper_focus
+        focus = paper_focus(self.ws.conn, conversation_id, user_message['id'], history_after, message)
+        focus_used = False
+        if intent == 'followup' and not reference_text and paper_link_request(message):
+            if check_cancel:
+                check_cancel()
+            answer = (f"刚才讨论的是 **{focus.get('title') or '这篇论文'}**。\n\n[查看论文原文]({focus['url']})"
+                      if focus else '你指的是哪篇论文？请告诉我标题或选中那段回答引用，我再给你准确的链接。')
+            sources = []
+            if on_text:
+                on_text(answer)
+            result = {'status': 'answered', 'paper_focus': focus, 'route_reason': 'resolved paper link',
+                      'candidates': [], 'source_details': source_details([focus]) if focus else [],
+                      'dialogue_events': [], 'grounding': {'completion_mode': 'paper_link', 'search_operations': 0}}
+        elif intent == 'feedback':
             observation = learning.record(self.ws.conn, user_id=user_id, technology=technology,
                 method=method, event=feedback, actor='user', task_id=session['task_id'],
                 evidence=json.dumps({'message_id': user_message['id'], 'content': message}, ensure_ascii=False))
@@ -204,8 +229,11 @@ class ConversationAgent:
                 result = generate(self.ws, self.llm, message, sources, session['project_id'])
                 answer = result['plan']
             else:
-                history = [m for m in self.history(conversation_id, user_id, 8)[:-1]
-                           if m['id'] > history_after]
+                transcript = self.history(conversation_id, user_id, 50)
+                # A retry must reconstruct the original turn, not include the
+                # failed/older answer it is replacing or add the user question twice.
+                history = [m for m in transcript
+                           if history_after < m['id'] < user_message['id']][-8:]
                 candidates = []
                 for previous in reversed(history):
                     metadata = json.loads(previous.get('metadata') or '{}')
@@ -216,7 +244,25 @@ class ConversationAgent:
                             and 'candidates' in metadata):
                         candidates = metadata['candidates']
                         break
+                from lodestar.agent.paper_recommendations import discovery_request, introduced_papers
+                introduced = introduced_papers(self.ws.conn, conversation_id, user_message['id'], history_after)
+                discover_new = discovery_request(message, reference_text, [*introduced, *sources, *candidates])
+                if discover_new:
+                    # Keep interests/history but avoid presenting old full papers
+                    # as the ready-made evidence for a new recommendation.
+                    sources, candidates = [], []
+                    focus = None
+                elif focus and re.search(r'这篇|那篇|上一篇|再讲|讲解|没听懂|流程图|继续', message):
+                    focus_used = True
+                    from lodestar.agent.paper_recommendations import paper_key
+                    selected = paper_key(focus['url'])
+                    sources = [s for s in sources if paper_key(s['url']) == selected]
+                    candidates = [s for s in candidates if paper_key(s['url']) == selected]
+                    if not sources and not candidates:
+                        candidates = [focus]
                 context = {'message': message, 'reference_text': reference_text, 'candidates': candidates,
+                    'paper_focus': focus,
+                    'paper_recommendation': {'discover_new': discover_new, 'excluded': introduced} if discover_new else {},
                     'managed_memory': memory_notes or [],
                     'history': _history_context(history),
                     'learning': learning.recall(self.ws.conn, message + ' ' + (technology or ''), user_id),
@@ -249,12 +295,28 @@ class ConversationAgent:
                 answer, grounding = context['answer'], context['grounding']
                 result = {'status': 'answered', 'evidence_reused': len(sources), 'supplement_reads': supplements,
                           'grounding': grounding, 'dialogue_events': events, 'candidates': context['candidates'],
-                          'source_details': source_details(context['candidates'] + context['papers'])}
+                          'source_details': source_details(context['candidates'] + context['papers']),
+                          'suggested_prompts': context.get('suggested_prompts', [])}
+        from lodestar.agent.paper_recommendations import mentioned_papers
+        if result.get('route_reason') != 'resolved paper link':
+            mentioned = mentioned_papers(answer, result.get('source_details', []))
+            result['paper_focus'] = (mentioned[0] if len(mentioned) == 1 or
+                                     (mentioned and re.search(r'介绍|讲解|这篇|那篇', message)) else focus)
+            result['referenced_papers'] = mentioned or ([focus] if focus_used else [])
+        else:
+            result['referenced_papers'] = [focus] if focus else []
         model_configuration = snapshot(self.ws.config)
         result['model_configuration'] = model_configuration
         assistant_message = repo.add_message(self.ws.conn, conversation_id, 'assistant', answer,
-                         task_id=result.get('task_id') or session['task_id'], metadata={'intent': intent, 'grounding': result.get('grounding'), 'dialogue_events': result.get('dialogue_events'), 'candidates': result.get('candidates', []), 'source_details': result.get('source_details', []), 'model_configuration': model_configuration})
-        if intent == 'followup' and track_exposure:
+                         task_id=result.get('task_id') or session['task_id'], metadata={'intent': intent, 'grounding': result.get('grounding'), 'dialogue_events': result.get('dialogue_events'), 'candidates': result.get('candidates', []), 'source_details': result.get('source_details', []), 'suggested_prompts': result.get('suggested_prompts', []), 'model_configuration': model_configuration})
+        # Persist a small pointer separately from retrieved evidence bodies.
+        with self.ws.conn:
+            row = self.ws.conn.execute('SELECT metadata FROM messages WHERE id=?', (assistant_message['id'],)).fetchone()
+            metadata = {**json.loads(row['metadata']), 'paper_focus': result.get('paper_focus'),
+                        'referenced_papers': result.get('referenced_papers', [])}
+            self.ws.conn.execute('UPDATE messages SET metadata=? WHERE id=?',
+                                 (json.dumps(metadata, ensure_ascii=False), assistant_message['id']))
+        if intent == 'followup' and track_exposure and result.get('route_reason') != 'resolved paper link':
             from lodestar.agent.exposure import record_exposure
             from lodestar.llm import LLMError
             try:
@@ -267,10 +329,12 @@ class ConversationAgent:
                 result['learning_exposure_status'] = 'cancelled' if getattr(error, 'code', None) == 'cancelled' else 'error'
                 result['learning_exposure_error'] = type(error).__name__
                 result['warning'] = '讲解已保留，方法接触记录更新未完成；未提升掌握程度。'
-            metadata = {'intent': intent, 'grounding': result.get('grounding'), 'dialogue_events': result.get('dialogue_events'), 'candidates': result.get('candidates', []), 'source_details': result.get('source_details', []), 'model_configuration': model_configuration, **{k: v for k, v in result.items()
+            metadata = {'intent': intent, 'grounding': result.get('grounding'), 'dialogue_events': result.get('dialogue_events'), 'candidates': result.get('candidates', []), 'source_details': result.get('source_details', []), 'suggested_prompts': result.get('suggested_prompts', []), 'model_configuration': model_configuration, **{k: v for k, v in result.items()
                 if k.startswith('learning_exposure')}}
             with self.ws.conn:
+                metadata['paper_focus'] = result.get('paper_focus')
+                metadata['referenced_papers'] = result.get('referenced_papers', [])
                 self.ws.conn.execute('UPDATE messages SET metadata=? WHERE id=?',
                     (json.dumps(metadata, ensure_ascii=False), assistant_message['id']))
         return {'status': 'ok', **result, 'conversation_id': conversation_id, 'answer': answer, 'intent': intent,
-                'route_reason': 'model-led dialogue' if automatic else 'explicit intent'}
+                'route_reason': result.get('route_reason') or ('model-led dialogue' if automatic else 'explicit intent')}

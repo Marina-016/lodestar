@@ -44,7 +44,7 @@ function inline(text, links) {
     if (part.startsWith("`"))
       out += `<code>${escape(part.slice(1, -1))}</code>`;
     else if (part.startsWith("**"))
-      out += `<strong>${escape(part.slice(2, -2))}</strong>`;
+      out += `<strong>${inline(part.slice(2, -2), links)}</strong>`;
     else {
       let label = part,
         url = part;
@@ -82,9 +82,17 @@ export function markdown(source, links = null) {
     const line = lines[i];
     if (/^```/.test(line)) {
       flush();
+      const diagram = /^```mermaid\s*$/i.test(line);
       let code = [];
       while (++i < lines.length && !/^```/.test(lines[i])) code.push(lines[i]);
-      out += `<pre><code>${escape(code.join("\n"))}</code></pre>`;
+      if (diagram && i >= lines.length) {
+        out += '<div class="diagram-pending" role="status">图表生成中…</div>';
+      } else if (diagram) {
+        const source = code.join('\n');
+        const type = source.trim().split(/\s/)[0];
+        const label = ({mindmap:'层级图',sequenceDiagram:'时序图',classDiagram:'结构图',erDiagram:'关系图'})[type] || '流程图';
+        out += `<figure class="diagram-card"><div class="diagram-toolbar"><strong>${label}</strong><div><button type="button" data-diagram-action="expand" disabled>放大查看</button><button type="button" data-diagram-action="copy">复制代码</button><button type="button" data-diagram-action="svg" disabled>下载 SVG</button><button type="button" data-diagram-action="png" disabled>下载 PNG</button></div></div><div class="diagram-preview"></div><figcaption class="diagram-status" role="status">回答完成后显示图表</figcaption><details class="diagram-code"><summary>查看图表代码</summary><pre><code>${escape(source)}</code></pre></details></figure>`;
+      } else out += `<pre><code>${escape(code.join("\n"))}</code></pre>`;
     } else if (/^#{1,4}\s/.test(line)) {
       flush();
       const m = line.match(/^(#{1,4})\s+(.*)$/);

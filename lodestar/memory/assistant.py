@@ -315,9 +315,39 @@ def prompt_rows(rows, evidence=None, *, now=None):
     return packets
 
 
+def reference_matches(row, query):
+    """Require a named reference or meaningful topic overlap for automatic recall.
+
+    Generic words such as 'paper' do not make every saved paper relevant. Chinese
+    bigrams allow a topic inside a sentence to match without an extra model call.
+    """
+    def keys(text):
+        ignored = {'paper', 'papers', 'arxiv', 'https', 'http', 'org', 'com', 'www',
+                   '论文', '资料', '参考', '介绍', '推荐', '一篇', '一下', '什么', '我们', '之前',
+                   '这个', '那个', '研究', '链接', '标题', '最新', '最近', '今天'}
+        text = REFERENCE_URL.sub('', text)
+        tokens = set(re.findall(r'[a-z][a-z0-9_-]{2,}', text.casefold()))
+        for segment in re.findall(r'[\u4e00-\u9fff]+', text):
+            tokens.update(segment[i:i+2] for i in range(len(segment)-1))
+        return tokens - ignored
+    content = row.get('content', '')
+    locator = reference_locator(content) or {}
+    url = locator.get('url', '')
+    for match in REFERENCE_URL.finditer(query):
+        if url and re.sub(r'v\d+$', '', match.group(0).rstrip('.,;')) == re.sub(r'v\d+$', '', url):
+            return True
+    arxiv_ids = re.findall(r'\d{4}\.\d{4,5}', content)
+    if any(paper_id in query for paper_id in arxiv_ids):
+        return True
+    # Reference summaries and boilerplate must not expand automatic recall.
+    cue = locator.get('title') or content
+    return bool(keys(query) & keys(cue))
+
+
 def select_rows(rows, query='', *, budget=8000, limit=20):
     """Bound automatic recall; explicit read_memory can retrieve other facts."""
     from lodestar.retrieval import terms
+    rows = [row for row in rows if row.get('kind') != 'reference' or reference_matches(row, query)]
     wanted = terms(query)
     priority = {'P0': 2, 'P1': 1, 'P2': 0}
     core = [row for row in rows if row.get('priority') == 'P0']
@@ -360,7 +390,8 @@ def reconstruct_context(conn, rows, query, *, char_budget=4000, max_memories=3, 
         return {}
     output, used = {}, 0
     for row in rows:
-        if len(output) >= max_memories or not (wanted & terms(row['content'])):
+        matched = reference_matches(row, query) if row.get('kind') == 'reference' else bool(wanted & terms(row['content']))
+        if len(output) >= max_memories or not matched:
             continue
         anchor = next((source for source in sources(conn, row['id']) if source['relation'] == 'primary'), None)
         if not anchor:

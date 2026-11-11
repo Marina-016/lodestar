@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS web_items (
 CREATE TABLE IF NOT EXISTS web_runs (
  id TEXT PRIMARY KEY, item_id TEXT NOT NULL, request_key TEXT NOT NULL,
  status TEXT NOT NULL, message TEXT NOT NULL, config TEXT NOT NULL,
+ retry_user_message_id INTEGER,
  result TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
  UNIQUE(item_id,request_key)
 );
@@ -155,7 +156,8 @@ class WebApp:
         of every tool read with every navigation makes switching tasks laggy.
         """
         preview = {key: metadata[key] for key in ('reference_text', 'model_configuration', 'action_receipts',
-                                                   'run_id', 'status', 'model_error', 'partial_answer')
+                                                   'run_id', 'status', 'model_error', 'partial_answer', 'suggested_prompts',
+                                                   'paper_focus', 'referenced_papers')
                    if key in metadata}
         candidates = [cls._source_preview(source) for source in metadata.get('candidates', [])]
         details = [cls._source_preview(source) for source in metadata.get('source_details', [])]
@@ -506,7 +508,8 @@ class WebApp:
             return self._submit_locked(item_id, message, key, reference_text=reference_text,
                                        background=background, policy=policy)
 
-    def _submit_locked(self, item_id, message, key, *, reference_text, background, policy):
+    def _submit_locked(self, item_id, message, key, *, reference_text, background, policy,
+                       retry_user_message_id=None):
         if not isinstance(message, str) or not message.strip() or len(message) > 24000:
             raise ValueError('请输入 1–24000 字的问题')
         if not isinstance(reference_text, str):
@@ -516,6 +519,8 @@ class WebApp:
             raise ValueError('问题与参考文本合计不能超过 24000 字')
         if not isinstance(key, str) or not 1 <= len(key) <= 100:
             raise ValueError('提交标识无效')
+        if retry_user_message_id is not None and (type(retry_user_message_id) is not int or retry_user_message_id < 1):
+            raise ValueError('重试消息无效')
         with self.lock, self.workspace() as ws, ws.conn:
             item = self.item(ws, item_id)
             existing = ws.conn.execute('SELECT id FROM web_runs WHERE item_id=? AND request_key=?', (item_id,key)).fetchone()
@@ -534,8 +539,8 @@ class WebApp:
             if cfg.model_calls_disabled and cfg.llm_mode != 'mock':
                 raise Conflict('模型调用已暂停，请在模型设置中启用后发送')
             run_id = uuid.uuid4().hex
-            ws.conn.execute('INSERT INTO web_runs(id,item_id,request_key,status,message,config,policy) VALUES(?,?,?,?,?,?,?)',
-                            (run_id,item_id,key,'queued',message,json.dumps(snapshot(cfg)),json.dumps(policy or {},ensure_ascii=False)))
+            ws.conn.execute('INSERT INTO web_runs(id,item_id,request_key,status,message,config,policy,retry_user_message_id) VALUES(?,?,?,?,?,?,?,?)',
+                            (run_id,item_id,key,'queued',message,json.dumps(snapshot(cfg)),json.dumps(policy or {},ensure_ascii=False),retry_user_message_id))
             signal = self.cancel_signals[run_id] = threading.Event()
         try:
             def work(*worker_args):
@@ -548,7 +553,7 @@ class WebApp:
             with self.lock:
                 if self.closing:
                     raise Conflict('服务正在关闭；本轮未启动')
-                worker = threading.Thread(target=work, args=(run_id,item,cfg,message,reference_text,signal,background), daemon=True)
+                worker = threading.Thread(target=work, args=(run_id,item,cfg,message,reference_text,signal,background,retry_user_message_id), daemon=True)
                 self.workers[run_id] = worker
                 worker.start()
         except Exception:
@@ -565,9 +570,10 @@ class WebApp:
                         "UPDATE web_runs SET status=?,result=? WHERE id=? AND status IN ('queued','cancelling')",
                         (status, json.dumps(failure, ensure_ascii=False), run_id))
                     if updated.rowcount:
-                        repo.add_message(ws.conn, item['conversation_id'], 'user', message,
-                                         metadata={'run_id': run_id,
-                                                   **({'reference_text': reference_text} if reference_text else {})})
+                        if retry_user_message_id is None:
+                            repo.add_message(ws.conn, item['conversation_id'], 'user', message,
+                                             metadata={'run_id': run_id,
+                                                       **({'reference_text': reference_text} if reference_text else {})})
                         repo.add_message(ws.conn, item['conversation_id'], 'assistant', answer, kind=status,
                                          metadata={'run_id': run_id, 'status': status, **failure})
             finally:
@@ -576,6 +582,39 @@ class WebApp:
                     self.workers.pop(run_id, None)
             raise
         return run_id
+
+    def retry(self, item_id, message_id, key):
+        """Regenerate only the current answer, reusing its original user turn.
+
+        This transcript is linear rather than branch-based. Retrying an earlier
+        reply after later messages would append an answer out of context, so the
+        endpoint deliberately accepts only the latest assistant message.
+        """
+        if type(message_id) is not int or message_id < 1:
+            raise ValueError('消息标识无效')
+        with self.lock, self.workspace() as ws:
+            item = self.item(ws, item_id)
+            target = ws.conn.execute('''SELECT * FROM messages WHERE id=? AND conversation_id=? AND role='assistant' ''',
+                                     (message_id, item['conversation_id'])).fetchone()
+            latest = ws.conn.execute('''SELECT id FROM messages WHERE conversation_id=?
+                                        ORDER BY id DESC LIMIT 1''', (item['conversation_id'],)).fetchone()
+            if target is None or latest is None or latest['id'] != message_id:
+                raise Conflict('只能重新生成当前最后一条回答')
+            user = ws.conn.execute('''SELECT * FROM messages WHERE conversation_id=? AND role='user' AND id<?
+                                      ORDER BY id DESC LIMIT 1''',
+                                   (item['conversation_id'], message_id)).fetchone()
+            if user is None:
+                raise LookupError('找不到这条回答对应的问题')
+            try:
+                metadata = json.loads(user['metadata'] or '{}')
+            except ValueError:
+                metadata = {}
+            reference_text = metadata.get('reference_text', '') if isinstance(metadata, dict) else ''
+            if not isinstance(reference_text, str):
+                reference_text = ''
+            message = user['content']
+        return self._submit_locked(item_id, message, key, reference_text=reference_text,
+                                   background=False, policy={}, retry_user_message_id=user['id'])
 
     def start_scheduler(self):
         from lodestar.web.background import Scheduler
@@ -638,7 +677,8 @@ class WebApp:
         return [json.loads(r['data']) for r in ws.conn.execute(
             "SELECT data FROM web_events WHERE run_id=? AND kind='action' ORDER BY id", (run_id,))]
 
-    def execute(self, run_id, item, cfg, message, reference_text, signal, background=False):
+    def execute(self, run_id, item, cfg, message, reference_text, signal, background=False,
+                retry_user_message_id=None):
         started_at = time.time()
         def check_cancel():
             if signal.is_set():
@@ -648,40 +688,57 @@ class WebApp:
             llm = None
             try:
                 with self.lock, ws.conn:
-                    row = ws.conn.execute('SELECT status,policy FROM web_runs WHERE id=?', (run_id,)).fetchone()
+                    row = ws.conn.execute('SELECT status,policy,retry_user_message_id FROM web_runs WHERE id=?', (run_id,)).fetchone()
                     if row['status'] not in ('queued','cancelling'):
                         return
                     ws.conn.execute("UPDATE web_runs SET status='running' WHERE id=? AND status='queued'", (run_id,))
                 policy = json.loads(row['policy'])
+                retry_user_message_id = row['retry_user_message_id']
                 # A queued cancellation still records its input and stopped answer,
                 # but never constructs a provider client or starts inference.
                 llm = None if signal.is_set() else self.llm_factory(cfg)
                 from lodestar.memory.assistant import mark_accessed, prompt_rows, reconstruct_context, select_rows
                 from lodestar.web.tools import assistant_tools
                 with ws.conn:
-                    note_rows = select_rows(memory.notes(ws, item, active_only=True), message)
+                    recall_query = message + '\n' + reference_text
+                    note_rows = select_rows(memory.notes(ws, item, active_only=True), recall_query)
                     mark_accessed(ws.conn, note_rows)
-                    note_evidence = reconstruct_context(ws.conn, note_rows, message, item_id=item['id'])
+                    note_evidence = reconstruct_context(ws.conn, note_rows, recall_query, item_id=item['id'])
                 notes = prompt_rows(note_rows, note_evidence)
                 result = self.agent_factory(ws,llm).turn(item['conversation_id'],message,
                     user_id=self.user(item['id']), memory_notes=notes, check_cancel=check_cancel,
                     reference_text=reference_text,
-                    history_after=item['context_after'], track_exposure=not background,
+                    history_after=item['context_after'], track_exposure=False,
                     execution_policy=policy,
+                    reuse_user_message_id=retry_user_message_id,
                     assistant_tools=assistant_tools(self, item, run_id, message, check_cancel, user_authored=not background, execution_policy=policy),
                     on_text=lambda text: self.event(ws,run_id,'text',text),
                     on_progress=lambda action: self.event(ws,run_id,'progress',action))
                 scope = {'item_id': item['id'], 'project_id': item['project_id'], 'user_id': self.user(),
                          'history_after': item['context_after'], 'background': background, 'execution_policy': policy,
+                         'retry_user_message_id': retry_user_message_id,
                          'memory': [{'id': r['id'], 'scope': r['scope'], 'revision': r['revision']} for r in note_rows]}
                 result['web_context'] = scope
                 result['action_receipts'] = self.action_receipts(ws, run_id)
                 with self.lock, ws.conn:
                     model_health.observe(ws.conn, cfg, result, llm, started_at)
                 last = ws.conn.execute("SELECT id,metadata FROM messages WHERE conversation_id=? AND role='assistant' ORDER BY id DESC LIMIT 1", (item['conversation_id'],)).fetchone()
+                # Capture the evidence before releasing the foreground slot. A
+                # subsequent turn can replace session evidence while this worker
+                # records learning in the background.
+                exposure_sources = []
+                if (not background and result.get('status') not in ('error', 'cancelled')
+                        and result.get('route_reason') != 'resolved paper link'):
+                    session = ws.conn.execute('SELECT evidence FROM agent_sessions WHERE conversation_id=?',
+                                              (item['conversation_id'],)).fetchone()
+                    exposure_sources = [s for s in json.loads(session['evidence'])
+                                        if s.get('source_type') == 'paper' and s.get('content')] if session else []
+                if exposure_sources:
+                    result['learning_exposure_status'] = 'pending'
                 if last:
                     metadata = {**json.loads(last['metadata']), 'web_context': scope, 'run_id': run_id,
-                                'action_receipts': result['action_receipts']}
+                                'action_receipts': result['action_receipts'],
+                                **({'learning_exposure_status': 'pending'} if exposure_sources else {})}
                     with ws.conn:
                         ws.conn.execute('UPDATE messages SET metadata=? WHERE id=?', (json.dumps(metadata,ensure_ascii=False),last['id']))
                 with self.lock, ws.conn:
@@ -690,6 +747,12 @@ class WebApp:
                         status = 'cancelled'
                     ws.conn.execute("UPDATE web_runs SET status=?, result=? WHERE id=? AND status IN ('running','cancelling')",
                         (status,json.dumps(result,ensure_ascii=False),run_id))
+                # The reply is now complete and the next user turn is allowed.
+                # Keep ownership of this worker/client until the optional audit
+                # finishes, without keeping the conversation in 'running'.
+                if status == 'completed' and exposure_sources and last:
+                    self._record_reply_exposure(ws, llm, item, run_id, last['id'],
+                                                message, result['answer'], exposure_sources, signal)
             except Exception:
                 # Provider bodies and credentials must never become browser diagnostics.
                 with self.lock, ws.conn:
@@ -698,7 +761,7 @@ class WebApp:
                     receipts = self.action_receipts(ws, run_id)
                     last = ws.conn.execute('SELECT role FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 1',
                                            (item['conversation_id'],)).fetchone()
-                    if last and last['role'] == 'user':
+                    if last and (last['role'] == 'user' or retry_user_message_id is not None):
                         repo.add_message(ws.conn, item['conversation_id'], 'assistant', answer,
                                          metadata={'run_id': run_id, 'status': status, 'action_receipts': receipts})
                     ws.conn.execute("UPDATE web_runs SET status=?,result=? WHERE id=? AND status IN ('queued','running','cancelling')",
@@ -715,6 +778,37 @@ class WebApp:
                         self.cancel_signals.pop(run_id, None)
                     if llm is not None:
                         llm.close()
+
+    def _record_reply_exposure(self, ws, llm, item, run_id, message_id, goal, answer, sources, signal):
+        """Optional post-answer work cannot fail or overwrite the foreground reply."""
+        from lodestar.agent.exposure import record_exposure
+        try:
+            if self.closing or signal.is_set():
+                outcome = {'learning_exposure_status': 'cancelled'}
+            else:
+                task = ws.conn.execute('SELECT task_id FROM agent_sessions WHERE conversation_id=?',
+                                       (item['conversation_id'],)).fetchone()
+                exposure = record_exposure(ws, llm, task['task_id'] if task else None,
+                    self.user(item['id']), answer, sources, goal=goal)
+                outcome = {'learning_exposure': exposure,
+                           'learning_exposure_status': 'recorded' if exposure else 'no_supported_methods'}
+        except Exception as error:
+            outcome = {'learning_exposure_status': 'error', 'learning_exposure_error': type(error).__name__}
+        try:
+            with self.lock, ws.conn:
+                row = ws.conn.execute('SELECT metadata FROM messages WHERE id=?', (message_id,)).fetchone()
+                if row:
+                    metadata = {**json.loads(row['metadata']), **outcome}
+                    ws.conn.execute('UPDATE messages SET metadata=? WHERE id=?',
+                                    (json.dumps(metadata, ensure_ascii=False), message_id))
+                run = ws.conn.execute('SELECT result FROM web_runs WHERE id=?', (run_id,)).fetchone()
+                if run:
+                    ws.conn.execute('UPDATE web_runs SET result=? WHERE id=?',
+                        (json.dumps({**json.loads(run['result']), **outcome}, ensure_ascii=False), run_id))
+        except Exception:
+            # The already-committed answer remains complete if optional audit
+            # persistence fails (e.g. shutdown or a transient local DB error).
+            pass
 
     def events(self, run_id, after):
         with self.workspace() as ws:
@@ -754,7 +848,10 @@ def make_server(app, port=8123):
             self.send_header('Cache-Control','no-store')
             self.send_header('X-Content-Type-Options','nosniff')
             self.send_header('Referrer-Policy','same-origin')
-            self.send_header('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'")
+            policy = ("default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src data:; connect-src 'none'; base-uri 'none'; frame-ancestors 'self'"
+                      if urlparse(self.path).path == '/diagram.html' else
+                      "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'")
+            self.send_header('Content-Security-Policy', policy)
             self.end_headers()
             self.wfile.write(body)
 
@@ -773,7 +870,14 @@ def make_server(app, port=8123):
                         template = 'index.html' if path=='/' else 'workbench.html' if path in ('/research','/history') else 'library.html'
                         page = (STATIC/template).read_text(encoding='utf-8').replace('__TOKEN__',app.token)
                         return self.respond(page.encode(),mime='text/html; charset=utf-8')
-                    if path in ('/app.mjs','/markdown.mjs','/sources.mjs','/insights.mjs','/actions.mjs','/quote.mjs','/timeline.mjs','/followups.mjs','/models.mjs','/library.mjs','/library-views.mjs','/workbench.mjs','/library.css','/style.css','/icon.svg'):
+                    if path == '/diagram.html':
+                        return self.respond((STATIC/'diagram.html').read_bytes(),mime='text/html; charset=utf-8')
+                    if path == '/lolo-avatar.png':
+                        return self.respond((STATIC/'lolo-avatar.png').read_bytes(),mime='image/png')
+                    if path in ('/mermaid.bundle.js','/diagram-frame.js','/diagram-frame.css','/diagrams.mjs','/mermaid-notices.txt','/mermaid.bundle.js.LEGAL.txt'):
+                        mime = 'text/css' if path.endswith('.css') else 'text/plain' if path.endswith('.txt') else 'text/javascript'
+                        return self.respond((STATIC/path[1:]).read_bytes(),mime=mime+'; charset=utf-8')
+                    if path in ('/app.mjs','/navigation.mjs','/markdown.mjs','/sources.mjs','/insights.mjs','/actions.mjs','/quote.mjs','/timeline.mjs','/followups.mjs','/stream.mjs','/models.mjs','/library.mjs','/library-views.mjs','/workbench.mjs','/library.css','/style.css','/icon.svg'):
                         mime = 'text/css' if path.endswith('.css') else 'image/svg+xml' if path.endswith('.svg') else 'text/javascript'
                         return self.respond((STATIC/path[1:]).read_bytes(),mime=mime+'; charset=utf-8')
                     if path == '/api/service':
@@ -930,6 +1034,8 @@ def make_server(app, port=8123):
                     app.learning(data)
                 elif path == '/api/cancel':
                     return self.respond({'status':app.cancel(item_id,data.get('run'))})
+                elif path == '/api/retry':
+                    return self.respond({'id':app.retry(item_id,data.get('message_id'),data.get('key'))},202)
                 elif path == '/api/send':
                     return self.respond({'id':app.submit(item_id,data.get('message'),data.get('key'),
                                                            reference_text=data.get('reference',''))},202)

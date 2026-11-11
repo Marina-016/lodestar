@@ -180,7 +180,9 @@ def _openai_step(client, system, messages, tools, on_text):
             if client._diandian is not None and response.status_code == 403 and error.code == 'http_error':
                 raise LLMError('DianDian rejected this dialogue payload', code='request_rejected') from error.__cause__
             raise
-        for line in response.iter_lines():
+        # requests defaults to 512-byte chunks; small SSE deltas can sit in
+        # that buffer and appear in bursts even when the provider emits promptly.
+        for line in response.iter_lines(chunk_size=1):
             if time.monotonic() >= deadline:
                 raise LLMError('Dialogue request exceeded configured timeout', code='timeout')
             line = line.decode('utf-8') if isinstance(line, bytes) else line

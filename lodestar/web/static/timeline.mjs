@@ -1,4 +1,4 @@
-const DAY_MS = 24 * 60 * 60 * 1000;
+const CHAT_GAP_MS = 2 * 60 * 60 * 1000;
 
 function timestamp(value) {
   const parsed = Date.parse(value || "");
@@ -9,7 +9,7 @@ export function beginsNewChat(previous, current, itemId) {
   if (itemId !== "main" || current?.role !== "user" || !previous) return false;
   const earlier = timestamp(previous.created_at);
   const later = timestamp(current.created_at);
-  return earlier !== null && later !== null && later - earlier > DAY_MS;
+  return earlier !== null && later !== null && later - earlier >= CHAT_GAP_MS;
 }
 
 export function timestampLabel(value) {

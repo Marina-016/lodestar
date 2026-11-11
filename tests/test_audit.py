@@ -55,7 +55,10 @@ class AuditTests(unittest.TestCase):
         metadata = json.loads(self.agent.history(self.session)[-1]['metadata'])
         self.assertEqual(metadata['model_error']['code'], 'stream_interrupted')
         self.assertEqual(metadata['candidates'][0]['url'], 'https://example.com')
-        self.assertEqual(len(metadata['dialogue_events']), 1)
+        # An explicit current-news request now performs one bounded host lookup
+        # before the model's own requested web search; both remain auditable.
+        self.assertEqual([event['action'] for event in metadata['dialogue_events']],
+                         ['search_updates', 'search_web'])
 
     def test_no_match_supplement_preserves_original_body(self):
         source={'url':'https://arxiv.org/abs/2609.33439','source_type':'paper','content':'useful body','read_depth':'full'}

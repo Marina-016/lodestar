@@ -74,6 +74,17 @@ class DialogueTests(unittest.TestCase):
         self.llm.complete.assert_not_called()
         self.llm.complete_json.assert_not_called()
 
+    def test_model_followup_trailer_becomes_bounded_response_metadata(self):
+        self.llm.dialogue_step.return_value = answer(
+            '这里是针对问题的具体结论。\n<!--lodestar-followups:{"items":['
+            '{"prompt":"请比较两种实现的代价。"},'
+            '{"prompt":"请给我一个最小验证步骤。"}]}-->'
+        )
+        result = self.run_dialogue()
+        self.assertEqual(result['answer'], '这里是针对问题的具体结论。')
+        self.assertEqual([item['prompt'] for item in result['suggested_prompts']],
+                         ['请比较两种实现的代价。', '请给我一个最小验证步骤。'])
+
     def test_explicit_fresh_request_prefetches_current_sources_without_creating_memory(self):
         self.llm.dialogue_step.return_value = answer('本轮答案。')
         source = {'url': 'https://openai.com/news', 'title': 'Official release',

@@ -8,6 +8,24 @@ const junk = { url: "https://dictionary.example/most", title: "Meaning of most" 
 const old = { url: "https://video.example/", title: "Old video homepage" };
 const search = (sources) => ({ action: "search_web", result: { sources } });
 
+test('a bold URL remains a source link and reaches the source panel', () => {
+  const content = `论文链接：**${paper.url}**`;
+  const html = markdown(content);
+  assert.ok(html.includes('class="inline-source-link"'));
+  assert.ok(html.includes('打开来源'));
+  assert.deepEqual(linkedUrls(content), [paper.url]);
+  assert.equal(sourceGroups({content, metadata:{source_details:[paper]}}).references[0].title, paper.title);
+});
+
+test('a named paper or explicitly used paper pointer appears without unused candidates', () => {
+  const named = {...paper, title:'A Specific Long Paper Title'};
+  const groups = sourceGroups({content:`我来介绍 **${named.title}**。`,
+    metadata:{source_details:[named,junk]}});
+  assert.deepEqual(groups.references.map(s=>s.url), [paper.url]);
+  const followup = sourceGroups({content:'这篇的方法如下。', metadata:{referenced_papers:[named], candidates:[junk]}});
+  assert.deepEqual(followup.references.map(s=>s.url), [paper.url]);
+});
+
 test("references contain cited pages; unused current results remain auditable", () => {
   const groups = sourceGroups({ content: `[paper](${paper.url})`, metadata: {
     candidates: [old, junk, paper], dialogue_events: [search([junk, paper])] } });

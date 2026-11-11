@@ -1,5 +1,7 @@
 import { escape as esc, safeUrl } from './markdown.mjs';
 import { scopes, noteRow, noteDetail, paperRow, paperDetail, projectRow, projectDetail, stamp } from './library-views.mjs';
+import { initializeNavigation } from './navigation.mjs';
+initializeNavigation();
 const $ = s => document.querySelector(s);
 const token = $('meta[name="lodestar-token"]').content;
 const isProjects = location.pathname === '/projects';

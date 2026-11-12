@@ -28,9 +28,12 @@ def tracked_files() -> set[Path]:
 
 def candidate_files() -> list[Path]:
     paths = set(tracked_files())
-    for path in ROOT.rglob("*"):
-        if not path.is_file():
+    result = subprocess.run(["git", "ls-files", "--others", "--exclude-standard", "-z"],
+                            cwd=ROOT, check=True, capture_output=True)
+    for name in result.stdout.decode('utf-8').split('\0'):
+        if not name:
             continue
+        path = ROOT / name
         relative = path.relative_to(ROOT).as_posix()
         if any(relative == part or relative.startswith(part + "/") for part in EXCLUDED_PARTS):
             continue
@@ -43,7 +46,8 @@ def candidate_files() -> list[Path]:
 def main() -> int:
     findings: list[str] = []
     large: list[str] = []
-    for path in candidate_files():
+    candidates = candidate_files()
+    for path in candidates:
         try:
             data = path.read_bytes()
         except OSError:
@@ -54,7 +58,7 @@ def main() -> int:
         for pattern in SECRET_PATTERNS:
             if pattern.search(text):
                 findings.append(f"{path.relative_to(ROOT)} matches {pattern.pattern}")
-    print(f"Scanned {len(candidate_files())} candidate files.")
+    print(f"Scanned {len(candidates)} candidate files.")
     if large:
         print("Large files:")
         print("\n".join(f"- {item}" for item in large))
@@ -62,7 +66,7 @@ def main() -> int:
         print("Potential secrets:")
         print("\n".join(f"- {item}" for item in findings))
         return 1
-    print("No secret-like values or oversized files found in the release set.")
+    print("No secret-like values found in the release set.")
     return 0
 
 

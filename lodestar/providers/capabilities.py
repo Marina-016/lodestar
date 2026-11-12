@@ -7,6 +7,8 @@ DOC = 'https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completi
 def reasoning_choices(config, *, include_current=False):
     model = config.model.lower()
     levels, toggle = (), False
+    if config.llm_provider == 'diandian' and model == 'dots3-note-prev':
+        toggle = True
     if config.llm_provider == 'dashscope':
         if model in {'qwen3.8-max', 'qwen3.8-max-0902', 'qwen3.8-flash',
                      'qwen3.8-2.4t-a95b', 'qwen3.8-27b', 'qwen3.8-omni-flash'}:
@@ -27,7 +29,7 @@ def reasoning_choices(config, *, include_current=False):
         options.append({'value': 'off', 'label': '关闭思考'})
     options.extend({'value': level, 'label': level} for level in levels)
     if toggle and not levels:
-        options.append({'value': 'on', 'label': '开启思考（固定预算）'})
+        options.append({'value': 'on', 'label': '开启深度思考' if config.llm_provider=='diandian' else '开启思考（固定预算）'})
     value = 'default'
     if config.llm_thinking_mode != 'default':
         if not config.llm_thinking:
@@ -47,7 +49,8 @@ def reasoning_choices(config, *, include_current=False):
         options.append({'value': 'current', 'label': label})
     return {'options': options, 'value': value, 'efforts': list(levels),
             'source': DOC if config.llm_provider == 'dashscope' else None,
-            'note': '档位由所选模型决定，不改变工具调用次数。' if levels else
+            'note': '点点服务默认开启深度思考，可明确开启或关闭。' if config.llm_provider=='diandian' and toggle else
+                    '档位由所选模型决定，不改变工具调用次数。' if levels else
                     '该模型未确认支持原生强度档位；可使用服务默认。'}
 
 

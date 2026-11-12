@@ -73,11 +73,12 @@ async function png(value) {
   download(blob,'lodestar-diagram.png');
 }
 
-function expand(value) {
+function expand(value,caption='图表') {
   const dialog = document.createElement('dialog');
   dialog.className = 'diagram-dialog'; dialog.setAttribute('aria-label','放大查看图表');
   dialog.innerHTML = '<header><strong>图表</strong><div><button type="button" data-zoom="out" aria-label="缩小">−</button><button type="button" data-zoom="fit">适应窗口</button><button type="button" data-zoom="in" aria-label="放大">＋</button><button type="button" data-zoom="close" aria-label="关闭图表">关闭</button></div></header><div class="diagram-viewport" tabindex="0" aria-label="图表画布，可拖动或滚动查看"><img alt="放大的示意图" draggable="false"></div>';
   document.body.append(dialog);
+  dialog.querySelector('header strong').textContent=caption;
   const viewport = dialog.querySelector('.diagram-viewport'), image = dialog.querySelector('img');
   image.src = dataUrl(value.svg);
   let scale = 1;
@@ -119,7 +120,7 @@ export function mountDiagrams(root) {
       if (!action) return;
       try {
         if (action === 'copy') { await navigator.clipboard.writeText(source); status.textContent='已复制图表代码'; }
-        else if (value && action === 'expand') expand(value);
+        else if (value && action === 'expand') expand(value,card.querySelector('.diagram-toolbar strong').textContent);
         else if (value && action === 'svg') download(new Blob([value.svg],{type:'image/svg+xml;charset=utf-8'}),'lodestar-diagram.svg');
         else if (value && action === 'png') { status.textContent='正在导出…'; await png(value); status.textContent='已导出 PNG'; }
       } catch(error) { status.textContent=error.message || '操作未完成'; }

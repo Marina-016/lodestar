@@ -49,7 +49,7 @@ class NewsDialogueTests(unittest.TestCase):
             fixtures.calls({'action': 'search_web', 'query': 'broader'}), fixtures.answer()]
         with patch('lodestar.tools.registry.call_tool', side_effect=[
                 {'sources': []}, {'sources': [{'url': 'https://example.com'}]}]) as tool:
-            context = gather(self.ws, self.llm, {'message': '今日新闻', 'papers': []})
+            context = gather(self.ws, self.llm, {'message': '查一些 AI 相关报道', 'papers': []})
         self.assertEqual(tool.call_count, 2)
         self.assertEqual(context['papers'], [])  # snippets never become read evidence
 

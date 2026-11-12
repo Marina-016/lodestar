@@ -379,7 +379,7 @@ def sources(conn, memory_id):
             m.role,m.kind,m.created_at AS message_created_at,i.id AS item_id,i.name AS item_name,m.conversation_id
             FROM assistant_memory_sources s JOIN messages m ON m.id=s.message_id
             JOIN web_items i ON i.conversation_id=m.conversation_id AND i.owner='local'
-            WHERE s.memory_id=? ORDER BY CASE s.relation WHEN 'primary' THEN 0 ELSE 1 END,s.message_id''', (memory_id,))]
+            WHERE s.memory_id=? AND coalesce(m.kind,'')<>'superseded' ORDER BY CASE s.relation WHEN 'primary' THEN 0 ELSE 1 END,s.message_id''', (memory_id,))]
 
 
 def reconstruct_context(conn, rows, query, *, char_budget=4000, max_memories=3, item_id=None):
@@ -400,10 +400,10 @@ def reconstruct_context(conn, rows, query, *, char_budget=4000, max_memories=3, 
         if item_id is not None and anchor['item_id'] != item_id:
             continue
         before = list(reversed(list(conn.execute('''SELECT id,role,content,created_at FROM messages
-            WHERE conversation_id=? AND id<=? ORDER BY id DESC LIMIT 2''',
+            WHERE conversation_id=? AND id<=? AND coalesce(kind,'')<>'superseded' ORDER BY id DESC LIMIT 2''',
             (anchor['conversation_id'], anchor['message_id'])))))
         after = list(conn.execute('''SELECT id,role,content,created_at FROM messages
-            WHERE conversation_id=? AND id>? ORDER BY id LIMIT 1''',
+            WHERE conversation_id=? AND id>? AND coalesce(kind,'')<>'superseded' ORDER BY id LIMIT 1''',
             (anchor['conversation_id'], anchor['message_id'])))
         messages = []
         for message in before + after:

@@ -28,6 +28,7 @@ class DianDianTests(unittest.TestCase):
         self.assertEqual(call.call_args.args[0], 'https://note3-prev-api.askdiandian.com/v1/chat/completions')
         self.assertEqual(call.call_args.kwargs['headers'], {'api-key': 'test-not-real'})
         self.assertNotIn('enable_thinking', call.call_args.kwargs['json'])
+        self.assertEqual(call.call_args.kwargs['json']['chat_template_kwargs'], {'enable_thinking':False})
         self.assertEqual(client._diandian.usage[0]['total_tokens'], 12)
 
     def test_explicit_thinking_uses_only_documented_field(self):
@@ -37,6 +38,17 @@ class DianDianTests(unittest.TestCase):
         with patch.dict(os.environ, {'DIANDIAN_API_KEY': 'test-not-real'}):
             adapter = DiandianClient(cfg)
         self.assertEqual(adapter.openai_options(), {'chat_template_kwargs': {'enable_thinking': True}})
+
+    def test_default_off_and_on_remain_distinct(self):
+        from lodestar.providers.capabilities import apply_reasoning,reasoning_choices
+        from lodestar.providers.reasoning import diandian_options
+        cfg=self.config()
+        default=apply_reasoning(cfg,'default')
+        off=apply_reasoning(default,'off')
+        self.assertEqual(diandian_options(default),{})
+        self.assertEqual(diandian_options(off),{'chat_template_kwargs':{'enable_thinking':False}})
+        self.assertEqual(reasoning_choices(off)['value'],'off')
+        self.assertEqual(diandian_options(apply_reasoning(off,'on')),{'chat_template_kwargs':{'enable_thinking':True}})
 
     def test_rejects_non_documented_endpoint_and_catalog_guessing(self):
         cfg = self.config()

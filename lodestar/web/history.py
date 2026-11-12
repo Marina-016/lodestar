@@ -5,7 +5,7 @@ from urllib.parse import urlencode
 def search(ws,query,*,project_id=None,item_id=None,page=1,model_item=None):
     if not isinstance(query,str) or len(query)>200 or not query.strip(): raise ValueError('请输入1–200字符的查询')
     if type(page) is not int or page<1 or page>10000: raise ValueError('页码无效')
-    where=["i.owner='local'","m.content LIKE ? ESCAPE '\\'"]
+    where=["i.owner='local'","coalesce(m.kind,'')<>'superseded'","m.content LIKE ? ESCAPE '\\'"]
     literal=query.strip().replace('\\','\\\\').replace('%','\\%').replace('_','\\_')
     args=['%'+literal+'%']
     if model_item is not None:
@@ -34,7 +34,7 @@ def search(ws,query,*,project_id=None,item_id=None,page=1,model_item=None):
 
 def message(ws,item_id,message_id):
     row=ws.conn.execute("SELECT m.id,m.role,m.content,m.created_at,i.name AS item_name,i.id AS item_id "
-        "FROM messages m JOIN web_items i ON i.conversation_id=m.conversation_id WHERE i.owner='local' AND i.id=? AND m.id=?",
+        "FROM messages m JOIN web_items i ON i.conversation_id=m.conversation_id WHERE i.owner='local' AND coalesce(m.kind,'')<>'superseded' AND i.id=? AND m.id=?",
         (item_id,message_id)).fetchone()
     if not row:raise LookupError('找不到这条消息')
     value=dict(row);value['original_chars']=len(value['content']);value['truncated']=len(value['content'])>24000

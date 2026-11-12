@@ -24,7 +24,8 @@ def initialize(ws):
             ws.conn.execute(f'ALTER TABLE web_items ADD COLUMN {name} {declaration}')
     ws.conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS web_dispatch_key ON web_items(dispatch_key) WHERE dispatch_key IS NOT NULL')
     run_columns = {r['name'] for r in ws.conn.execute('PRAGMA table_info(web_runs)')}
-    for name, declaration in {'policy': "TEXT NOT NULL DEFAULT '{}'", 'retry_user_message_id': 'INTEGER'}.items():
+    for name, declaration in {'policy': "TEXT NOT NULL DEFAULT '{}'", 'retry_user_message_id': 'INTEGER',
+                              'continue_message_id': 'INTEGER'}.items():
         if name not in run_columns:
             ws.conn.execute(f'ALTER TABLE web_runs ADD COLUMN {name} {declaration}')
     ws.conn.execute('CREATE TABLE IF NOT EXISTS web_migrations(name TEXT PRIMARY KEY)')

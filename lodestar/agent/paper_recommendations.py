@@ -46,7 +46,7 @@ def paper_focus(conn, conversation_id, before, after=0, query=''):
         if row['role'] == 'user':
             request = row['content']
             continue
-        if row['role'] != 'assistant' or row['kind'] in ('error', 'cancelled'):
+        if row['role'] != 'assistant' or row['kind'] in ('error', 'cancelled', 'superseded'):
             continue
         try:
             metadata = json.loads(row['metadata'] or '{}')
@@ -88,7 +88,7 @@ def introduced_papers(conn, conversation_id, before, after=0):
     """Use only papers actually named/cited in completed replies, not search hits."""
     known = {}
     for row in conn.execute("SELECT content,metadata FROM messages WHERE conversation_id=? AND role='assistant' "
-                            "AND kind NOT IN ('error','cancelled') AND id>? AND id<? ORDER BY id",
+                            "AND kind NOT IN ('error','cancelled','superseded') AND id>? AND id<? ORDER BY id",
                             (conversation_id, after, before)):
         try:
             metadata = json.loads(row['metadata'] or '{}')

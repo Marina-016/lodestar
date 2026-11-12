@@ -25,6 +25,11 @@ CREATE TABLE IF NOT EXISTS library_paper_projects (
  PRIMARY KEY(paper_id, project_id)
 );
 CREATE INDEX IF NOT EXISTS idx_library_paper_projects_project ON library_paper_projects(project_id,status,priority);
+CREATE TABLE IF NOT EXISTS paper_impact_cache (
+ paper_key TEXT NOT NULL, provider TEXT NOT NULL, payload TEXT NOT NULL DEFAULT '{}',
+ fetched_at TEXT, attempted_at TEXT NOT NULL, status TEXT NOT NULL,
+ PRIMARY KEY(paper_key,provider)
+);
 """
 
 STATUSES = {'inbox', 'later', 'reading', 'read', 'archived'}
@@ -222,5 +227,10 @@ def detail(conn, paper_id, project_id=None):
     project_id = _project(conn, project_id) if project_id not in (None, '') else None
     rows = conn.execute('SELECT rp.*,p.name AS project_name FROM library_paper_projects rp JOIN projects p ON p.id=rp.project_id WHERE rp.paper_id=? ORDER BY p.name', (paper_id,)).fetchall()
     projects = [_row(row) for row in rows]
-    return {'paper': _row(paper), 'projects': projects,
+    from lodestar.paper_impact import cached
+    try:
+        impact = cached(conn, paper['canonical_url'])
+    except ValueError:
+        impact = {'providers': {}, 'supported': False, 'note': '引用指标查询目前支持 arXiv 或 DOI 链接。'}
+    return {'paper': _row(paper), 'impact': impact, 'projects': projects,
             'project': next((row for row in projects if row['project_id']==project_id), None)}

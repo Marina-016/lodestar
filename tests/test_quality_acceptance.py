@@ -29,6 +29,7 @@ class FixtureModel(LLMClient):
         self.observed.append(json.dumps({'system': system, 'messages': messages}, ensure_ascii=False))
         request = next((m['content'] for m in reversed(messages)
                         if m['role'] == 'user' and isinstance(m['content'], str)), '')
+        request = request.rsplit('User request:\n', 1)[-1]
         actions = []
         if self.steps == 0:
             if '推荐近 7 天' in request:

@@ -11,6 +11,7 @@ import importlib
 import json
 import os
 import re
+import threading
 import requests
 from typing import Any, Dict
 
@@ -89,6 +90,11 @@ class LLMClient:
         self._dashscope = None
         self._diandian = None
         self.last_dialogue_observation = None
+        self.cancel_signal = None
+        self._transport_lock = threading.Lock()
+        self._active_transports = 0
+        self._close_requested = False
+        self._resources_closed = False
         if self.mode == "live" and config.llm_provider == "dashscope":
             from lodestar.providers.dashscope import DashScopeClient
             try:
@@ -112,6 +118,14 @@ class LLMClient:
 
     # ---------- 对外接口 ----------
     def close(self):
+        with self._transport_lock:
+            self._close_requested = True
+            if self._active_transports or self._resources_closed:
+                return
+            self._resources_closed = True
+        self._close_resources()
+
+    def _close_resources(self):
         if self._client is not None:
             self._client.close()
         if self._dashscope is not None:
@@ -142,7 +156,7 @@ class LLMClient:
         except Exception as error:
             raise LLMError('Model catalog request failed') from error
 
-    def dialogue_step(self, system, messages, tools, on_text=None):
+    def dialogue_step(self, system, messages, tools, on_text=None, *, tool_choice=None):
         """One native assistant turn, preserving tool calls and result identifiers."""
         if self.mode == 'mock':
             text = '这是离线对话夹具；实时检索和自主工具调用请使用 live 模式。'
@@ -150,7 +164,27 @@ class LLMClient:
                 on_text(text)
             return {'role': 'assistant', 'content': [{'type': 'text', 'text': text}]}
         from lodestar.providers.dialogue import step
-        return step(self, system, messages, tools, on_text)
+        choice_options = {'tool_choice': tool_choice} if tool_choice is not None else {}
+        if self.cancel_signal is None:
+            return step(self, system, messages, tools, on_text, **choice_options)
+        from lodestar.cancellation import interruptible
+        def check_cancel():
+            if self.cancel_signal.is_set():
+                raise LLMError('Run cancelled by user', code='cancelled', role='conversation')
+        def finished():
+            with self._transport_lock:
+                self._active_transports -= 1
+                close = self._close_requested and not self._resources_closed and not self._active_transports
+                if close:
+                    self._resources_closed = True
+            if close:
+                self._close_resources()
+        check_cancel()
+        with self._transport_lock:
+            self._active_transports += 1
+        return interruptible(lambda emit: step(self, system, messages, tools, emit, **choice_options),
+            check_cancel=check_cancel, on_text=on_text, timeout_s=self.config.conversation_timeout_s,
+            on_finished=finished)
 
     def complete(self, role: str, system: str, user: str, max_tokens: int | None = None) -> str:
         if self.mode == "mock":

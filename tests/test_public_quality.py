@@ -42,6 +42,7 @@ class PublicScriptedModel(LLMClient):
         self.observed.append(json.dumps(messages, ensure_ascii=False))
         request = next((m['content'] for m in reversed(messages)
                         if m['role'] == 'user' and isinstance(m['content'], str)), '')
+        request = request.rsplit('User request:\n', 1)[-1]
         actions = []
         if self.steps == 0:
             if '请找出这些历史论文' in request:
@@ -189,7 +190,7 @@ class PublicQualityTests(unittest.TestCase):
                 self.assertEqual(coverage['abstract_fallbacks'], ['paper'] if changes.get('read_depth') == 'abstract' else [])
 
     def test_synthetic_http_full_text_fallback_is_not_reported_as_body_evidence(self):
-        from test_quality_acceptance import FixtureModel
+        from tests.test_quality_acceptance import FixtureModel
         original_read = quality_fixtures.read_paper
         def abstract_only(url, **options):
             options['full_text'] = False

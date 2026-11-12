@@ -73,13 +73,18 @@ def _guard_sse_errors(response):
     response.stream = GuardedStream()
 
 
-def step(client, system, messages, tools, on_text=None):
+def step(client, system, messages, tools, on_text=None, *, tool_choice=None):
     from lodestar.llm import LLMError
     try:
         if client._dashscope is not None or getattr(client, '_diandian', None) is not None:
-            return _openai_step(client, system, messages, tools, on_text)
+            return _openai_step(client, system, messages, tools, on_text, tool_choice=tool_choice)
         options = {'tools': tools} if tools else {'tool_choice': {'type': 'none'}}
         options.update(anthropic_options(client.config))
+        if tools and tool_choice == 'required':
+            # Extended thinking supports auto/none, not a forced any/tool call.
+            # Keep the one bounded host repair without sending an invalid mix.
+            thinking = options.get('thinking', {}).get('type')
+            options['tool_choice'] = {'type': 'auto' if thinking in ('enabled','adaptive') else 'any'}
         with client._client.messages.stream(
                 model=client.model, max_tokens=client.config.max_tokens,
                 system=system, messages=messages,
@@ -142,7 +147,7 @@ def _openai_messages(messages):
     return converted
 
 
-def _openai_step(client, system, messages, tools, on_text):
+def _openai_step(client, system, messages, tools, on_text, *, tool_choice=None):
     from lodestar.llm import LLMError
     adapter = client._dashscope or client._diandian
     # Older tests inject a minimal DashScope fixture; retain the public
@@ -155,6 +160,8 @@ def _openai_step(client, system, messages, tools, on_text):
                'temperature': client.config.temperature, **openai_options,
                'stream': True, 'stream_options': {'include_usage': True}}
     if tools:
+        if tool_choice == 'required':
+            payload['tool_choice'] = 'required'
         payload['tools'] = [{'type': 'function', 'function': {
             'name': t['name'], 'description': t['description'], 'parameters': t['input_schema']}}
             for t in tools]
@@ -167,10 +174,13 @@ def _openai_step(client, system, messages, tools, on_text):
     # upstream SSE heartbeat can therefore keep an otherwise stalled dialogue
     # alive indefinitely. Conversation timeout is an end-to-end UI budget.
     conversation_timeout_s = client.config.conversation_timeout_s
-    deadline = time.monotonic() + conversation_timeout_s
+    request_start = time.monotonic()
+    first_text_ms, first_reasoning_ms = None, None
+    deadline = request_start + conversation_timeout_s
     with transport.post(adapter.base_url + '/chat/completions',
             headers=headers, json=payload,
             timeout=min(client.config.llm_timeout_s, conversation_timeout_s), stream=True) as response:
+        headers_ms = round((time.monotonic()-request_start)*1000)
         try:
             raise_for_status(response)
         except LLMError as error:
@@ -202,8 +212,12 @@ def _openai_step(client, system, messages, tools, on_text):
             for choice in data.get('choices', []):
                 delta = choice.get('delta', {})
                 if delta.get('reasoning_content'):
+                    if first_reasoning_ms is None:
+                        first_reasoning_ms = round((time.monotonic()-request_start)*1000)
                     reasoning.append(delta['reasoning_content'])
                 if delta.get('content'):
+                    if first_text_ms is None:
+                        first_text_ms = round((time.monotonic()-request_start)*1000)
                     text.append(delta['content'])
                     if on_text:
                         on_text(delta['content'])
@@ -233,5 +247,9 @@ def _openai_step(client, system, messages, tools, on_text):
         'requested_model': client.model, 'returned_model': returned_model,
         'thinking_requested': None if client.config.llm_thinking_mode == 'default' else client.config.llm_thinking,
         'thinking_observed': bool(reasoning), 'usage': usage,
+        'timing': {'headers_ms':headers_ms,'first_text_ms':first_text_ms,
+                   'first_reasoning_ms':first_reasoning_ms,
+                   'total_ms':round((time.monotonic()-request_start)*1000),
+                   'input_chars':sum(len(str(m.get('content') or '')) for m in payload['messages'])},
     }
     return {'role': 'assistant', 'content': blocks}

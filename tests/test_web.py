@@ -155,8 +155,13 @@ class WebTest(unittest.TestCase):
             retried = self.wait(self.app.retry('main', first_answer['id'], 'retry'))
         self.assertEqual(first['run']['status'], 'completed')
         self.assertEqual(retried['run']['status'], 'completed')
+        self.assertIsNotNone(json.loads(retried['run']['result'])['timing']['first_text_ms'])
         transcript = self.app.state()['messages']
-        self.assertEqual([message['role'] for message in transcript], ['user', 'assistant', 'assistant'])
+        self.assertEqual([message['role'] for message in transcript], ['user', 'assistant'])
+        self.assertNotIn(first_answer['id'], [message['id'] for message in transcript])
+        with self.app.workspace() as ws:
+            retired = ws.conn.execute('SELECT kind,content FROM messages WHERE id=?', (first_answer['id'],)).fetchone()
+            self.assertEqual((retired['kind'],retired['content']), ('superseded',''))
         self.assertEqual(captured[1]['message'], '解释这个机制')
         self.assertEqual(captured[1]['reference_text'], 'SOURCE_NOTE')
         self.assertEqual(captured[1]['history'], [])
@@ -288,6 +293,12 @@ class WebTest(unittest.TestCase):
             good=client.post(url+'/api/items',json={'name':'A'},headers={'X-Lodestar-Token':self.app.token},timeout=3)
             self.assertEqual(good.status_code,201)
             self.assertEqual(client.get(url+'/style.css',timeout=3).status_code,200)
+            companion = client.get(url+'/companion.mjs',timeout=3)
+            self.assertEqual(companion.status_code,200)
+            self.assertIn('javascript',companion.headers['Content-Type'])
+            sprite = client.get(url+'/lolo-companion.png',timeout=3)
+            self.assertEqual(sprite.headers['Content-Type'],'image/png')
+            self.assertTrue(sprite.content.startswith(b'\x89PNG\r\n\x1a\n'))
             actions = client.get(url+'/actions.mjs',timeout=3)
             self.assertEqual(actions.status_code,200)
             self.assertIn('javascript',actions.headers['Content-Type'])
@@ -388,7 +399,7 @@ class WebTest(unittest.TestCase):
         factory.assert_not_called()
         self.assertEqual([m['role'] for m in self.app.state()['messages']],['user','assistant'])
 
-    def test_stop_during_tool_retains_observation_without_another_model_call(self):
+    def test_stop_during_tool_discards_unreturned_observation_without_another_model_call(self):
         ready, release = threading.Event(), threading.Event()
         client = Mock()
         client.dialogue_step.return_value = {'role':'assistant','content':[{'type':'tool_use',
@@ -413,8 +424,8 @@ class WebTest(unittest.TestCase):
         client.dialogue_step.assert_called_once()
         tool.assert_called_once()
         meta = self.app.state()['messages'][-1]['metadata']
-        self.assertEqual(meta['candidates'][0]['url'],source['url'])
-        self.assertEqual(meta['dialogue_events'][0]['result']['sources'][0],source)
+        self.assertEqual(meta['candidates'],[])
+        self.assertEqual(meta['dialogue_events'],[])
 
     def test_stopping_run_is_recovered_as_interrupted_without_inference(self):
         with self.app.workspace() as ws, ws.conn:

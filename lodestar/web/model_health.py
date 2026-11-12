@@ -35,6 +35,10 @@ def service_key(cfg):
 
 def request_key(cfg):
     values = snapshot(cfg)
+    if cfg.llm_provider == 'diandian':
+        # Older observations omitted false and actually used upstream default ON.
+        # They cannot verify the corrected explicit-off payload.
+        values['thinking_payload_version'] = 2
     for key in ('model', 'profile', 'operation_budget'):
         values.pop(key)
     values['temperature'] = cfg.temperature

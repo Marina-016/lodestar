@@ -6,10 +6,18 @@ import { defaultModel, modelOptionsHTML, hiddenModelsHTML } from "./models.mjs";
 import { quoteMarkdown } from "./quote.mjs";
 import { beginsNewChat, sessionDateLabel, timestampLabel } from "./timeline.mjs";
 import { storedFollowups, visibleAnswer } from "./followups.mjs";
-import { streamDisplay } from "./stream.mjs";
-import { initializeNavigation } from "./navigation.mjs";
+import { streamDisplay, scrollFollower, patchStream } from "./stream.mjs";
+import { initializeNavigation, initializeChatWidth, initializeAppearance } from "./navigation.mjs";
+import { initializeCompanion } from "./companion.mjs";
 import { mountDiagrams } from "./diagrams.mjs";
+import { impactReference } from "./impact.mjs";
+import { waitingHTML, updateWaiting, responseNotice, answerBody, canContinue } from "./response-ui.mjs";
 initializeNavigation();
+initializeChatWidth();
+initializeAppearance();
+const companion = initializeCompanion();
+let activeStream=null, stoppingRunId=null;
+let followScroll=null, streamViewport=null, viewportFrame=null;
 const $ = (s) => document.querySelector(s),
   icon = (name) => `<svg aria-hidden="true"><use href="#i-${name}"/></svg>`;
 const token = $('meta[name="lodestar-token"]').content;
@@ -27,6 +35,7 @@ let memoryFocusId = null,
   selectedAnswerQuote = "";
 const REFERENCE_PASTE_THRESHOLD = 600;
 let referenceExpanded = false;
+let deletingMessageId = null;
 let composingPrompt = false;
 let finishAfterComposition = null;
 try {
@@ -37,6 +46,8 @@ itemId = initialQuery.get('item') || itemId;
 let requestedPaperId = Number(initialQuery.get('paper')) || null;
 let requestedMessageId = Number(initialQuery.get('message')) || null;
 const labels = {
+  model_request: "lolo 正在组织回答",
+  get_paper_impact: "正在查论文引用指标",
   search_papers: "正在检索论文",
   discover_papers: "正在发现近期论文",
   search_web: "正在搜索网页",
@@ -88,21 +99,44 @@ function toast(message) {
   toastTimer = setTimeout(() => ($("#toast").hidden = true), 4500);
 }
 function setStatus(text, busy = false) {
+  companion.status(text, busy);
   if ($("#run-status").textContent !== text) $("#run-status").textContent = text;
   $("#run-status").classList.toggle("busy", busy);
   $("#composer").setAttribute("aria-busy", String(busy));
 }
 function nearBottom() {
   const el = $("#scroll-area");
-  return el.scrollHeight - el.scrollTop - el.clientHeight < 180;
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 24;
 }
 function updateLatest() {
-  $("#scroll-latest").hidden = !state?.messages.length || nearBottom();
+  $("#scroll-latest").hidden = !state?.messages.length || (followScroll?.following && nearBottom());
 }
 function scrollBottom(force = false) {
-  const el = $("#scroll-area");
-  if (force || nearBottom()) el.scrollTop = el.scrollHeight;
-  updateLatest();
+  if(force) followScroll?.latest();
+  else followScroll?.follow();
+}
+function syncStreamViewport() {
+  if(followScroll?.following) {streamViewport?.display.resume();return;}
+  if(viewportFrame!==null || !streamViewport) return;
+  viewportFrame=requestAnimationFrame(()=>{
+    viewportFrame=null;
+    if(!streamViewport) return;
+    const root=streamViewport.root()?.querySelector('.answer');
+    if(!root) return;
+    const view=$('#scroll-area').getBoundingClientRect(), tail=root.getBoundingClientRect().bottom;
+    if(!followScroll.following && (tail>view.bottom+120 || tail<view.top)) streamViewport.display.pause();
+    else streamViewport.display.resume();
+  });
+}
+function readingPosition() {
+  const area=$('#scroll-area'), edge=area.getBoundingClientRect().top;
+  const message=[...$('#messages').children].find(el=>el.matches('.message') && el.getBoundingClientRect().bottom>edge);
+  return {top:area.scrollTop,id:message?.dataset.message,offset:message ? message.getBoundingClientRect().top-edge : 0};
+}
+function restoreReadingPosition(position) {
+  const area=$('#scroll-area');
+  const message=position.id && $(`[data-message="${CSS.escape(position.id)}"]`);
+  area.scrollTop=message ? area.scrollTop+message.getBoundingClientRect().top-area.getBoundingClientRect().top-position.offset : position.top;
 }
 function busy() {
   return !!activeRun || submitting;
@@ -119,7 +153,7 @@ function controls() {
   $("#send").classList.toggle("is-busy", submitting || stopping);
   $("#send use").setAttribute("href", activeRun ? "#i-stop" : "#i-arrow");
   $("#send").setAttribute("aria-label", activeRun ? stopping ? "正在停止" : "停止回答" : "发送问题");
-  $("#send").title = activeRun ? stopping ? "等待当前请求返回后停止" : "停止回答"
+  $("#send").title = activeRun ? stopping ? "收到，正在收住这轮回复" : "停止回答"
     : submitting ? "正在提交"
     : inactive ? "请先恢复任务"
       : paused ? "点击模型名称，启用模型调用"
@@ -140,7 +174,7 @@ function newChatDivider(message) {
   return `<div class="new-chat-divider" role="separator" aria-label="新对话${date ? " · " + esc(date) : ""}"><span></span><strong>新对话</strong>${date ? `<time datetime="${esc(message.created_at)}">${esc(date)}</time>` : ""}<span></span></div>`;
 }
 function userMessage(message) {
-  return `<article class="message message-user" data-message="${esc(message.id)}">${messageReference(message)}<div class="user-bubble">${esc(message.content)}</div><div class="message-actions user-message-actions">${messageTime(message)}<button class="subtle copy-question" data-id="${esc(message.id)}" title="复制这条问题" aria-label="复制这条问题">${icon("copy")}<span>复制问题</span></button></div></article>`;
+  return `<article class="message message-user" data-message="${esc(message.id)}">${messageReference(message)}<div class="user-bubble">${esc(message.content)}</div><div class="message-actions user-message-actions">${messageTime(message)}<button class="subtle copy-question" data-id="${esc(message.id)}" title="复制这条问题" aria-label="复制这条问题">${icon("copy")}<span>复制问题</span></button>${!busy() ? `<button class="subtle delete-message" data-id="${message.id}" title="删除这一轮问题和回答" aria-label="删除这一轮问题和回答">${icon("trash")}</button>` : ''}</div></article>`;
 }
 function referenceText() {
   return $("#reference-text").value.trim();
@@ -149,6 +183,12 @@ function syncReferenceInput() {
   const text = referenceText();
   $("#reference-input").hidden = !referenceExpanded && !text;
   $("#reference-count").textContent = text ? `${text.length} / 24000 字` : "";
+  $('#reference-text').hidden = !referenceExpanded;
+  $('#reference-preview').hidden = referenceExpanded;
+  $('#reference-preview').textContent = text ? text.replace(/^>\s?/gm,'').replace(/\s+/g,' ').slice(0,180) : '添加需要参考的文字';
+  $('#toggle-reference').textContent = referenceExpanded ? '收起' : '展开';
+  $('#toggle-reference').setAttribute('aria-expanded',String(referenceExpanded));
+  $('#toggle-reference').title = referenceExpanded ? '收起编辑区，内容保留并随本次问题发送' : '展开并编辑参考文本';
 }
 function showReferenceInput() {
   referenceExpanded = true;
@@ -165,7 +205,7 @@ function appendReference(text) {
     return false;
   }
   field.value = next;
-  referenceExpanded = true;
+  referenceExpanded = false;
   syncReferenceInput();
   field.dispatchEvent(new Event("input", { bubbles: true }));
   return true;
@@ -192,6 +232,7 @@ async function addRequestedPaperReference() {
       paper.venue ? `发表：${paper.venue}` : '',
       paper.keywords?.length ? `关键词：${paper.keywords.join('；')}` : '',
       value.project?.reading_depth ? `项目阅读深度：${value.project.reading_depth}` : '',
+      impactReference(value.impact),
     ].filter(Boolean).join('\n');
     if (appendReference(`论文资料（用户明确引用；以下是元数据，不代表已经阅读全文）\n${metadata}`))
       toast('论文资料已加入上方参考文本；请再输入你的问题');
@@ -242,7 +283,14 @@ function renderInsights() {
 }
 function assistant(text, config, error = false, id = "draft", receipts, message = {}) {
   const count = id === "draft" ? 0 : sourcesFor(id).references.length;
-  const answer = text ? markdown(visibleAnswer(text)) : '<div class="typing-dots" aria-hidden="true"><span></span><span></span><span></span></div>';
+  let answer = text ? markdown(visibleAnswer(text)) : waitingHTML();
+  if (error || message.kind==='error') {
+    answer=(message.metadata?.partial_answer ? markdown(message.metadata.partial_answer) : '')+
+      responseNotice('error',message.metadata || {},text);
+  } else if(message.kind==='cancelled') {
+    answer=(message.metadata?.partial_answer ? markdown(message.metadata.partial_answer) : '')+
+      responseNotice('cancelled',message.metadata || {});
+  }
   const index = state.messages.findIndex((entry) => String(entry.id) === String(id));
   const laterMessages = index < 0 ? [] : state.messages.slice(index + 1);
   const latestAssistant = [...state.messages].reverse().find((entry) => entry.role === "assistant");
@@ -252,7 +300,9 @@ function assistant(text, config, error = false, id = "draft", receipts, message 
   const nextSteps = latestResponse && !error ? storedFollowups(message.metadata?.suggested_prompts) : [];
   const followups = nextSteps.length ? `<section class="next-steps" aria-label="推荐的下一步"><span class="next-steps-label">你还可以继续问</span><div class="next-steps-options">${nextSteps.map((step) => `<button type="button" class="next-step" data-id="${esc(id)}" data-next-prompt="${esc(step.prompt)}"><span class="next-step-prompt">${esc(step.prompt)}</span><span class="next-step-arrow">${icon("arrow")}</span></button>`).join("")}</div></section>` : "";
   const retry = latestResponse ? `<button class="subtle retry-answer" data-id="${id}" title="重新生成这条回答">${icon("retry")}<span>重新生成</span></button>` : "";
-  const actions = id === "draft" ? "" : `<div class="message-actions">${messageTime(message)}${retry}<button class="subtle copy-answer" data-id="${id}" title="复制完整回答">${icon("copy")}<span>复制</span></button><button class="subtle quote-answer" data-id="${id}" title="将整段回答引用到输入框">${icon("paper")}<span>引用整段</span></button><button class="subtle inspect-answer" data-id="${id}" title="查看本轮来源与上下文">${icon("context")}<span>来源与上下文</span>${count ? `<span class="source-count">${count}</span>` : ""}</button></div>`;
+  const resume = latestResponse && canContinue(message) ? `<button class="subtle continue-answer" data-id="${id}" title="保留已有内容，在这条回答里接着写">${icon("arrow")}<span>继续生成</span></button>` : '';
+  const remove = !busy() ? `<button class="subtle delete-message" data-id="${id}" title="删除这条回答">${icon("trash")}<span>删除</span></button>` : '';
+  const actions = id === "draft" ? "" : `<div class="message-actions">${messageTime(message)}${resume}${retry}<button class="subtle copy-answer" data-id="${id}" title="复制完整回答">${icon("copy")}<span>复制</span></button><button class="subtle quote-answer" data-id="${id}" title="将整段回答加入参考文本">${icon("paper")}<span>引用整段</span></button><button class="subtle inspect-answer" data-id="${id}" title="查看本轮来源与上下文">${icon("context")}<span>来源与上下文</span>${count ? `<span class="source-count">${count}</span>` : ""}</button>${remove}</div>`;
   return `<article class="message message-assistant ${error ? "message-error" : ""}" data-message="${id}"><div class="assistant-meta"><img class="assistant-avatar" src="/lolo-avatar.png" alt="" width="28" height="28" loading="lazy" decoding="async"><span>lolo</span></div><div class="answer">${answer}</div><div class="execution">${actionHTML(receipts, { pending: id === "draft" })}</div>${followups}${actions}</article>`;
 }
 function render() {
@@ -333,7 +383,7 @@ async function load(id = itemId) {
         const reference=sessionStorage.getItem('lodestar-reference:'+itemId);
         if(reference && !referenceText()) {
           $('#reference-text').value=reference.slice(0,24000);
-          referenceExpanded=true;
+          referenceExpanded=false;
           syncReferenceInput();
         }
       } catch {}
@@ -368,57 +418,83 @@ function startPoll(run) {
     text = "",
     receipts = [],
     epoch = generation;
+  const continuing = state.messages.find(m=>Number(m.id)===Number(run.continue_message_id));
+  const previousText = continuing ? answerBody(continuing) : '';
+  const streamRoot = () => $(`[data-message="${continuing ? continuing.id : 'draft'}"]`);
   const display = streamDisplay((value) => {
-    if (epoch !== generation) { display.stop(); return; }
+    if (epoch !== generation) { stopDisplay(); return; }
     if (composingPrompt) return;
-    const el = $('[data-message="draft"] .answer');
+    const el = streamRoot()?.querySelector('.answer');
     if (!el) return;
-    const follow = !composingPrompt && nearBottom();
-    el.innerHTML = markdown(value);
-    if (follow) scrollBottom(true);
-  });
-  $("#messages").insertAdjacentHTML(
+    patchStream(el,markdown(previousText + value));
+    scrollBottom();
+    if(!followScroll.following) syncStreamViewport();
+  },{interval:()=>followScroll.following ? 48 : 120});
+  streamViewport={display,root:streamRoot};
+  function stopDisplay() {
+    display.stop();
+    if(streamViewport?.display===display) streamViewport=null;
+  }
+  activeStream=display;
+  const waitStarted=Date.now();
+  let waitPhase='model_request';
+  const waitTimer=setInterval(()=>{
+    if(epoch!==generation || text) {clearInterval(waitTimer); return;}
+    updateWaiting(streamRoot(),waitPhase,(Date.now()-waitStarted)/1000);
+  },1000);
+  if (continuing) {
+    const root=streamRoot();
+    root.querySelector('.answer').innerHTML=markdown(previousText)+waitingHTML();
+    root.querySelector('.message-actions')?.remove();
+    root.querySelector('.next-steps')?.remove();
+  } else $("#messages").insertAdjacentHTML(
     "beforeend",
     assistant("", JSON.parse(run.config), false, "draft", []),
   );
-  setStatus(run.status === "cancelling" ? "正在停止，等待当前请求返回…" : "正在理解问题…", true);
+  setStatus(run.status === "cancelling" ? "收到，lolo 正在停下…" : "lolo 接到问题啦，稍等一下…", true);
   scrollBottom(true);
   const tick = async () => {
-    if (epoch !== generation) { display.stop(); return; }
+    if (epoch !== generation) { stopDisplay(); clearInterval(waitTimer); return; }
     try {
       const data = await api(
         `/api/events?run=${encodeURIComponent(run.id)}&after=${after}`,
       );
-      if (epoch !== generation) { display.stop(); return; }
+      if (epoch !== generation) { stopDisplay(); return; }
       activeRun = data.run;
+      if(stoppingRunId===run.id && ['queued','running'].includes(activeRun.status)) activeRun.status='cancelling';
       controls();
-      const followStream = nearBottom();
       for (const event of data.events) {
         after = event.id;
         if (event.kind === "text") {
           text += event.data;
-          setStatus("正在回答…", true);
+          if(stoppingRunId!==run.id) setStatus("lolo 正在写给你…", true);
         } else if (event.kind === "action") {
           receipts.push(event.data);
-          const el = $('[data-message="draft"] .execution');
+          const el = streamRoot()?.querySelector('.execution');
           if (el) el.innerHTML = actionHTML(receipts, { pending: true });
-        } else if (event.kind === "progress")
-          setStatus((labels[event.data] || "正在准备资料") + "…", true);
+        } else if (event.kind === "progress") {
+          waitPhase=event.data;
+          updateWaiting(streamRoot(),waitPhase,(Date.now()-waitStarted)/1000);
+          if(stoppingRunId!==run.id) setStatus((labels[event.data] || "lolo 正在准备资料") + "…", true);
+        }
       }
-      display.update(visibleAnswer(text));
-      if (data.run.status === "cancelling") setStatus("正在停止，等待当前请求返回…", true);
-      if (!composingPrompt) scrollBottom(followStream);
+      if(stoppingRunId!==run.id) display.update(visibleAnswer(text));
+      if (activeRun.status === "cancelling") setStatus("收到，lolo 正在停下…", true);
+      if (!composingPrompt) scrollBottom();
       if (["queued", "running", "cancelling"].includes(data.run.status)) {
         setTimeout(tick, 120);
         return;
       }
-      display.stop();
+      stopDisplay();
+      clearInterval(waitTimer);
+      if(stoppingRunId===run.id) stoppingRunId=null;
       const result = JSON.parse(data.run.result || "{}");
       const response = await api(
         "/api/state?item=" + encodeURIComponent(itemId),
       );
       if (epoch !== generation) return;
-      const follow = nearBottom();
+      const follow = followScroll.following;
+      const reading = follow ? null : readingPosition();
       activeRun = null;
       if (composingPrompt) {
         setStatus("");
@@ -447,16 +523,18 @@ function startPoll(run) {
       setStatus(
         data.run.status === "completed"
           ? ""
-          : data.run.status === "cancelled" ? "本轮已停止，已保留生成内容。"
+          : data.run.status === "cancelled" ? (text ? "停好啦，已生成的内容给你留着。" : "停好啦，想继续时再叫 lolo。")
           : data.run.status === "interrupted"
-            ? "运行已中断；没有自动重试"
-            : "本轮未完成，可以修改问题后重试",
+            ? "这轮被中断了，可以重新生成。"
+            : state.messages.some(m=>canContinue(m)) ? "这条还没写完，可以继续生成，已有内容会保留。" : "这次没接上，可以点重新生成再试一次。",
       );
-      scrollBottom(follow);
+      if(reading) restoreReadingPosition(reading);
+      else scrollBottom();
     } catch (error) {
-      display.stop();
+      stopDisplay();
+      clearInterval(waitTimer);
       if (epoch !== generation) return;
-      setStatus("连接中断；后台运行可能仍在继续，刷新可恢复");
+      setStatus("和本地服务暂时断开了。后台可能还在运行，刷新后可以接回来。");
       activeRun = null;
       controls();
       toast(error.message);
@@ -469,13 +547,17 @@ $("#composer").addEventListener("submit", async (event) => {
   if (activeRun) {
     if (activeRun.status === "cancelling") return;
     const run = activeRun, epoch = generation;
+    stoppingRunId=run.id;
+    activeRun.status='cancelling'; activeStream?.stop(); controls();
+    updateWaiting($(`[data-message="${run.continue_message_id || 'draft'}"]`),'stopping',0);
+    setStatus("收到，lolo 先停一下…",true);
     try {
       const result = await api("/api/cancel", { item: itemId, run: run.id });
       if (epoch !== generation || activeRun?.id !== run.id) return;
       activeRun.status = result.status;
       controls();
-      setStatus(result.status === "cancelling" ? "正在停止，等待当前请求返回…" : "正在保存本轮结果…", true);
-    } catch (error) { toast(error.message); }
+      setStatus(result.status === "cancelling" ? "收到，lolo 正在停下…" : "这轮已经收好了。", true);
+    } catch (error) { stoppingRunId=null; toast('停止请求没能确认：'+error.message); load(itemId); }
     return;
   }
   const message = $("#prompt").value.trim();
@@ -485,7 +567,7 @@ $("#composer").addEventListener("submit", async (event) => {
     epoch = generation;
   submitting = true;
   $("#send").disabled = true;
-  setStatus("正在提交…", true);
+  setStatus("把问题交给 lolo…", true);
   try {
     const request = await api("/api/send", {
       item: id,
@@ -522,7 +604,7 @@ async function retryAnswer(messageId) {
   const id = itemId;
   const epoch = generation;
   submitting = true;
-  setStatus("正在重新生成…", true);
+  setStatus("换个思路，lolo 重新写一版…", true);
   renderMessages();
   try {
     const request = await api("/api/retry", {
@@ -532,6 +614,8 @@ async function retryAnswer(messageId) {
     });
     if (epoch !== generation) return;
     submitting = false;
+    state.messages=state.messages.filter(message=>String(message.id)!==String(messageId));
+    sourceCache.clear(); inspectedMessages.clear(); renderMessages();
     startPoll({ id: request.id, status: "queued", config: JSON.stringify(state.configuration) });
   } catch (error) {
     if (epoch !== generation) return;
@@ -542,6 +626,45 @@ async function retryAnswer(messageId) {
     toast(error.message);
   }
 }
+async function continueAnswer(messageId) {
+  if (!state || busy()) return;
+  const epoch=generation;
+  submitting=true;
+  renderMessages(); controls();
+  try {
+    const request=await api('/api/continue',{item:itemId,message_id:Number(messageId),key:crypto.randomUUID()});
+    if(epoch!==generation) return;
+    submitting=false;
+    startPoll({id:request.id,status:'queued',config:JSON.stringify(state.configuration),continue_message_id:Number(messageId)});
+  } catch(error) {
+    if(epoch!==generation) return;
+    submitting=false;renderMessages();controls();setStatus(error.message);toast(error.message);
+  }
+}
+function requestDeleteMessage(message) {
+  if(busy()) {toast('先等 lolo 停下，再删除吧');return;}
+  deletingMessageId=message.id;
+  $('#delete-message-title').textContent=message.role==='user' ? '删除这一轮对话？' : '删除这条回答？';
+  $('#delete-message-description').textContent=(message.role==='user' ? '这条问题和它后面的回答将一起删除。' : '你的问题会保留，只删除这条回答。')+
+    '删除后无法撤销，不再进入历史搜索和后续上下文。已保存的记忆、已执行的任务会保留，需要单独管理。';
+  $('#delete-message-dialog').showModal();
+}
+$('#delete-message-form').onsubmit=async(event)=>{
+  event.preventDefault();
+  if(busy() || deletingMessageId===null) return;
+  const epoch=generation, button=event.submitter;
+  button.disabled=true;
+  try {
+    const result=await api('/api/delete-message',{item:itemId,message_id:Number(deletingMessageId)});
+    $('#delete-message-dialog').close();
+    if(epoch!==generation) return;
+    state.messages=state.messages.filter(m=>!result.deleted_ids.includes(m.id));
+    sourceCache.clear();inspectedMessages.clear();renderMessages();renderInsights();
+    if(drawerKind==='context') closeDrawer();
+    setStatus('');toast('已删除，这些内容不会再带入后续对话');
+  } catch(error) {toast(error.message);}
+  finally {button.disabled=false;deletingMessageId=null;}
+};
 $("#prompt").addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey && !event.isComposing && !composingPrompt && event.keyCode !== 229) {
     event.preventDefault();
@@ -577,11 +700,15 @@ $("#prompt").addEventListener("paste", (event) => {
   }
 });
 $("#reference-text").addEventListener("input", () => {
-  referenceExpanded = true;
   syncReferenceInput();
 });
 $("#add-reference").onclick = showReferenceInput;
-$("#clear-reference").onclick = clearReferenceInput;
+$("#clear-reference").onclick = () => {clearReferenceInput();$('#prompt').focus();};
+$('#toggle-reference').onclick=()=>{
+  referenceExpanded=!referenceExpanded;syncReferenceInput();
+  if(referenceExpanded) $('#reference-text').focus();
+};
+$('#reference-preview').onclick=showReferenceInput;
 // A full management page must not discard an unsent question when returning.
 window.addEventListener('pagehide',()=>{
   try {
@@ -1008,6 +1135,7 @@ $("#messages").onclick = async (e) => {
     await retryAnswer(b.dataset.id);
     return;
   }
+  if (b.classList.contains('continue-answer')) {await continueAnswer(b.dataset.id);return;}
   if (b.dataset.receiptItem) return load(b.dataset.receiptItem);
   if (b.dataset.receiptMemory) {
     memoryFocusId = b.dataset.receiptMemory;
@@ -1016,9 +1144,10 @@ $("#messages").onclick = async (e) => {
   }
   const message = state.messages.find((m) => String(m.id) === b.dataset.id);
   if (!message) return;
+  if (b.classList.contains('delete-message')) {requestDeleteMessage(message);return;}
   if (b.classList.contains("copy-question")) {
     try {
-      await navigator.clipboard.writeText(message.content);
+      await navigator.clipboard.writeText(answerBody(message) || message.content);
       toast("已复制问题");
     } catch {
       toast("浏览器未允许复制，请手动选择文字");
@@ -1027,7 +1156,7 @@ $("#messages").onclick = async (e) => {
   }
   if (b.classList.contains("copy-answer")) {
     try {
-      await navigator.clipboard.writeText(message.content);
+      await navigator.clipboard.writeText(answerBody(message) || message.content);
       const original = b.innerHTML;
       b.innerHTML = `${icon("check")}<span>已复制</span>`;
       setTimeout(() => { if (b.isConnected) b.innerHTML = original; }, 1600);
@@ -1038,7 +1167,7 @@ $("#messages").onclick = async (e) => {
     return;
   }
   if (b.classList.contains("quote-answer")) {
-    insertQuote(message.content);
+    insertQuote(answerBody(message) || message.content);
     return;
   }
   if (b.classList.contains("inspect-answer")) {
@@ -1126,7 +1255,10 @@ $("#menu").onclick = () => {
   $("#home").focus();
 };
 $("#nav-backdrop").onclick = () => closeNavigation(true);
-$("#scroll-area").addEventListener("scroll", updateLatest, {passive: true});
+followScroll=scrollFollower($('#scroll-area'),{onChange:()=>{updateLatest();syncStreamViewport();}});
+$('#chat-width').addEventListener('change',()=>{followScroll.follow();syncStreamViewport();});
+document.addEventListener('keydown',event=>followScroll.key(event),{capture:true});
+new ResizeObserver(()=>{followScroll.follow();syncStreamViewport();}).observe($('#scroll-area'));
 $("#scroll-latest").onclick = () => scrollBottom(true);
 window.addEventListener("resize", () => {
   if (window.innerWidth > 760) closeNavigation();

@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS web_items (
 CREATE TABLE IF NOT EXISTS web_runs (
  id TEXT PRIMARY KEY, item_id TEXT NOT NULL, request_key TEXT NOT NULL,
  status TEXT NOT NULL, message TEXT NOT NULL, config TEXT NOT NULL,
- retry_user_message_id INTEGER,
+ retry_user_message_id INTEGER, continue_message_id INTEGER,
  result TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
  UNIQUE(item_id,request_key)
 );
@@ -90,6 +90,8 @@ class WebApp:
                 ws.conn.execute('DROP INDEX web_one_active_run')
                 ws.conn.execute("CREATE UNIQUE INDEX web_one_active_run ON web_runs(item_id) WHERE status IN ('queued','running','cancelling')")
             ws.conn.execute("UPDATE web_runs SET status='interrupted' WHERE status IN ('queued','running','cancelling')")
+            from lodestar.web.recovery import recover_latest_interrupted
+            recover_latest_interrupted(ws.conn)
             if not ws.conn.execute("SELECT 1 FROM web_items WHERE id='main'").fetchone():
                 self._create(ws, 'main', '主对话')
             ws.conn.commit()
@@ -157,7 +159,7 @@ class WebApp:
         """
         preview = {key: metadata[key] for key in ('reference_text', 'model_configuration', 'action_receipts',
                                                    'run_id', 'status', 'model_error', 'partial_answer', 'suggested_prompts',
-                                                   'paper_focus', 'referenced_papers')
+                                                   'paper_focus', 'referenced_papers', 'error_message', 'timing')
                    if key in metadata}
         candidates = [cls._source_preview(source) for source in metadata.get('candidates', [])]
         details = [cls._source_preview(source) for source in metadata.get('source_details', [])]
@@ -196,7 +198,7 @@ class WebApp:
             raise ValueError('消息标识无效')
         with self.workspace() as ws:
             item = self.item(ws, item_id)
-            rows = ws.conn.execute('''SELECT * FROM messages WHERE conversation_id=? AND id<=?
+            rows = ws.conn.execute('''SELECT * FROM messages WHERE conversation_id=? AND id<=? AND coalesce(kind,'')<>'superseded'
                                       ORDER BY id DESC LIMIT 200''',
                                    (item['conversation_id'], message_id)).fetchall()
             if not rows or rows[0]['id'] != message_id:
@@ -208,7 +210,7 @@ class WebApp:
         with self.workspace() as ws, ws.conn:
             item = self.item(ws, item_id)
             cfg = self.config_for(item)
-            rows = ws.conn.execute('SELECT * FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 200',
+            rows = ws.conn.execute("SELECT * FROM messages WHERE conversation_id=? AND coalesce(kind,'')<>'superseded' ORDER BY id DESC LIMIT 200",
                                    (item['conversation_id'],)).fetchall()
             messages = [self._message_view(row, compact=compact) for row in reversed(rows)]
             run = ws.conn.execute('SELECT * FROM web_runs WHERE item_id=? ORDER BY rowid DESC LIMIT 1', (item_id,)).fetchone()
@@ -288,6 +290,16 @@ class WebApp:
     def paper_library(self, data):
         from lodestar.memory import papers
         action = data.get('action', 'save')
+        if action == 'refresh_impact':
+            from lodestar.paper_impact import lookup
+            with self.lock, self.workspace() as ws:
+                if self.closing:
+                    raise Conflict('服务正在关闭，请稍后再操作资料库')
+                value = papers.detail(ws.conn, data.get('id'), data.get('project_id'))
+            # External metadata requests must not hold the global application lock.
+            with self.workspace() as ws, ws.conn:
+                lookup(ws.conn, value['paper']['canonical_url'], title=value['paper']['title'], refresh=True)
+                return papers.detail(ws.conn, data['id'], data.get('project_id'))
         with self.lock, self.workspace() as ws, ws.conn:
             if self.closing:
                 raise Conflict('服务正在关闭，请稍后再操作资料库')
@@ -509,7 +521,7 @@ class WebApp:
                                        background=background, policy=policy)
 
     def _submit_locked(self, item_id, message, key, *, reference_text, background, policy,
-                       retry_user_message_id=None):
+                       retry_user_message_id=None, continue_message_id=None):
         if not isinstance(message, str) or not message.strip() or len(message) > 24000:
             raise ValueError('请输入 1–24000 字的问题')
         if not isinstance(reference_text, str):
@@ -539,8 +551,19 @@ class WebApp:
             if cfg.model_calls_disabled and cfg.llm_mode != 'mock':
                 raise Conflict('模型调用已暂停，请在模型设置中启用后发送')
             run_id = uuid.uuid4().hex
-            ws.conn.execute('INSERT INTO web_runs(id,item_id,request_key,status,message,config,policy,retry_user_message_id) VALUES(?,?,?,?,?,?,?,?)',
-                            (run_id,item_id,key,'queued',message,json.dumps(snapshot(cfg)),json.dumps(policy or {},ensure_ascii=False),retry_user_message_id))
+            ws.conn.execute('INSERT INTO web_runs(id,item_id,request_key,status,message,config,policy,retry_user_message_id,continue_message_id) VALUES(?,?,?,?,?,?,?,?,?)',
+                            (run_id,item_id,key,'queued',message,json.dumps(snapshot(cfg)),json.dumps(policy or {},ensure_ascii=False),retry_user_message_id,continue_message_id))
+            if retry_user_message_id is not None:
+                # Keep source IDs and committed action receipts, retire the old prose.
+                old_replies = ws.conn.execute("SELECT id,metadata FROM messages WHERE conversation_id=? AND id>? AND role='assistant' AND coalesce(kind,'')<>'superseded'",
+                    (item['conversation_id'], retry_user_message_id)).fetchall()
+                for old in old_replies:
+                    previous = json.loads(old['metadata'] or '{}')
+                    retired = {'replaced_by_run': run_id, 'source_removed': True, 'run_id': previous.get('run_id'),
+                               'run_ids': previous.get('run_ids', []),
+                               'action_receipts': previous.get('action_receipts', [])}
+                    ws.conn.execute("UPDATE messages SET content='',kind='superseded',metadata=? WHERE id=?",
+                                    (json.dumps(retired,ensure_ascii=False),old['id']))
             signal = self.cancel_signals[run_id] = threading.Event()
         try:
             def work(*worker_args):
@@ -570,6 +593,9 @@ class WebApp:
                         "UPDATE web_runs SET status=?,result=? WHERE id=? AND status IN ('queued','cancelling')",
                         (status, json.dumps(failure, ensure_ascii=False), run_id))
                     if updated.rowcount:
+                        if continue_message_id is not None:
+                            # A failed worker start must never replace the existing prose.
+                            return run_id
                         if retry_user_message_id is None:
                             repo.add_message(ws.conn, item['conversation_id'], 'user', message,
                                              metadata={'run_id': run_id,
@@ -594,9 +620,12 @@ class WebApp:
             raise ValueError('消息标识无效')
         with self.lock, self.workspace() as ws:
             item = self.item(ws, item_id)
+            existing = ws.conn.execute('SELECT id FROM web_runs WHERE item_id=? AND request_key=?', (item_id,key)).fetchone()
+            if existing:
+                return existing['id']
             target = ws.conn.execute('''SELECT * FROM messages WHERE id=? AND conversation_id=? AND role='assistant' ''',
                                      (message_id, item['conversation_id'])).fetchone()
-            latest = ws.conn.execute('''SELECT id FROM messages WHERE conversation_id=?
+            latest = ws.conn.execute('''SELECT id FROM messages WHERE conversation_id=? AND coalesce(kind,'')<>'superseded'
                                         ORDER BY id DESC LIMIT 1''', (item['conversation_id'],)).fetchone()
             if target is None or latest is None or latest['id'] != message_id:
                 raise Conflict('只能重新生成当前最后一条回答')
@@ -613,8 +642,73 @@ class WebApp:
             if not isinstance(reference_text, str):
                 reference_text = ''
             message = user['content']
-        return self._submit_locked(item_id, message, key, reference_text=reference_text,
-                                   background=False, policy={}, retry_user_message_id=user['id'])
+            return self._submit_locked(item_id, message, key, reference_text=reference_text,
+                                       background=False, policy={}, retry_user_message_id=user['id'])
+
+    def continue_answer(self, item_id, message_id, key):
+        from lodestar.agent.continuation import can_continue
+        if type(message_id) is not int or message_id < 1:
+            raise ValueError('消息标识无效')
+        with self.lock, self.workspace() as ws:
+            item = self.item(ws, item_id)
+            existing = ws.conn.execute('SELECT id FROM web_runs WHERE item_id=? AND request_key=?', (item_id,key)).fetchone()
+            if existing:
+                return existing['id']
+            target = ws.conn.execute('SELECT * FROM messages WHERE conversation_id=? AND id=? AND role=\'assistant\'',
+                                     (item['conversation_id'],message_id)).fetchone()
+            latest = ws.conn.execute("SELECT id FROM messages WHERE conversation_id=? AND coalesce(kind,'')<>'superseded' ORDER BY id DESC LIMIT 1",
+                                     (item['conversation_id'],)).fetchone()
+            if not target or not latest or latest['id'] != message_id or not can_continue(dict(target)):
+                raise Conflict('只能继续最后一条已有正文、尚未完成的回答')
+            # Reserve the run under the same lock as eligibility validation.
+            return self._submit_locked(item_id, '继续完成上一条回答', key, reference_text='',
+                background=False, policy={}, continue_message_id=message_id)
+
+    def delete_message(self, item_id, message_id):
+        """Tombstone IDs for source integrity; remove prose and replayable run data."""
+        if type(message_id) is not int or message_id < 1:
+            raise ValueError('消息标识无效')
+        with self.lock, self.workspace() as ws, ws.conn:
+            item = self.item(ws, item_id)
+            if ws.conn.execute("SELECT 1 FROM web_runs WHERE item_id=? AND status IN ('queued','running','cancelling')", (item_id,)).fetchone():
+                raise Conflict('先等 lolo 停下，再删除这条消息吧')
+            target = ws.conn.execute('SELECT * FROM messages WHERE id=? AND conversation_id=?',
+                                     (message_id,item['conversation_id'])).fetchone()
+            if target is None:
+                raise LookupError('找不到这条消息')
+            rows = [target]
+            if target['role'] == 'user':
+                following = ws.conn.execute('SELECT * FROM messages WHERE conversation_id=? AND id>? ORDER BY id',
+                                             (item['conversation_id'],message_id)).fetchall()
+                for row in following:
+                    if row['role'] == 'user':
+                        break
+                    rows.append(row)
+            ids = [row['id'] for row in rows]
+            run_ids = set()
+            for row in rows:
+                previous = json.loads(row['metadata'] or '{}')
+                run_ids.update(previous.get('run_ids', []))
+                if previous.get('run_id'):
+                    run_ids.add(previous['run_id'])
+                # Older retries / continuations may also contain the removed text.
+                for run in ws.conn.execute('SELECT id,result FROM web_runs WHERE item_id=? AND (retry_user_message_id=? OR continue_message_id=?)',
+                                            (item_id,row['id'],row['id'])):
+                    run_ids.add(run['id'])
+                retired = {'source_removed': True, 'deleted_at': repo._now(),
+                           'action_receipts': previous.get('action_receipts', [])}
+                ws.conn.execute("UPDATE messages SET content='',kind='superseded',metadata=? WHERE id=?",
+                    (json.dumps(retired,ensure_ascii=False),row['id']))
+            for run_id in run_ids:
+                if not ws.conn.execute('SELECT 1 FROM web_runs WHERE id=? AND item_id=?', (run_id,item_id)).fetchone():
+                    continue
+                receipts = self.action_receipts(ws, run_id)
+                ws.conn.execute("UPDATE web_runs SET message='',result=? WHERE id=? AND item_id=?",
+                    (json.dumps({'source_removed':True,'action_receipts':receipts},ensure_ascii=False),run_id,item_id))
+                ws.conn.execute("DELETE FROM web_events WHERE run_id=? AND kind<>'action'", (run_id,))
+            # Reconstruct future source focus from remaining visible messages.
+            ws.conn.execute("UPDATE agent_sessions SET evidence='[]' WHERE conversation_id=?", (item['conversation_id'],))
+            return {'deleted_ids': ids}
 
     def start_scheduler(self):
         from lodestar.web.background import Scheduler
@@ -680,6 +774,8 @@ class WebApp:
     def execute(self, run_id, item, cfg, message, reference_text, signal, background=False,
                 retry_user_message_id=None):
         started_at = time.time()
+        clock_start = time.monotonic()
+        timing = {'first_text_ms': None, 'phases': []}
         def check_cancel():
             if signal.is_set():
                 raise LLMError('Run cancelled by user', code='cancelled', role='conversation')
@@ -688,15 +784,18 @@ class WebApp:
             llm = None
             try:
                 with self.lock, ws.conn:
-                    row = ws.conn.execute('SELECT status,policy,retry_user_message_id FROM web_runs WHERE id=?', (run_id,)).fetchone()
+                    row = ws.conn.execute('SELECT status,policy,retry_user_message_id,continue_message_id FROM web_runs WHERE id=?', (run_id,)).fetchone()
                     if row['status'] not in ('queued','cancelling'):
                         return
                     ws.conn.execute("UPDATE web_runs SET status='running' WHERE id=? AND status='queued'", (run_id,))
                 policy = json.loads(row['policy'])
                 retry_user_message_id = row['retry_user_message_id']
+                continue_message_id = row['continue_message_id']
                 # A queued cancellation still records its input and stopped answer,
                 # but never constructs a provider client or starts inference.
                 llm = None if signal.is_set() else self.llm_factory(cfg)
+                if isinstance(llm, LLMClient):
+                    llm.cancel_signal = signal
                 from lodestar.memory.assistant import mark_accessed, prompt_rows, reconstruct_context, select_rows
                 from lodestar.web.tools import assistant_tools
                 with ws.conn:
@@ -705,15 +804,33 @@ class WebApp:
                     mark_accessed(ws.conn, note_rows)
                     note_evidence = reconstruct_context(ws.conn, note_rows, recall_query, item_id=item['id'])
                 notes = prompt_rows(note_rows, note_evidence)
-                result = self.agent_factory(ws,llm).turn(item['conversation_id'],message,
+                def deliver(text):
+                    check_cancel()
+                    if text and timing['first_text_ms'] is None:
+                        timing['first_text_ms'] = round((time.monotonic()-clock_start)*1000)
+                    self.event(ws,run_id,'text',text)
+
+                def progress(action):
+                    check_cancel()
+                    if len(timing['phases']) < 64:
+                        timing['phases'].append({'action':action,'elapsed_ms':round((time.monotonic()-clock_start)*1000)})
+                    self.event(ws,run_id,'progress',action)
+                agent = self.agent_factory(ws,llm)
+                if continue_message_id is not None:
+                    from lodestar.agent.continuation import continue_turn
+                    result = continue_turn(agent,item['conversation_id'],continue_message_id,
+                        user_id=self.user(item['id']),on_text=deliver,on_progress=progress,check_cancel=check_cancel,run_id=run_id)
+                else:
+                    result = agent.turn(item['conversation_id'],message,
                     user_id=self.user(item['id']), memory_notes=notes, check_cancel=check_cancel,
                     reference_text=reference_text,
                     history_after=item['context_after'], track_exposure=False,
                     execution_policy=policy,
                     reuse_user_message_id=retry_user_message_id,
                     assistant_tools=assistant_tools(self, item, run_id, message, check_cancel, user_authored=not background, execution_policy=policy),
-                    on_text=lambda text: self.event(ws,run_id,'text',text),
-                    on_progress=lambda action: self.event(ws,run_id,'progress',action))
+                    on_text=deliver, on_progress=progress)
+                timing['response_ms'] = round((time.monotonic()-clock_start)*1000)
+                result['timing'] = timing
                 scope = {'item_id': item['id'], 'project_id': item['project_id'], 'user_id': self.user(),
                          'history_after': item['context_after'], 'background': background, 'execution_policy': policy,
                          'retry_user_message_id': retry_user_message_id,
@@ -722,12 +839,12 @@ class WebApp:
                 result['action_receipts'] = self.action_receipts(ws, run_id)
                 with self.lock, ws.conn:
                     model_health.observe(ws.conn, cfg, result, llm, started_at)
-                last = ws.conn.execute("SELECT id,metadata FROM messages WHERE conversation_id=? AND role='assistant' ORDER BY id DESC LIMIT 1", (item['conversation_id'],)).fetchone()
+                last = ws.conn.execute("SELECT id,metadata FROM messages WHERE conversation_id=? AND role='assistant' AND coalesce(kind,'')<>'superseded' ORDER BY id DESC LIMIT 1", (item['conversation_id'],)).fetchone()
                 # Capture the evidence before releasing the foreground slot. A
                 # subsequent turn can replace session evidence while this worker
                 # records learning in the background.
                 exposure_sources = []
-                if (not background and result.get('status') not in ('error', 'cancelled')
+                if (continue_message_id is None and not background and result.get('status') not in ('error', 'cancelled')
                         and result.get('route_reason') != 'resolved paper link'):
                     session = ws.conn.execute('SELECT evidence FROM agent_sessions WHERE conversation_id=?',
                                               (item['conversation_id'],)).fetchone()
@@ -736,8 +853,12 @@ class WebApp:
                 if exposure_sources:
                     result['learning_exposure_status'] = 'pending'
                 if last:
-                    metadata = {**json.loads(last['metadata']), 'web_context': scope, 'run_id': run_id,
-                                'action_receipts': result['action_receipts'],
+                    previous = json.loads(last['metadata'])
+                    if continue_message_id is not None:
+                        result['action_receipts'] = previous.get('action_receipts', []) + result['action_receipts']
+                    run_ids = list(dict.fromkeys([*previous.get('run_ids', []), previous.get('run_id'), run_id]))
+                    metadata = {**previous, 'web_context': scope, 'run_id': run_id, 'run_ids': [r for r in run_ids if r],
+                                'action_receipts': result['action_receipts'], 'timing':timing,
                                 **({'learning_exposure_status': 'pending'} if exposure_sources else {})}
                     with ws.conn:
                         ws.conn.execute('UPDATE messages SET metadata=? WHERE id=?', (json.dumps(metadata,ensure_ascii=False),last['id']))
@@ -759,7 +880,7 @@ class WebApp:
                     status = 'cancelled' if signal.is_set() else 'error'
                     answer = '本轮已停止，运行记录已保留。' if signal.is_set() else '本轮未完成，记录已保留。请检查本地服务配置后重试。'
                     receipts = self.action_receipts(ws, run_id)
-                    last = ws.conn.execute('SELECT role FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 1',
+                    last = ws.conn.execute("SELECT role FROM messages WHERE conversation_id=? AND coalesce(kind,'')<>'superseded' ORDER BY id DESC LIMIT 1",
                                            (item['conversation_id'],)).fetchone()
                     if last and (last['role'] == 'user' or retry_user_message_id is not None):
                         repo.add_message(ws.conn, item['conversation_id'], 'assistant', answer,
@@ -796,13 +917,13 @@ class WebApp:
             outcome = {'learning_exposure_status': 'error', 'learning_exposure_error': type(error).__name__}
         try:
             with self.lock, ws.conn:
-                row = ws.conn.execute('SELECT metadata FROM messages WHERE id=?', (message_id,)).fetchone()
-                if row:
+                row = ws.conn.execute('SELECT metadata,kind FROM messages WHERE id=?', (message_id,)).fetchone()
+                if row and row['kind'] != 'superseded':
                     metadata = {**json.loads(row['metadata']), **outcome}
                     ws.conn.execute('UPDATE messages SET metadata=? WHERE id=?',
                                     (json.dumps(metadata, ensure_ascii=False), message_id))
                 run = ws.conn.execute('SELECT result FROM web_runs WHERE id=?', (run_id,)).fetchone()
-                if run:
+                if run and not json.loads(run['result']).get('source_removed'):
                     ws.conn.execute('UPDATE web_runs SET result=? WHERE id=?',
                         (json.dumps({**json.loads(run['result']), **outcome}, ensure_ascii=False), run_id))
         except Exception:
@@ -872,8 +993,14 @@ def make_server(app, port=8123):
                         return self.respond(page.encode(),mime='text/html; charset=utf-8')
                     if path == '/diagram.html':
                         return self.respond((STATIC/'diagram.html').read_bytes(),mime='text/html; charset=utf-8')
-                    if path == '/lolo-avatar.png':
-                        return self.respond((STATIC/'lolo-avatar.png').read_bytes(),mime='image/png')
+                    if path in ('/lolo-avatar.png','/lolo-companion.png'):
+                        return self.respond((STATIC/path[1:]).read_bytes(),mime='image/png')
+                    if path == '/companion.mjs':
+                        return self.respond((STATIC/'companion.mjs').read_bytes(),mime='text/javascript; charset=utf-8')
+                    if path == '/impact.mjs':
+                        return self.respond((STATIC/'impact.mjs').read_bytes(),mime='text/javascript; charset=utf-8')
+                    if path == '/response-ui.mjs':
+                        return self.respond((STATIC/'response-ui.mjs').read_bytes(),mime='text/javascript; charset=utf-8')
                     if path in ('/mermaid.bundle.js','/diagram-frame.js','/diagram-frame.css','/diagrams.mjs','/mermaid-notices.txt','/mermaid.bundle.js.LEGAL.txt'):
                         mime = 'text/css' if path.endswith('.css') else 'text/plain' if path.endswith('.txt') else 'text/javascript'
                         return self.respond((STATIC/path[1:]).read_bytes(),mime=mime+'; charset=utf-8')
@@ -1036,6 +1163,10 @@ def make_server(app, port=8123):
                     return self.respond({'status':app.cancel(item_id,data.get('run'))})
                 elif path == '/api/retry':
                     return self.respond({'id':app.retry(item_id,data.get('message_id'),data.get('key'))},202)
+                elif path == '/api/continue':
+                    return self.respond({'id':app.continue_answer(item_id,data.get('message_id'),data.get('key'))},202)
+                elif path == '/api/delete-message':
+                    return self.respond(app.delete_message(item_id,data.get('message_id')))
                 elif path == '/api/send':
                     return self.respond({'id':app.submit(item_id,data.get('message'),data.get('key'),
                                                            reference_text=data.get('reference',''))},202)

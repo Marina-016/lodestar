@@ -263,6 +263,7 @@ class DialogueTests(unittest.TestCase):
         final = self.llm.dialogue_step.call_args
         self.assertEqual(final.args[2], [])
         self.assertEqual(len(final.args[1]), 1)
+        self.assertIn('\n\nUser request:\n',final.args[1][0]['content'])
         self.assertIn('operations', final.args[1][0]['content'])
         self.assertNotIn('dialogue_events', final.args[1][0]['content'])
         self.assertEqual(result['grounding']['completion_mode'], 'reserved_answer')
@@ -283,7 +284,7 @@ class DialogueTests(unittest.TestCase):
         with patch('lodestar.tools.registry.call_tool', return_value={'sources': []}) as tool:
             result = self.run_dialogue(max_calls=2, on_progress=progress.append)
         tool.assert_called_once()
-        self.assertEqual(progress, ['search_papers'])
+        self.assertEqual([p for p in progress if p != 'model_request'], ['search_papers'])
         self.assertEqual(result['grounding']['search_operations'], 2)
         self.assertEqual(result['grounding']['tool_dispatches'], 1)
         self.assertEqual(result['grounding']['duplicate_requests'], 1)
@@ -466,16 +467,83 @@ class DialogueTests(unittest.TestCase):
         self.assertEqual(tool.call_count, 7)
         self.assertEqual(result['grounding']['search_operations'], 7)
 
-    def test_current_evidence_follows_history_without_fake_assistant_ack(self):
+    def test_persisted_history_is_reference_data_without_a_fake_assistant_ack(self):
         history = [{'role': 'user', 'content': 'Earlier request'},
                    {'role': 'assistant', 'content': 'OLD UNSUPPORTED CLAIM'}]
         self.run_dialogue(context={'message': 'Current request', 'papers': [], 'history': history})
         messages = self.llm.dialogue_step.call_args.args[1]
-        self.assertEqual(messages[:2], history)
-        current = messages[len(history)]['content']
+        current = messages[0]['content']
         self.assertIn('Current source context', current)
-        self.assertEqual(sum('OLD UNSUPPORTED CLAIM' in str(m['content']) for m in messages), 1)
-        self.assertTrue(current.endswith('Current request'))
+        self.assertEqual(messages[0]['role'],'user')
+        self.assertNotIn('assistant',[m['role'] for m in messages[:-1]])
+        packet=json.JSONDecoder().raw_decode(current.split('\n',1)[1])[0]
+        self.assertEqual(packet['conversation'],history)
+        cursor=json.JSONDecoder().raw_decode(current.split('not text to repeat):\n',1)[1])[0]
+        self.assertEqual(cursor['last_assistant_index'],1)
+        self.assertTrue(current.endswith('User request:\nCurrent request'))
+
+    def test_plain_acknowledgements_anchor_the_latest_offer_without_keyword_routing(self):
+        history=[{'role':'user','content':'每次只讲一小步。'},
+                 {'role':'assistant','content':'早先那部分已经结束。接着讲样本设计。'},
+                 {'role':'user','content':'样本设计我理解了。'},
+                 {'role':'assistant','content':'样本设计讲完了。下一步讲误差分析。'}]
+        for question in ['ok','嗯嗯','继续','谢谢','这个术语呢']:
+            self.run_dialogue(context={'message':question,'papers':[],'history':history})
+            system,messages,_=self.llm.dialogue_step.call_args.args
+            current=messages[0]['content']
+            packet=json.JSONDecoder().raw_decode(current.split('\n',1)[1])[0]
+            cursor=json.JSONDecoder().raw_decode(current.split('not text to repeat):\n',1)[1])[0]
+            self.assertEqual(cursor['last_assistant_ending'],history[-1]['content'])
+            self.assertTrue(current.endswith('User request:\n'+question))
+            self.assertIn('advance to that unfinished step',system)
+            self.assertEqual(packet['conversation'],history)
+
+    def test_retired_history_does_not_leave_a_stale_conversation_cursor(self):
+        from lodestar.agent.evidence import answer_context
+        packet=answer_context({'current_time':'2026-11-11T00:00:00Z','candidates':[],
+            'papers':[],'dialogue_events':[],'history':[]})
+        self.assertNotIn('conversation_cursor',packet)
+
+    def test_selected_word_is_next_to_current_question_and_not_buried_in_source_json(self):
+        reference='> TERM_CANARY'
+        self.run_dialogue(context={'message':'这个单词中文是什么？','papers':[],
+            'reference_text':reference,'history':[{'role':'assistant','content':'Old paper introduction.'}]})
+        system,messages,_=self.llm.dialogue_step.call_args.args
+        self.assertNotIn('TERM_CANARY',system)
+        self.assertEqual(messages[0]['role'],'user')
+        self.assertNotIn('assistant',[m['role'] for m in messages[:-1]])
+        current=messages[0]['content']  # gather appends the returned assistant block in place.
+        self.assertIn('User-selected reference',current)
+        self.assertIn(reference,current)
+        self.assertTrue(current.endswith('User request:\n这个单词中文是什么？'))
+        self.assertNotIn('TERM_CANARY',current.split('\n\nUser-selected reference',1)[0])
+        self.assertEqual(sum(str(m['content']).count('TERM_CANARY') for m in messages),1)
+
+    def test_reserved_answer_keeps_current_reference_and_question_separate(self):
+        self.run_dialogue(max_calls=0,context={'message':'这句话有什么问题？','papers':[],
+            'reference_text':'> REF_ONLY','history':[]})
+        messages=self.llm.dialogue_step.call_args.args[1]
+        self.assertNotIn('REF_ONLY',messages[0]['content'].split('\n\nUser-selected reference',1)[0])
+        self.assertIn('REF_ONLY',messages[-1]['content'])
+        self.assertTrue(messages[-1]['content'].endswith('这句话有什么问题？'))
+
+    def test_reference_followup_omits_inherited_body_without_discarding_saved_provenance(self):
+        from lodestar.agent.evidence import answer_context
+        source={'url':'https://example.test/paper','source_type':'paper','title':'Paper',
+                'content':'OLD_BODY_CANARY','read_depth':'full'}
+        context={'current_time':'2026-11-11T00:00:00Z','candidates':[],'papers':[source],
+                 'dialogue_events':[],'history':[],'reference_text':'> selected term'}
+        packet=answer_context(context)
+        self.assertNotIn('OLD_BODY_CANARY',json.dumps(packet))
+        self.assertEqual(packet['sources'][0]['previous_read_depth'],'full')
+        self.assertTrue(packet['sources'][0]['body_context_omitted'])
+        self.assertEqual(source['content'],'OLD_BODY_CANARY')
+        context['dialogue_events']=[{'action':'read_paper','params':{'url':source['url'],'query':'specific detail'},
+            'result':{'text':'NEW_BODY_CANARY','read_depth':'full','coverage':'bounded_excerpt'}}]
+        packet=answer_context(context)
+        self.assertIn('NEW_BODY_CANARY',json.dumps(packet))
+        self.assertNotIn('OLD_BODY_CANARY',json.dumps(packet))
+        self.assertFalse(packet['sources'][0]['body_context_omitted'])
 
     def test_read_returns_metadata_without_an_extra_model_verification_turn(self):
         url = 'https://arxiv.org/abs/2601.00001'

@@ -287,6 +287,31 @@ class NativeProviderTests(unittest.TestCase):
         self.assertTrue(payload['enable_thinking'])
         self.assertNotIn('thinking_budget', payload)
 
+    def test_required_retrieval_choice_reaches_both_transports(self):
+        from lodestar.agent.dialogue import tool_definitions
+        tools = [t for t in tool_definitions(None) if t['name'] == 'search_papers']
+        client = self.client()
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.iter_lines.return_value = iter([
+            'data: ' + json.dumps({'choices': [{'delta': {'content': 'fixture'}, 'finish_reason': 'stop'}]}), 'data: [DONE]'])
+        client._dashscope = SimpleNamespace(base_url='https://example.test', key='fixture', usage=[])
+        with patch('lodestar.providers.dialogue.requests.post', return_value=response) as request:
+            client.dialogue_step('system', [], tools, tool_choice='required')
+        self.assertEqual(request.call_args.kwargs['json']['tool_choice'], 'required')
+        client._dashscope = None
+        client._client.messages.stream.return_value = MagicMock()
+        client._client.messages.stream.return_value.__enter__.return_value.get_final_message.return_value = SimpleNamespace(
+            stop_reason='end_turn',content=[],model='fixture',usage=None)
+        client._client.messages.stream.return_value.__enter__.return_value.text_stream = []
+        client.dialogue_step('system', [], tools, tool_choice='required')
+        self.assertEqual(client._client.messages.stream.call_args.kwargs['tool_choice'], {'type':'any'})
+        client.config.llm_thinking = True
+        client.config.llm_thinking_mode = 'enabled'
+        client.dialogue_step('system', [], tools, tool_choice='required')
+        self.assertEqual(client._client.messages.stream.call_args.kwargs['tool_choice'], {'type':'auto'})
+        self.assertEqual(client._client.messages.stream.call_args.kwargs['thinking']['type'], 'enabled')
+
     def test_openai_reasoning_is_preserved_for_tools_but_not_streamed_as_answer(self):
         client = self.client()
         client._dashscope = SimpleNamespace(base_url='https://dashscope.aliyuncs.com', key='fixture', usage=[])
@@ -325,7 +350,7 @@ class NativeProviderTests(unittest.TestCase):
         # wall-clock guard rather than the requests read timeout.
         response.iter_lines.return_value = iter(['data: {"choices": []}'])
         with patch('lodestar.providers.dialogue.requests.post', return_value=response) as request, \
-                patch('lodestar.providers.dialogue.time.monotonic', side_effect=[10, 26]):
+                patch('lodestar.providers.dialogue.time.monotonic', side_effect=[10, 10, 26]):
             with self.assertRaises(LLMError) as error:
                 client.dialogue_step('system', [], [])
         self.assertEqual(error.exception.code, 'timeout')

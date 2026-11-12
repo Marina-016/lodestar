@@ -41,10 +41,12 @@ def dashscope_options(config, *, structured=False):
 
 
 def diandian_options(config, *, structured=False):
-    """Only send DianDian's documented thinking field when it is requested."""
+    """Omission means ON upstream; an explicit off must send the documented false."""
     from lodestar.llm import LLMError
-    if structured or not config.llm_thinking:
+    if not structured and config.llm_thinking_mode == 'default':
         return {}
+    if structured or not config.llm_thinking:
+        return {'chat_template_kwargs': {'enable_thinking': False}}
     if config.llm_thinking_mode != 'enabled':
         raise LLMError('Unsupported DianDian thinking mode', code='configuration')
     return {'chat_template_kwargs': {'enable_thinking': True}}

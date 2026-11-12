@@ -227,6 +227,7 @@ $('#paper-editor-form').onsubmit=e=>save($('#paper-editor-form'),e,async()=>{
 $('#entry-detail').onclick=async event=>{
   const button=event.target.closest('button'); if(!button || pending) return;
   const action=button.dataset.action;
+  const originalLabel=button.textContent;
   if(action==='edit-note') return editNote(detail);
   if(action==='edit-project') return editProject(detail);
   if(action==='edit-paper') return editPaper(detail);
@@ -239,6 +240,16 @@ $('#entry-detail').onclick=async event=>{
   }
   button.disabled=true;
   try {
+    if(action==='refresh-impact') {
+      const id=detail.paper.id, project=$('#project-filter').value;
+      button.textContent='正在查询…';
+      const result=await api('/api/paper-library',{action:'refresh_impact',id,project_id:project ? Number(project) : null});
+      if(mode==='papers' && selected===id && $('#project-filter').value===project) {
+        detail=result; $('#entry-detail').innerHTML=paperDetail(result,contextItem);
+        toast('指标查询已结束；缺失和限流状态请查看各来源说明');
+      }
+      return;
+    }
     if(button.dataset.revoke) {
       if(!confirm('撤销这条学习证据？后续掌握情况将依据剩余证据重新计算。')) return;
       await api('/api/learning',{id:Number(button.dataset.revoke),action:'revoke'});
@@ -261,7 +272,7 @@ $('#entry-detail').onclick=async event=>{
       notice('工作区已安全同步。若资料版本变化，README 外发许可已重新关闭，请检查后再授权。');
     }
   } catch(error) { notice(error.message); }
-  finally { pending=false; button.disabled=false; }
+  finally { pending=false; button.disabled=false; if(action==='refresh-impact') button.textContent=originalLabel; }
 };
 $('#entry-list').onclick=event=>{
   const button=event.target.closest('button'); if(!button) return;

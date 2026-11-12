@@ -56,6 +56,25 @@ class ConversationTests(unittest.TestCase):
         self.assertEqual(question['content'], '请解释这段引用')
         self.assertEqual(json.loads(question['metadata'])['reference_text'], 'REFERENCE_CANARY')
 
+    def test_selected_reference_bounds_repetitive_answers_but_retains_user_corrections(self):
+        from unittest.mock import patch
+        from lodestar.memory import repo
+        session=self.agent.start('alice')
+        repeated='OLD REPEATED INTRODUCTION\n'+('background '*500)
+        repo.add_message(self.ws.conn,session,'user','先讲背景，每次只讲一部分')
+        repo.add_message(self.ws.conn,session,'assistant',repeated)
+        repo.add_message(self.ws.conn,session,'user','我问的是这个词的中文')
+        repo.add_message(self.ws.conn,session,'assistant',repeated)
+        def gather(ws,llm,context,*args,**kwargs):
+            history=context['history']
+            self.assertLess(sum(len(m['content']) for m in history),8000)
+            self.assertEqual(sum(m['content'].count('OLD REPEATED INTRODUCTION') for m in history),1)
+            self.assertTrue(any(m['content']=='我问的是这个词的中文' for m in history))
+            self.assertEqual(context['reference_text'],'> verifier')
+            return {**context,'answer':'测试回答','grounding':{},'dialogue_events':[]}
+        with patch('lodestar.agent.dialogue.gather',side_effect=gather):
+            self.agent.turn(session,'这个单词是什么',user_id='alice',reference_text='> verifier',track_exposure=False)
+
     def test_retry_reuses_the_original_user_message_without_duplication(self):
         from unittest.mock import patch
         session = self.agent.start('alice')

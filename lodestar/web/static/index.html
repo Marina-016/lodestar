@@ -57,6 +57,8 @@
         <symbol id="i-close" viewBox="0 0 24 24">
           <path d="m6 6 12 12M6 18 18 6" />
         </symbol>
+        <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/></symbol>
+        <symbol id="i-palette" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18h1a2 2 0 0 0 1-3.7 1.5 1.5 0 0 1 .8-2.8H17A4 4 0 0 0 21 10c-.8-4.2-4.6-7-9-7Z"/><circle cx="7.5" cy="10" r=".8"/><circle cx="11" cy="7" r=".8"/><circle cx="15.5" cy="8" r=".8"/></symbol>
         <symbol id="i-think" viewBox="0 0 24 24">
           <path d="M9 18h6m-5 3h4M8 14a6 6 0 1 1 8 0c-1 1-1 2-1 2H9s0-1-1-2Z" />
         </symbol>
@@ -129,8 +131,19 @@
             ><span id="space-subtitle">持续研究</span>
           </div>
           <div class="header-actions">
-            <button id="task-options" class="subtle" hidden>管理任务</button
-            ><button class="context-button" id="context">
+            <label class="chat-width-control" title="调整正文和输入框宽度，选择会自动记住">
+              <span>宽度</span>
+              <select id="chat-width" aria-label="对话宽度">
+                <option value="compact">紧凑</option>
+                <option value="standard" selected>标准</option>
+                <option value="wide">宽屏</option>
+              </select>
+            </label>
+            <button type="button" class="context-button appearance-button" id="appearance-settings" title="外观设置" aria-label="外观设置" aria-haspopup="dialog">
+              <svg aria-hidden="true"><use href="#i-palette" /></svg><span>外观</span>
+            </button>
+            <button id="task-options" class="subtle" title="管理任务" hidden>管理任务</button
+            ><button class="context-button" id="context" title="当前上下文" aria-label="当前上下文">
               <svg aria-hidden="true"><use href="#i-context" /></svg>
               <span>当前上下文</span>
             </button>
@@ -182,10 +195,14 @@
           <form class="composer" id="composer">
             <section class="reference-input" id="reference-input" hidden aria-label="参考文本">
               <div class="reference-input-head">
-                <label for="reference-text">参考文本</label><span id="reference-count"></span>
-                <button type="button" class="subtle" id="clear-reference">清除</button>
+                <span class="reference-label">参考文本</span><span id="reference-count"></span>
+                <span class="reference-send-hint">随本次问题发送</span>
+                <button type="button" class="subtle" id="toggle-reference" aria-controls="reference-text" aria-expanded="false">展开</button>
+                <button type="button" class="subtle" id="clear-reference" title="移除参考文本，不随问题发送">移除</button>
               </div>
-              <textarea id="reference-text" rows="3" maxlength="24000" placeholder="引用的回答或较长的粘贴内容会放在这里；下方只写你的问题。"></textarea>
+              <button type="button" class="reference-preview" id="reference-preview" title="展开并编辑参考文本"></button>
+              <label class="sr-only" for="reference-text">编辑参考文本</label>
+              <textarea id="reference-text" rows="2" maxlength="24000" hidden placeholder="把需要参考的文字放在这里，下方写你的问题。"></textarea>
             </section>
             <label class="sr-only" for="prompt">输入研究问题</label
             ><textarea
@@ -253,6 +270,30 @@
       </header>
       <div class="drawer-content" id="drawer-content"></div>
     </aside>
+    <dialog id="appearance-dialog" class="appearance-dialog" aria-labelledby="appearance-title">
+      <div class="dialog-heading"><h2 id="appearance-title">聊天外观</h2><button type="button" class="icon-button" data-close="appearance-dialog" aria-label="关闭外观设置"><svg><use href="#i-close" /></svg></button></div>
+      <p class="appearance-intro">选择后立即生效，保存在当前浏览器。</p>
+      <fieldset class="appearance-group"><legend>重点色</legend><p>用于按钮、链接和选中状态。</p><div class="appearance-swatches" data-appearance-presets="accent"></div><label class="appearance-custom"><input id="appearance-accent" type="color" value="#0071e3" aria-label="自定义重点色"><span>自选颜色</span><output data-appearance-value="accent">默认</output></label></fieldset>
+      <fieldset class="appearance-group"><legend>我的消息气泡</legend><p>只改变你发出的消息，文字会自动适配深浅。</p><div class="appearance-swatches" data-appearance-presets="bubble"></div><label class="appearance-custom"><input id="appearance-bubble" type="color" value="#f5f5f7" aria-label="自定义气泡颜色"><span>自选颜色</span><output data-appearance-value="bubble">默认</output></label></fieldset>
+      <div class="appearance-preview" aria-label="配色预览"><span>预览一下</span><div class="appearance-sample-user">把想到的问题，都放在这里。</div><div class="appearance-sample-assistant">lolo 在呢，我们一起慢慢想。</div></div>
+      <label class="check-row" for="companion-visible"><span><strong>小 lolo 陪伴</strong><small>可以拖动；窄屏收小，手机上自动隐藏。</small></span><input type="checkbox" id="companion-visible" checked></label>
+      <div class="companion-settings">
+        <label class="companion-option"><input type="checkbox" id="companion-auto-size" checked><span>自动适应留白</span></label>
+        <label class="companion-size-label" for="companion-size">角色大小 <output id="companion-size-value">自动适应留白</output></label>
+        <input type="range" id="companion-size" min="64" max="240" step="4" value="164" disabled aria-label="小 lolo 大小">
+        <p>关闭自动后可调为 64–240 px，大尺寸可能覆盖正文；位置仍可拖动。</p>
+        <label class="companion-option"><input type="checkbox" id="companion-motion" checked><span>轻轻晃动和招手动画</span></label>
+      </div>
+      <button type="button" class="subtle companion-reset" id="companion-reset">让小 lolo 回到角落</button>
+      <div class="dialog-actions"><button type="button" class="secondary" id="appearance-reset">恢复默认配色</button><button type="button" class="primary" data-close="appearance-dialog">完成</button></div>
+    </dialog>
+    <dialog id="delete-message-dialog" aria-labelledby="delete-message-title">
+      <form id="delete-message-form">
+        <div class="dialog-heading"><h2 id="delete-message-title">删除这条回答？</h2><button type="button" class="icon-button" data-close="delete-message-dialog" aria-label="取消">×</button></div>
+        <p id="delete-message-description">删除后不再出现在对话、历史搜索和后续上下文中。已保存的记忆和已执行的任务会保留，需要单独管理。</p>
+        <div class="dialog-actions"><button type="button" class="secondary" data-close="delete-message-dialog">保留</button><button type="submit" class="primary danger-action">删除</button></div>
+      </form>
+    </dialog>
     <dialog id="task-dialog" aria-labelledby="task-title">
       <form id="task-form">
         <div class="dialog-heading">
@@ -412,6 +453,18 @@
         <div class="dialog-actions"><button type="button" class="secondary" data-close="learning-dialog">取消</button><button type="submit" class="primary">保存纠正</button></div>
       </form>
     </dialog>
+    <div id="lolo-companion" class="lolo-companion" data-pose="idle" hidden>
+      <div class="companion-caption" aria-hidden="true">lolo 在这里陪你</div>
+      <button type="button" class="companion-pet" aria-label="lolo 在这里陪你，打开小 lolo 菜单" aria-expanded="false" aria-controls="companion-menu" title="小 lolo · 拖动换位置，点击打开菜单，方向键微调">
+        <span class="companion-sprite" aria-hidden="true"></span>
+      </button>
+      <div id="companion-menu" class="companion-menu" aria-label="小 lolo" hidden>
+        <div><strong>lolo 在呢</strong><small>拖动换位置，也可以按方向键</small></div>
+        <button type="button" data-companion="compose">写点什么 <span>↗</span></button>
+        <button type="button" data-companion="reset">回到角落</button>
+        <button type="button" data-companion="hide">先藏起来 <span>外观中可找回</span></button>
+      </div>
+    </div>
     <div class="toast" id="toast" role="alert" hidden></div>
     <script type="module" src="/app.mjs"></script>
   </body>

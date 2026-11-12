@@ -23,3 +23,26 @@ test('network batches render progressively without splitting emoji and stop clea
   display.stop();
   assert.equal(frames.size, 0);
 });
+
+test('reading above the stream pauses paint while new text accumulates and catches up on return',()=>{
+  const frames=new Map(),rendered=[];let id=0;
+  const display=streamDisplay(text=>rendered.push(text),{
+    schedule:cb=>{frames.set(++id,cb);return id;},cancel:id=>frames.delete(id),
+  });
+  display.update('最初的正文');
+  display.pause();
+  assert.equal(frames.size,0);
+  display.update('最初的正文🙂更多内容');display.update('最初的正文🙂更多内容\n完整的尾部');
+  assert.equal(frames.size,0);assert.equal(rendered.length,0);
+  display.resume();
+  assert.deepEqual(rendered,['最初的正文🙂更多内容\n完整的尾部']);
+  display.stop();display.pause();display.resume();
+  assert.equal(rendered.length,1);
+});
+test('returning before the first token preserves the waiting card',()=>{
+  const rendered=[];
+  const display=streamDisplay(text=>rendered.push(text),{schedule:()=>1,cancel:()=>{}});
+  display.pause();display.resume();
+  assert.deepEqual(rendered,[]);
+  display.stop();
+});

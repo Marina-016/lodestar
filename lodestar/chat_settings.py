@@ -28,6 +28,8 @@ def configure(config, *, profile=None, model=None, thinking=None,
         if thinking not in ('on', 'off', 'effort', 'adaptive'):
             raise ValueError('思考模式应为 on / off / effort / adaptive')
         updates['llm_thinking'] = thinking != 'off'
+        if thinking == 'off':
+            updates['llm_thinking_mode'] = 'enabled'
         if thinking != 'off':
             updates['llm_thinking_mode'] = thinking if thinking in ('effort', 'adaptive') else 'enabled'
     for attr, value in (('llm_thinking_budget', thinking_budget), ('max_tokens', max_tokens),

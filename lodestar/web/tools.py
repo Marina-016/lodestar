@@ -96,6 +96,33 @@ def assistant_tools(app, item, run_id, message, check_cancel, *, user_authored=T
                                 'Omit query for a bounded overview. Truncation flags distinguish matched-but-omitted '
                                 'records from no matches; an overview is not necessarily the whole profile.'}}
 
+    def manage_paper(args):
+        from lodestar.web import paper_hub
+        check_cancel()
+        with app.lock, app.workspace() as ws, ws.conn:
+            current=app.item(ws,item['id'])
+            paper_hub.sync(ws)
+            if args['action']=='list':
+                return paper_hub.catalog(ws,query=args.get('query',''),status=args.get('status',''))
+            if not user_authored:
+                raise ValueError('后台研究不能替用户修改阅读状态或掌握自评')
+            user_message=ws.conn.execute("SELECT id FROM messages WHERE conversation_id=? AND role='user' ORDER BY id DESC LIMIT 1",(current['conversation_id'],)).fetchone()
+            if not user_message:
+                raise ValueError('修改论文状态需要当前用户消息')
+            paper_id=args.get('id')
+            if args['action']=='save':
+                paper_id=paper_hub.remember(ws,{'url':args.get('url',''),'title':args.get('title',''),'keywords':args.get('keywords',[])},
+                    kind='message',ref=user_message['id'],item_id=current['id'],message_id=user_message['id'],project_id=current['project_id'],label='用户收藏')
+            value=paper_hub.detail(ws,paper_id)
+            state=value['paper']['study']
+            update={'id':paper_id,'revision':args.get('revision',state['revision'])}
+            update.update({k:args[k] for k in ('status','mastery','note') if k in args})
+            if args['action']=='update' and 'revision' not in args:
+                raise ValueError('请先 list 获取当前论文状态及 revision')
+            value=paper_hub.update(ws,update,source='user_message:'+str(user_message['id']))
+            app.record_action(ws,run_id,{'action':'manage_paper','id':paper_id,'operation':args['action'],'status':value['paper']['study']['status']})
+            return value
+
     def manage_memory(args):
         if not user_authored and args.get('scope', 'personal') == 'personal':
             raise ValueError('后台研究只保存任务或项目事实，不更新用户个人记忆')
@@ -254,7 +281,13 @@ def assistant_tools(app, item, run_id, message, check_cancel, *, user_authored=T
             {'query':{'type':'string','minLength':1,'maxLength':200}},search_history,['query']),
         'read_memory': definition('Read visible active personal/project/task facts and your user\'s learning evidence. query is an optional lexical filter; omit it for a bounded overview. Counts cover this space\'s visible notes, the current user\'s events and distinct technology/method profiles. Match counts and truncation flags disclose omitted records. Long evidence may be returned as an explicit omitted-text reference. Empty filtered results do not imply empty memory.',
                                  {'query': {'type': 'string'}}, read_memory),
-        'manage_memory': definition('Save a user-confirmed memory, or correct/forget one by ID. tier=session expires into a durable P0/P1 note or archives P2 after one inactive day; durable is for cross-session facts. P0 is a core preference/fact, P1 is a reference that becomes stale after 90 days, P2 is a temporary conclusion that becomes stale after 30 days and archives after 180 days. Use only user-provided facts or confirmed project decisions. Never store technology definitions, infer mastery, or turn background reading into user exposure. scope defaults to personal; project requires a bound project; task keeps a local note. Read existing IDs before modifying them.',
+        'manage_paper': definition('List saved papers or save/update a paper on explicit user request. Paper backlogs such as later learning belong here with status=later, never in manage_memory. Read status and mastery are independent: reading does not prove mastery. Change mastery only for explicit user self-assessment, never from assistant explanation or background reading. list first to get IDs and study.revision; update requires that revision. Save requires a real paper URL and title. Do not invent URLs. Existing papers keep curated metadata.',
+            {'action':{'type':'string','enum':['list','save','update']},'id':{'type':'integer'},'revision':{'type':'integer'},
+             'query':{'type':'string','maxLength':200},'title':{'type':'string','maxLength':300},'url':{'type':'string','maxLength':2000},
+             'keywords':{'type':'array','items':{'type':'string'},'maxItems':30},
+             'status':{'type':'string','enum':['inbox','later','reading','read','archived']},
+             'mastery':{'type':'string','enum':['unknown','aware','understand','explain','apply']},'note':{'type':'string','maxLength':3000}},manage_paper,['action']),
+        'manage_memory': definition('Paper collections, reading backlogs and later-learning requests belong in manage_paper, not personal memory. Save a user-confirmed memory, or correct/forget one by ID. tier=session expires into a durable P0/P1 note or archives P2 after one inactive day; durable is for cross-session facts. P0 is a core preference/fact, P1 is a reference that becomes stale after 90 days, P2 is a temporary conclusion that becomes stale after 30 days and archives after 180 days. Use only user-provided facts or confirmed project decisions. Never store technology definitions, infer mastery, or turn background reading into user exposure. scope defaults to personal; project requires a bound project; task keeps a local note. Read existing IDs before modifying them.',
             {'action': {'type': 'string', 'enum': ['save', 'forget']}, 'id': {'type': 'string'},
              'content': {'type': 'string', 'maxLength': 2000},
              'scope': {'type': 'string', 'enum': ['personal', 'project', 'task']},

@@ -47,7 +47,7 @@ def _history_context(history, char_budget=24000, *, focused_reference=False):
             available = char_budget - len(marker)
             head = available * 2 // 3
             content = content[:head] + marker + content[-(available - head):]
-        kept.append({'role': message['role'], 'content': content})
+        kept.append({'role': message['role'], 'content': content, **({'message_id':message['id']} if message.get('id') else {})})
         char_budget -= len(content)
     return list(reversed(kept))
 
@@ -78,7 +78,7 @@ class ConversationAgent:
     def history(self, conversation_id, user_id='default', limit=20):
         self._session(conversation_id, user_id)
         rows = self.ws.conn.execute("SELECT * FROM messages WHERE conversation_id=? AND coalesce(kind,'')<>'superseded' ORDER BY id DESC LIMIT ?",
-                                    (conversation_id, max(1, min(limit, 50)))).fetchall()
+                                    (conversation_id, max(1, min(limit, 400)))).fetchall()
         return [dict(row) for row in reversed(rows)]
 
     def turn(self, conversation_id, message, **kwargs):
@@ -229,11 +229,11 @@ class ConversationAgent:
                 result = generate(self.ws, self.llm, message, sources, session['project_id'])
                 answer = result['plan']
             else:
-                transcript = self.history(conversation_id, user_id, 50)
+                transcript = self.history(conversation_id, user_id, 200)
                 # A retry must reconstruct the original turn, not include the
                 # failed/older answer it is replacing or add the user question twice.
                 history = [m for m in transcript
-                           if history_after < m['id'] < user_message['id']][-8:]
+                           if history_after < m['id'] < user_message['id']][-24:]
                 candidates = []
                 for previous in reversed(history):
                     metadata = json.loads(previous.get('metadata') or '{}')
@@ -267,7 +267,11 @@ class ConversationAgent:
                 previous_request = next((m['content'] for m in reversed(history) if m['role'] == 'user'), '')
                 technical_followup = bool(re.search(r'实验|机制|方法|结果|局限|method|experiment|result', message, re.I)
                     and re.search(r'论文|paper|arxiv', previous_request, re.I))
-                context = {'message': message, 'reference_text': reference_text, 'candidates': candidates,
+                from lodestar.agent import continuity
+                ongoing=continuity.packet(self.ws.conn,conversation_id,user_message['id'],history_after,message)
+                ongoing['current_user_message_id']=user_message['id']
+                working_tools=continuity.tool(self.ws.conn,conversation_id,user_message['id'],history_after)
+                context = {'conversation_continuity':ongoing,'message': message, 'reference_text': reference_text, 'candidates': candidates,
                     'paper_focus': focus if focus_used else None,
                     'omit_inherited_bodies': not (focus_used or technical_followup),
                     'paper_recommendation': {'discover_new': discover_new, 'excluded': introduced} if discover_new else {},
@@ -281,7 +285,7 @@ class ConversationAgent:
                 context = gather(self.ws, self.llm, context, session['project_id'],
                                  on_progress=on_progress, on_text=on_text, check_cancel=check_cancel,
                                  **({'execution_policy': execution_policy} if execution_policy else {}),
-                                 **({'extra_tools': assistant_tools} if assistant_tools else {}))
+                                 extra_tools={**(assistant_tools or {}),**working_tools})
                 events = context.pop('dialogue_events')
                 sources = context['papers']
                 supplements = [{'url': event['params']['url'],

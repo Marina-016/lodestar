@@ -7,7 +7,7 @@ import { quoteMarkdown } from "./quote.mjs";
 import { beginsNewChat, sessionDateLabel, timestampLabel } from "./timeline.mjs";
 import { storedFollowups, visibleAnswer } from "./followups.mjs";
 import { streamDisplay, scrollFollower, patchStream } from "./stream.mjs";
-import { initializeNavigation, initializeChatWidth, initializeAppearance } from "./navigation.mjs";
+import { initializeNavigation, initializeChatWidth, initializeAppearance, showFormError, clearFormError } from "./navigation.mjs";
 import { initializeCompanion } from "./companion.mjs";
 import { mountDiagrams } from "./diagrams.mjs";
 import { impactReference } from "./impact.mjs";
@@ -15,8 +15,8 @@ import { waitingHTML, updateWaiting, responseNotice, answerBody, canContinue } f
 initializeNavigation();
 initializeChatWidth();
 initializeAppearance();
-const companion = initializeCompanion();
-let activeStream=null, stoppingRunId=null;
+const companion = initializeCompanion({notify:toast});
+let activeStream=null, stoppingRunId=null, followupWatch=null;
 let followScroll=null, streamViewport=null, viewportFrame=null;
 const $ = (s) => document.querySelector(s),
   icon = (name) => `<svg aria-hidden="true"><use href="#i-${name}"/></svg>`;
@@ -36,6 +36,7 @@ let memoryFocusId = null,
 const REFERENCE_PASTE_THRESHOLD = 600;
 let referenceExpanded = false;
 let deletingMessageId = null;
+let contextTab='scope', inspectionMode='space', taskFilter='all', taskQuery='';
 let composingPrompt = false;
 let finishAfterComposition = null;
 try {
@@ -142,24 +143,47 @@ function busy() {
   return !!activeRun || submitting;
 }
 function controls() {
-  const inactive = !state || state.item.status !== "active";
-  const paused = state && !state.enabled && state.mode !== "mock";
-  const unavailable = state?.model_selection?.current_blocked;
-  const stopping = activeRun?.status === "cancelling";
-  $("#send").disabled = activeRun ? stopping : submitting || inactive || paused || unavailable || !$("#prompt").value.trim();
-  if ($("#prompt").disabled !== inactive) $("#prompt").disabled = inactive;
-  $("#thinking").disabled = !state;
-  $("#model-settings").disabled = !state;
-  $("#send").classList.toggle("is-busy", submitting || stopping);
-  $("#send use").setAttribute("href", activeRun ? "#i-stop" : "#i-arrow");
-  $("#send").setAttribute("aria-label", activeRun ? stopping ? "正在停止" : "停止回答" : "发送问题");
-  $("#send").title = activeRun ? stopping ? "收到，正在收住这轮回复" : "停止回答"
-    : submitting ? "正在提交"
-    : inactive ? "请先恢复任务"
-      : paused ? "点击模型名称，启用模型调用"
-        : unavailable ? "当前模型不可用，请先选择其他模型"
-        : $("#prompt").value.trim() ? "发送问题" : "先输入一个研究问题";
+  const inactive=!state||state.item.status!=='active',paused=state&&!state.enabled&&state.mode!=='mock';
+  const queued=['pending','starting'].includes(state?.followup?.status),stopping=activeRun?.status==='cancelling';
+  const typed=!!$('#prompt').value.trim();
+  $('#send').disabled=submitting||inactive||paused||state?.model_selection?.current_blocked||!typed||queued||stopping;
+  $('#prompt').disabled=inactive;$('#thinking').disabled=!state;$('#model-settings').disabled=!state;
+  $('#stop').hidden=!activeRun&&!queued;$('#stop').disabled=submitting||(stopping&&!queued);
+  $('#send').classList.toggle('is-busy',submitting);
+  $('#send use').setAttribute('href','#i-arrow');
+  $('#send').setAttribute('aria-label',activeRun?'补充并重新回答':'发送问题');
+  $('#send').title=queued?'补充已收到':activeRun?'停止当前回答，按补充要求接着回答':typed?'发送问题':'输入问题';
+  $('#prompt').placeholder=activeRun?'可以补充要求，或纠正刚才的问题…':'从一个问题开始…';
 }
+function queuedMessage() {
+  if(['error','interrupted'].includes(state?.followup?.status))return `<article class="message message-user queued-message"><div class="user-bubble">${esc(state.followup.message)}</div><small>${esc(state.followup.error)} <button type="button" class="subtle" data-followup-retry>重新填写</button></small></article>`;
+  return ['pending','starting'].includes(state?.followup?.status)?`<article class="message message-user queued-message"><div class="user-bubble">${esc(state.followup.message)}</div><small>已补充，正在接续</small></article>`:'';
+}
+function watchFollowup() {
+  const pending=state?.followup;if(!pending||!['pending','starting'].includes(pending.status))return;
+  const key=pending.id,id=itemId;if(followupWatch===key)return;followupWatch=key;
+  const check=async()=>{
+    if(itemId!==id||followupWatch!==key){if(followupWatch===key)followupWatch=null;return;}
+    try {
+      const data=await api('/api/state?item='+encodeURIComponent(id));
+      if(itemId!==id)return;
+      if(data.followup&&['pending','starting'].includes(data.followup.status)){setTimeout(check,350);return;}
+      followupWatch=null;if(data.run?.id===activeRun?.id&&['queued','running','cancelling'].includes(data.run.status)){state.followup=null;return;}await load(id);
+      if(data.followup?.error)setStatus(data.followup.error);
+    }catch{setTimeout(check,1200);}
+  };setTimeout(check,200);
+}
+async function stopCurrent() {
+  const run=activeRun||{id:state?.followup?.supersedes_run};if(!run.id)return;
+  const epoch=generation;stoppingRunId=run.id;
+  if(activeRun)activeRun.status='cancelling';controls();setStatus('正在停止…',true);
+  try{
+    await api('/api/cancel',{item:itemId,run:run.id});
+    if(epoch!==generation)return;
+    state.followup=null;followupWatch=null;controls();
+  }catch(error){setStatus(error.message);}
+}
+
 function messageTime(message) {
   const label = timestampLabel(message.created_at);
   return label ? `<time class="message-timestamp" datetime="${esc(message.created_at)}">${esc(label)}</time>` : "";
@@ -257,7 +281,8 @@ function renderMessages() {
             m,
           )}`,
     )
-    .join("");
+    .join("") + queuedMessage();
+  $("#quick-prompts").hidden=itemId!=="main"||!state.messages.length;
   $("#main").classList.toggle("is-empty", !state.messages.length);
   $("#welcome").hidden = !!state.messages.length;
   $("#messages").hidden = !state.messages.length;
@@ -270,12 +295,13 @@ function renderMessages() {
       : "从第一个问题开始，围绕这个课题积累资料、讨论和记忆。";
 }
 function renderInsights() {
+  $("#insight-board").hidden=true;return;
   const metrics = workspaceMetrics(state);
   const cards = [
     ["answers", "研究回答", metrics.answers, "本空间已完成"],
     ["sources", "引用来源", metrics.sources, "可追溯链接"],
     ["context", "当前上下文", metrics.currentContext, "本轮可带入"],
-    ["learning", "学习证据", metrics.learningEvidence, "不等于掌握"],
+    ["learning", "知识与方法", metrics.learningEvidence, "讨论与实践记录"],
   ];
   const status = metrics.running ? "正在推进" : metrics.activeTasks ? `${metrics.activeTasks} 个任务进行中` : "专注当前对话";
   $("#insight-board").hidden = false;
@@ -288,8 +314,8 @@ function assistant(text, config, error = false, id = "draft", receipts, message 
     answer=(message.metadata?.partial_answer ? markdown(message.metadata.partial_answer) : '')+
       responseNotice('error',message.metadata || {},text);
   } else if(message.kind==='cancelled') {
-    answer=(message.metadata?.partial_answer ? markdown(message.metadata.partial_answer) : '')+
-      responseNotice('cancelled',message.metadata || {});
+    const newerQuestion=state.messages.some(m=>m.role==='user'&&Number(m.id)>Number(id));
+    answer=newerQuestion?`<details class="interrupted-answer"><summary>此前未完成的回答</summary>${message.metadata?.partial_answer?markdown(message.metadata.partial_answer):'已停止'}</details>`:(message.metadata?.partial_answer ? markdown(message.metadata.partial_answer) : '')+responseNotice('cancelled',message.metadata || {});
   }
   const index = state.messages.findIndex((entry) => String(entry.id) === String(id));
   const laterMessages = index < 0 ? [] : state.messages.slice(index + 1);
@@ -298,11 +324,12 @@ function assistant(text, config, error = false, id = "draft", receipts, message 
     && !laterMessages.some((entry) => entry.role === "user")
     && String(latestAssistant?.id) === String(id);
   const nextSteps = latestResponse && !error ? storedFollowups(message.metadata?.suggested_prompts) : [];
-  const followups = nextSteps.length ? `<section class="next-steps" aria-label="推荐的下一步"><span class="next-steps-label">你还可以继续问</span><div class="next-steps-options">${nextSteps.map((step) => `<button type="button" class="next-step" data-id="${esc(id)}" data-next-prompt="${esc(step.prompt)}"><span class="next-step-prompt">${esc(step.prompt)}</span><span class="next-step-arrow">${icon("arrow")}</span></button>`).join("")}</div></section>` : "";
+  const followups = nextSteps.length ? `<section class="next-steps" aria-label="推荐的下一步"><span class="next-steps-label">你还可以继续问</span><div class="next-steps-options">${nextSteps.map((step) => `<button type="button" class="next-step" data-id="${esc(id)}" data-next-prompt="${esc(step.prompt)}" title="发送这个问题"><span class="next-step-prompt">${esc(step.prompt)}</span><span class="next-step-arrow">${icon("arrow")}</span></button>`).join("")}</div></section>` : "";
   const retry = latestResponse ? `<button class="subtle retry-answer" data-id="${id}" title="重新生成这条回答">${icon("retry")}<span>重新生成</span></button>` : "";
   const resume = latestResponse && canContinue(message) ? `<button class="subtle continue-answer" data-id="${id}" title="保留已有内容，在这条回答里接着写">${icon("arrow")}<span>继续生成</span></button>` : '';
   const remove = !busy() ? `<button class="subtle delete-message" data-id="${id}" title="删除这条回答">${icon("trash")}<span>删除</span></button>` : '';
-  const actions = id === "draft" ? "" : `<div class="message-actions">${messageTime(message)}${resume}${retry}<button class="subtle copy-answer" data-id="${id}" title="复制完整回答">${icon("copy")}<span>复制</span></button><button class="subtle quote-answer" data-id="${id}" title="将整段回答加入参考文本">${icon("paper")}<span>引用整段</span></button><button class="subtle inspect-answer" data-id="${id}" title="查看本轮来源与上下文">${icon("context")}<span>来源与上下文</span>${count ? `<span class="source-count">${count}</span>` : ""}</button>${remove}</div>`;
+  const more = retry || remove ? `<details class="message-more"><summary aria-label="更多回答操作" title="更多操作">${icon('more')}</summary><div class="message-action-menu" aria-label="回答操作">${retry ? retry.replace('<span>重新生成</span>','<span><strong>重新生成</strong><small>重新请求模型，替换这条回答</small></span>') : ''}${remove.replace('<span>删除</span>','<span><strong>删除回答</strong><small>保留问题，移除这条回答</small></span>')}</div></details>` : '';
+  const actions = id === "draft" ? "" : `<div class="message-actions">${messageTime(message)}${resume}<button class="subtle copy-answer" data-id="${id}" title="复制完整回答">${icon("copy")}<span>复制</span></button><button class="subtle quote-answer" data-id="${id}" title="将整段回答加入参考文本">${icon("paper")}<span>引用整段</span></button><button class="subtle inspect-answer" data-id="${id}" title="查看本轮来源与上下文">${icon("context")}<span>来源与上下文</span>${count ? `<span class="source-count">${count}</span>` : ""}</button>${more}</div>`;
   return `<article class="message message-assistant ${error ? "message-error" : ""}" data-message="${id}"><div class="assistant-meta"><img class="assistant-avatar" src="/lolo-avatar.png" alt="" width="28" height="28" loading="lazy" decoding="async"><span>lolo</span></div><div class="answer">${answer}</div><div class="execution">${actionHTML(receipts, { pending: id === "draft" })}</div>${followups}${actions}</article>`;
 }
 function render() {
@@ -342,6 +369,8 @@ function renderTasks() {
     )
     .join("");
   $("#tasks-empty").hidden = tasks.some((t) => t.status !== "archived");
+  $("#archived-toggle").setAttribute("aria-expanded",String(showArchived));
+  $("#archived-toggle").setAttribute("aria-controls","task-list");
   $("#archived-toggle").hidden = !tasks.some((t) => t.status === "archived");
   $("#archived-toggle").textContent = showArchived
     ? "收起已归档任务"
@@ -389,6 +418,7 @@ async function load(id = itemId) {
       } catch {}
     }
     closeNavigation();
+    watchFollowup();
     scrollBottom(true);
     if (state.run && ["queued", "running", "cancelling"].includes(state.run.status))
       startPoll(state.run);
@@ -399,12 +429,13 @@ async function load(id = itemId) {
     else if (!state.enabled && state.mode !== "mock")
       setStatus("模型调用已暂停 · 点击模型名称可启用");
     else if (state.mode === "mock") setStatus("离线演示模式 · 不调用真实模型");
+    if(state.followup?.error)setStatus(state.followup.error);
     if (!activeRun && state.model_selection?.current_blocked)
       setStatus('当前模型不可用 · 点击模型名称选择其他模型');
   } catch (error) {
     if (epoch !== generation) return;
     if (id !== "main") return load("main");
-    toast(error.message);
+    if(!showFormError(error.message)) toast(error.message);
     setStatus("本地服务未连接，请刷新重试");
   }
 }
@@ -506,6 +537,8 @@ function startPoll(run) {
       sourceCache = new Map();
       inspectedMessages.clear();
       render();
+      if(state.run&&state.run.id!==run.id&&['queued','running','cancelling'].includes(state.run.status)){startPoll(state.run);return;}
+      watchFollowup();
       if (
         result.answer &&
         !state.messages.some(
@@ -537,39 +570,26 @@ function startPoll(run) {
       setStatus("和本地服务暂时断开了。后台可能还在运行，刷新后可以接回来。");
       activeRun = null;
       controls();
-      toast(error.message);
+      if(!showFormError(error.message)) toast(error.message);
     }
   };
   tick();
 }
+$('#stop').onclick=stopCurrent;
 $("#composer").addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (activeRun) {
-    if (activeRun.status === "cancelling") return;
-    const run = activeRun, epoch = generation;
-    stoppingRunId=run.id;
-    activeRun.status='cancelling'; activeStream?.stop(); controls();
-    updateWaiting($(`[data-message="${run.continue_message_id || 'draft'}"]`),'stopping',0);
-    setStatus("收到，lolo 先停一下…",true);
-    try {
-      const result = await api("/api/cancel", { item: itemId, run: run.id });
-      if (epoch !== generation || activeRun?.id !== run.id) return;
-      activeRun.status = result.status;
-      controls();
-      setStatus(result.status === "cancelling" ? "收到，lolo 正在停下…" : "这轮已经收好了。", true);
-    } catch (error) { stoppingRunId=null; toast('停止请求没能确认：'+error.message); load(itemId); }
-    return;
-  }
   const message = $("#prompt").value.trim();
   const reference = referenceText();
-  if (!message || busy() || !state || composingPrompt) return;
+  if (!message || submitting || !state || composingPrompt || activeRun?.status==='cancelling' || ['pending','starting'].includes(state.followup?.status)) return;
   const id = itemId,
     epoch = generation;
+  const interrupted=activeRun?.id;
   submitting = true;
   $("#send").disabled = true;
   setStatus("把问题交给 lolo…", true);
   try {
-    const request = await api("/api/send", {
+    const request = await api(interrupted?"/api/interrupt":"/api/send", {
+      ...(interrupted?{run:interrupted}:{}),
       item: id,
       message,
       reference,
@@ -584,6 +604,13 @@ $("#composer").addEventListener("submit", async (event) => {
       sessionStorage.removeItem('lodestar-reference:'+id);
     } catch {}
     $("#prompt").style.height = "auto";
+    if(interrupted){
+      state.followup=request.status==='pending'?request:null;
+      if(activeRun)activeRun.status='cancelling';
+      renderMessages();controls();
+      if(state.followup)watchFollowup();else await load(id);
+      return;
+    }
     state.messages.push({ role: "user", content: message,
       metadata: reference ? { reference_text: reference } : {} });
     renderMessages();
@@ -593,7 +620,7 @@ $("#composer").addEventListener("submit", async (event) => {
     submitting = false;
     setStatus(error.message);
     controls();
-    toast(error.message);
+    if(!showFormError(error.message)) toast(error.message);
   }
 });
 async function retryAnswer(messageId) {
@@ -623,7 +650,7 @@ async function retryAnswer(messageId) {
     setStatus(error.message);
     renderMessages();
     controls();
-    toast(error.message);
+    if(!showFormError(error.message)) toast(error.message);
   }
 }
 async function continueAnswer(messageId) {
@@ -638,7 +665,7 @@ async function continueAnswer(messageId) {
     startPoll({id:request.id,status:'queued',config:JSON.stringify(state.configuration),continue_message_id:Number(messageId)});
   } catch(error) {
     if(epoch!==generation) return;
-    submitting=false;renderMessages();controls();setStatus(error.message);toast(error.message);
+    submitting=false;renderMessages();controls();setStatus(error.message);if(!showFormError(error.message)) toast(error.message);
   }
 }
 function requestDeleteMessage(message) {
@@ -647,12 +674,13 @@ function requestDeleteMessage(message) {
   $('#delete-message-title').textContent=message.role==='user' ? '删除这一轮对话？' : '删除这条回答？';
   $('#delete-message-description').textContent=(message.role==='user' ? '这条问题和它后面的回答将一起删除。' : '你的问题会保留，只删除这条回答。')+
     '删除后无法撤销，不再进入历史搜索和后续上下文。已保存的记忆、已执行的任务会保留，需要单独管理。';
-  $('#delete-message-dialog').showModal();
+  $('#delete-message-preview').textContent=(message.metadata?.partial_answer || message.content || '').slice(0,240);
+  $('#delete-message-dialog').showModal();$('#delete-message-form .secondary').focus();
 }
 $('#delete-message-form').onsubmit=async(event)=>{
   event.preventDefault();
   if(busy() || deletingMessageId===null) return;
-  const epoch=generation, button=event.submitter;
+  const epoch=generation, button=event.submitter || $('#delete-message-form .primary');
   button.disabled=true;
   try {
     const result=await api('/api/delete-message',{item:itemId,message_id:Number(deletingMessageId)});
@@ -662,13 +690,13 @@ $('#delete-message-form').onsubmit=async(event)=>{
     sourceCache.clear();inspectedMessages.clear();renderMessages();renderInsights();
     if(drawerKind==='context') closeDrawer();
     setStatus('');toast('已删除，这些内容不会再带入后续对话');
-  } catch(error) {toast(error.message);}
-  finally {button.disabled=false;deletingMessageId=null;}
+  } catch(error) {if(!showFormError(error.message)) toast(error.message);}
+  finally {button.disabled=false;}
 };
 $("#prompt").addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey && !event.isComposing && !composingPrompt && event.keyCode !== 229) {
     event.preventDefault();
-    if (!busy()) $("#composer").requestSubmit();
+    if (!submitting && (!activeRun || activeRun.status!=="cancelling")) $("#composer").requestSubmit();
   }
 });
 function resizePrompt() {
@@ -718,9 +746,10 @@ window.addEventListener('pagehide',()=>{
     else sessionStorage.removeItem('lodestar-reference:'+itemId);
   } catch {}
 });
-$(".suggestions").addEventListener("click", (event) => {
+document.addEventListener("click", (event) => {
   const button = event.target.closest("[data-prompt]");
   if (!button) return;
+  if($('#prompt').value.trim() && $('#prompt').value.trim()!==button.dataset.prompt){$('#prompt').focus();toast('已保留正在编辑的问题，清空后可选择灵感。');return;}
   $("#prompt").value = button.dataset.prompt;
   $("#prompt").dispatchEvent(new Event("input"));
   $("#prompt").focus();
@@ -747,7 +776,7 @@ $("#task-form").onsubmit = async (e) => {
     closeDrawer();
     await load(task.id);
   } catch (error) {
-    toast(error.message);
+    if(!showFormError(error.message)) toast(error.message);
   }
 };
 $("#task-options").onclick = () => {
@@ -768,7 +797,7 @@ $("#manage-form").onsubmit = async (e) => {
     $("#manage-dialog").close();
     await load();
   } catch (error) {
-    toast(error.message);
+    if(!showFormError(error.message)) toast(error.message);
   }
 };
 function renderModelControls() {
@@ -801,19 +830,24 @@ function reasoningOptions(capability, value = capability.value) {
     `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join("");
   $("#reasoning-setting").value = capability.options.some((o) => o.value === value) ? value : "default";
   $("#reasoning-note").textContent = capability.note;
+  $('#reasoning-setting').hidden=true;
+  const hints={default:'由模型服务决定',none:'关闭额外思考',off:'关闭额外思考',disabled:'关闭额外思考',low:'较少的思考时间',medium:'适中的思考时间',high:'更多的思考时间',xhigh:'更充分地思考'};
+  $('#reasoning-options').innerHTML=capability.options.map(o=>`<button type="button" class="reasoning-choice" data-reasoning="${esc(o.value)}" aria-pressed="${o.value===$('#reasoning-setting').value}"><strong>${esc(o.label)}</strong><small>${esc(hints[o.value] || '按当前模型能力执行')}</small><span class="choice-check" aria-hidden="true">${icon('check')}</span></button>`).join('');
 }
-async function openModelSettings() {
+async function openModelSettings(focus='model') {
   if (!state) return;
   const currentItem = itemId, revision = ++catalogGeneration;
   $("#model-id").value = state.configuration.model;
-  $("#model-id").hidden = true;
+  $("#model-id").hidden = true;$("#model-id").required=false;
   modelAvailability = state.model_selection?.availability || {};
   modelOptions(state.models, state.configuration.model);
   hiddenModels(state.model_selection);
   reasoningOptions(state.reasoning);
   $("#enabled-setting").checked = state.enabled;
   $("#catalog-status").textContent = "正在读取服务端模型目录…";
-  $("#settings-dialog").showModal();
+  $('#settings-space').textContent=state.item.name;
+  $("#settings-dialog").showModal();$('#reasoning-options').hidden=false;
+  if(focus==='reasoning') $('#reasoning-options button[aria-pressed="true"]')?.focus();
   try {
     const catalog = await api("/api/models", { item: currentItem });
     if (revision !== catalogGeneration || currentItem !== itemId || !$("#settings-dialog").open) return;
@@ -830,10 +864,11 @@ async function openModelSettings() {
 }
 async function chooseModel() {
   const custom = $("#model-select").value === "__custom__";
-  $("#model-id").hidden = !custom;
+  $("#model-id").hidden = !custom;$("#model-id").required=custom;
   if (custom) $("#model-id").focus();
   const model = selectedModel(), revision = ++settingsGeneration;
-  if (!model) return;
+  $('#reasoning-options').hidden=!model;
+  if (!model) {$('#reasoning-note').textContent='先选择模型或填写模型 ID，再设置推理方式。';return;}
   if (model === state.configuration.model) return reasoningOptions(state.reasoning);
   let capability = modelCatalog[model];
   if (!capability) {
@@ -843,8 +878,13 @@ async function chooseModel() {
   }
   reasoningOptions(capability, capability.efforts[0] || "default");
 }
-$("#model-settings").onclick = openModelSettings;
-$("#thinking").onclick = openModelSettings;
+$("#model-settings").onclick = ()=>openModelSettings("model");
+$("#thinking").onclick = ()=>openModelSettings("reasoning");
+$('#reasoning-options').onclick=event=>{
+  const button=event.target.closest('[data-reasoning]');if(!button)return;
+  $('#reasoning-setting').value=button.dataset.reasoning;
+  for(const choice of $('#reasoning-options').querySelectorAll('button'))choice.setAttribute('aria-pressed',String(choice===button));
+};
 $("#model-select").onchange = chooseModel;
 $("#model-id").oninput = chooseModel;
 $('#hidden-models').onclick = async (event) => {
@@ -862,13 +902,13 @@ $('#hidden-models').onclick = async (event) => {
     modelOptions(catalog.models, selectedModel());
     hiddenModels(catalog);
     $('#catalog-status').textContent = '已重新允许手动尝试，未验证额度，也未发起模型请求。';
-  } catch (error) { toast(error.message); }
+  } catch (error) { if(!showFormError(error.message)) toast(error.message); }
   finally { button.disabled = false; }
 };
 $("#settings-form").onsubmit = async (e) => {
   e.preventDefault();
   const targetItem = itemId;
-  if (!selectedModel()) return toast('请先选择模型');
+  if (!selectedModel()) return showFormError('请先选择模型或填写模型 ID。');
   try {
     const updated = await api("/api/item", {
       item: targetItem,
@@ -892,7 +932,7 @@ $("#settings-form").onsubmit = async (e) => {
     if (busy()) toast("已保存，下一轮生效");
     else await load();
   } catch (error) {
-    toast(error.message);
+    if(!showFormError(error.message)) toast(error.message);
   }
 };
 function sourcesFor(messageId = null) {
@@ -922,6 +962,8 @@ function openDrawer(kind) {
   closeNavigation();
   $(".app").inert = true;
   drawerKind = kind;
+  $('#context').setAttribute('aria-expanded',String(kind==='context'));
+  $('#task-center').setAttribute('aria-expanded',String(kind==='tasks'));
   sourceMessage = null;
   renderDrawer();
   $("#drawer").hidden = false;
@@ -937,7 +979,16 @@ async function hydrateMessageInspection(messageId) {
     inspectedMessages.add(String(messageId));
     sourceCache = new Map();
     if (drawerKind === "context" && String(sourceMessage) === String(messageId)) {
+      const openEvidence=[...$('#drawer-content').querySelectorAll('.source-evidence[open]')].map(node=>({url:node.dataset.evidenceUrl,technical:!!node.querySelector('.evidence-technical[open]')}));
+      const activeEvidence=document.activeElement?.closest('[data-evidence-url]')?.dataset.evidenceUrl;
+      const previousScroll=$('#drawer').scrollTop;
       renderDrawer();
+      for(const saved of openEvidence) {
+        const node=[...$('#drawer-content').querySelectorAll('[data-evidence-url]')].find(n=>n.dataset.evidenceUrl===saved.url);
+        if(node){node.open=true;if(saved.technical&&node.querySelector('.evidence-technical'))node.querySelector('.evidence-technical').open=true;}
+      }
+      $('#drawer').scrollTop=previousScroll;
+      if(activeEvidence)[...$('#drawer-content').querySelectorAll('[data-evidence-url]')].find(n=>n.dataset.evidenceUrl===activeEvidence)?.querySelector('summary')?.focus({preventScroll:true});
       if (pendingEvidenceUrl) {
         const evidence = [...document.querySelectorAll("[data-evidence-url]")]
           .find((element) => element.dataset.evidenceUrl === pendingEvidenceUrl);
@@ -954,6 +1005,7 @@ async function hydrateMessageInspection(messageId) {
   }
 }
 function openContext(messageId = null, evidenceUrl = "") {
+  inspectionMode=messageId ? 'answer':'space';contextTab=messageId ? 'sources':'scope';
   openDrawer("context");
   sourceMessage = messageId || [...state.messages].reverse().find((message) => message.role === "assistant")?.id || null;
   pendingEvidenceUrl = evidenceUrl;
@@ -963,8 +1015,9 @@ function openContext(messageId = null, evidenceUrl = "") {
 function closeDrawer() {
   if (!drawerKind) return;
   $(".app").inert = false;
-  drawerFocus?.focus();
+  (drawerFocus?.isConnected?drawerFocus:$("#context"))?.focus();
   drawerKind = "";
+  $('#context').setAttribute('aria-expanded','false');$('#task-center').setAttribute('aria-expanded','false');
   $("#drawer").hidden = true;
   $("#drawer-backdrop").hidden = true;
 }
@@ -987,23 +1040,54 @@ function renderDrawer() {
       message?.metadata?.model_configuration || state.configuration;
     const web = message?.metadata?.web_context;
     const loading = message?.metadata?.inspection_available && !inspectedMessages.has(String(message.id));
-    target.innerHTML = `<section class="drawer-section"><h3>${message ? "所选回答的范围" : "当前任务范围"}</h3><div class="detail-row"><span>当前任务</span><span>${esc(state.item.name)}</span></div><div class="detail-row"><span>对话</span><span>当前任务 · 变更边界后的近期记录</span></div><div class="detail-row"><span>记忆</span><span>${used ? used.length + " 条本轮带入" : state.context_notes.length + " 条当前可用"}</span></div><div class="detail-row"><span>模型</span><span>${esc(config.model)}</span></div>${web?.history_after ? '<p class="panel-info">本轮已跳过记忆变更前的模型上下文，历史聊天仍可查看。</p>' : ""}<p class="panel-info">同一用户共享个人记忆，同项目共享项目记忆。其他任务的结果可由模型按需读取。</p></section><section class="drawer-section"><h3>项目归属 <button class="subtle" id="register-project">＋ 登记</button></h3><select id="bind-project" aria-label="绑定项目">${projectOptions(state.item.project_id)}</select><p class="fineprint">更换项目会重新建立后续上下文；登记与绑定不会自动读取本地代码。</p></section><section class="drawer-section"><h3>参考来源 <span>${sources.length || ""}</span></h3>${sources.length ? sources.map(sourceHTML).join("") : '<div class="empty-state">这条回答没有引用来源。</div>'}${loading ? '<p class="panel-info">正在加载本轮保存的证据与上下文…</p>' : ''}<p class="panel-info">仅列出这条回答引用的链接；引用不代表内容已经核实。</p></section>${retrieval.length ? `<details class="retrieval-records drawer-section"><summary>检索记录 <span>${retrieval.length}</span></summary><p class="panel-info">本轮检索或阅读过、但未在回答中引用的页面。</p>${retrieval.map(sourceHTML).join("")}</details>` : ""}`;
+    const answerMode=inspectionMode==='answer';
+    const effectiveConfig=answerMode?config:state.configuration;
+    const memory=answerMode?used:state.context_notes;
+    $('#drawer-title').textContent=answerMode?'回答详情':'当前上下文';
+    target.innerHTML=`<div class="inspector-intro"><span class="inspector-label">${answerMode?'这一条回答':'当前对话空间'}</span><p>${answerMode?'查看这条回答引用了什么，以及当时使用的上下文。':'管理后续对话的范围；参考来源显示最近一条回答的引用。'}</p></div>
+      <div class="panel-tabs inspector-tabs" role="tablist" aria-label="上下文分类"><button type="button" role="tab" id="context-tab-scope" aria-controls="context-scope" aria-selected="${contextTab==='scope'}" tabindex="${contextTab==='scope'?0:-1}" data-context-tab="scope">上下文范围</button><button type="button" role="tab" id="context-tab-sources" aria-controls="context-sources" aria-selected="${contextTab==='sources'}" tabindex="${contextTab==='sources'?0:-1}" data-context-tab="sources">参考来源 <span>${sources.length}</span></button></div>
+      <section id="context-scope" role="tabpanel" aria-labelledby="context-tab-scope" ${contextTab==='scope'?'':'hidden'}>
+      <section class="drawer-section inspector-card"><h3>${answerMode?'回答使用的范围':'下一轮可用范围'}</h3><div class="detail-row"><span>对话空间</span><strong>${esc(state.item.name)}</strong></div><div class="detail-row"><span>对话记录</span><span>当前空间 · 变更边界后的近期记录</span></div><div class="detail-row"><span>记忆</span><span>${memory?.length || 0} 条${answerMode?'本轮带入':'当前可用'}</span></div><div class="detail-row"><span>模型</span><span class="model-value">${esc(effectiveConfig.model)}</span></div>${web?.history_after&&answerMode?'<p class="panel-info">本轮跳过了记忆变更前的模型上下文，历史聊天仍可查看。</p>':''}</section>
+      ${memory?.some(n=>n.content)?`<section class="drawer-section inspector-card"><h3>${answerMode?'本轮使用的记忆':'可用记忆'}</h3><div class="context-memory-list">${memory.filter(n=>n.content).slice(0,12).map(n=>`<article><span>${esc(scopeLabels[n.scope] || '记忆')}</span><p>${esc(n.content)}</p></article>`).join('')}</div></section>`:''}
+      <section class="drawer-section inspector-card"><h3>项目归属 <button type="button" class="subtle" id="register-project">${icon('plus')}新建项目</button></h3><label for="bind-project" class="sr-only">绑定项目</label><select id="bind-project" aria-label="绑定项目">${projectOptions(state.item.project_id)}</select><p class="fineprint">更换项目影响后续对话，已保存回答不变。绑定不会自动读取本地代码。</p></section><p class="panel-info">个人记忆共享，项目记忆限同项目。其他任务结果由模型按需读取，不会自动带入全部对话。</p></section>
+      <section id="context-sources" role="tabpanel" aria-labelledby="context-tab-sources" ${contextTab==='sources'?'':'hidden'}><section class="drawer-section"><div class="source-section-heading"><h3>回答引用 <span>${sources.length}</span></h3><span>保留当时的证据</span></div>${sources.length?sources.map(sourceHTML).join(''):'<div class="empty-state"><span class="empty-icon">'+icon('paper')+'</span><strong>这条回答没有引用来源</strong><span>没有引用链接，不代表内容已核实。</span></div>'}${loading?'<p class="panel-info" role="status">正在读取保存的证据…</p>':''}</section>${retrieval.length?`<details class="retrieval-records drawer-section"><summary>未引用的检索记录 <span>${retrieval.length}</span></summary><p class="panel-info">本轮检索或阅读过，但没有在回答中引用。</p>${retrieval.map(sourceHTML).join('')}</details>`:''}<p class="panel-info">“检索候选”“已读摘要”“正文片段”代表不同阅读深度。引用链接本身不代表已核实结论。</p></section>`;
+    for(const tab of target.querySelectorAll('[data-context-tab]'))tab.onclick=()=>{
+      contextTab=tab.dataset.contextTab;renderDrawer();$('#context-tab-'+contextTab).focus();
+    };
     $("#bind-project").onchange = async (e) => {
-      try { await api("/api/item", {item: itemId, project_id: Number(e.target.value) || null}); await load(); }
-      catch (error) { toast(error.message); renderDrawer(); }
+      e.target.disabled=true;
+      try { await api("/api/item", {item: itemId, project_id: Number(e.target.value) || null}); await load(); toast("项目归属已更新，下一轮生效"); }
+      catch (error) { if(!showFormError(error.message)) toast(error.message); renderDrawer(); }
     };
     $("#register-project").onclick = () => $("#project-dialog").showModal();
   }
   if (drawerKind === "memory") {
-    target.innerHTML = `<section class="drawer-section"><h3>个人与项目记忆 <button class="subtle" id="add-note">＋ 添加</button></h3><p>查看所有已保存的事实和偏好。范围决定哪些任务可以使用。</p><input class="memory-search" id="memory-search" type="search" placeholder="搜索记忆" aria-label="搜索记忆"><div id="notes-list"></div></section><section class="drawer-section"><h3>我的学习</h3>${state.learning.length ? state.learning.map((l) => `<details class="learning-row"><summary>${esc(l.technology)}${l.method ? " · " + esc(l.method) : ""}<small>${l.event_count} 条证据 · ${l.paper_count} 篇关联论文 · ${esc(masteryLabels[l.mastery] || l.mastery)}</small></summary>${l.evidence.map((e) => `<article class="learning-evidence"><div class="source-meta">${esc(e.event)} · ${esc(e.created_at.slice(0,10))}</div><p>${esc(e.evidence)}</p>${safeUrl(e.paper_url) ? `<a href="${esc(safeUrl(e.paper_url))}" target="_blank" rel="noopener noreferrer">关联论文 ↗</a>` : ""}<div class="note-actions"><button class="subtle" data-learning="${e.id}" data-action="correct">纠正</button><button class="subtle" data-learning="${e.id}" data-action="revoke">撤销证据</button></div></article>`).join("")}</details>`).join("") : '<div class="empty-state">还没有学习记录。<br>后台研究不代表你已经接触或掌握。</div>'}</section><p class="panel-info">纠正、停用和遗忘会更新后续上下文边界，避免旧回答再次带入失效记忆。已有聊天仍保留；已发送给模型的信息无法撤回。</p>`;
+    target.innerHTML = `<section class="drawer-section"><h3>个人与项目记忆 <button class="subtle" id="add-note">＋ 添加</button></h3><p>查看所有已保存的事实和偏好。范围决定哪些任务可以使用。</p><input class="memory-search" id="memory-search" type="search" placeholder="搜索记忆" aria-label="搜索记忆"><div id="notes-list"></div></section><section class="drawer-section"><h3>论文与学习</h3><p><a class="text-link" href="/papers?item=${encodeURIComponent(itemId)}">阅读进度与掌握自评 ↗</a></p><p><a class="text-link" href="/papers?tab=learning&amp;item=${encodeURIComponent(itemId)}">知识与方法记录 ↗</a></p></section><p class="panel-info">纠正、停用和遗忘会更新后续上下文边界，避免旧回答再次带入失效记忆。已有聊天仍保留；已发送给模型的信息无法撤回。</p>`;
     renderNotes();
     $("#memory-search").oninput = renderNotes;
     $("#add-note").onclick = () => editNote();
   }
   if (drawerKind === "tasks") {
-    const tasks = state.items.filter((t) => t.id !== "main" && t.status !== "archived");
-    target.innerHTML = `<section class="drawer-section"><h3>各自推进，随时接续 <span>${tasks.length}</span></h3><p>在主对话中派发多个研究任务，也可以进入任一任务继续讨论。</p>${tasks.length ? tasks.map((t) => `<button class="task-card" data-open-task="${esc(t.id)}"><strong>${esc(t.name)}</strong><span>${esc(taskStatus(t))}</span><small>${esc(state.projects.find((p) => p.id === t.project_id)?.name || "未绑定项目")} · 共享个人记忆</small></button>`).join("") : '<div class="empty-state">试试：分别研究 Harness 和 RAG 的近期论文，创建两个任务。</div>'}</section>`;
+    const tasks=state.items.filter(t=>t.id!=='main');
+    const shown=tasks.filter(t=>(taskFilter==='all'?t.status!=='archived':t.status===taskFilter) && t.name.toLocaleLowerCase().includes(taskQuery.toLocaleLowerCase()));
+    target.innerHTML=`<div class="inspector-intro"><span class="inspector-label">把研究分开，随时接续</span><p>任务各自保留对话、来源与设置，共享适用范围内的记忆。</p></div><div class="drawer-toolbar"><input type="search" id="drawer-task-search" aria-label="搜索任务" placeholder="搜索研究课题…" value="${esc(taskQuery)}"><button type="button" class="primary" data-create-task>${icon('plus')}新建</button></div><div class="task-filter" role="group" aria-label="任务状态">${[['all','全部'],['active','进行中'],['completed','已完成'],['archived','已归档']].map(([value,label])=>`<button type="button" aria-pressed="${taskFilter===value}" data-task-filter="${value}">${label}</button>`).join('')}</div><p class="panel-count" role="status">${shown.length} 个${taskQuery?'匹配的':''}任务</p><div class="drawer-task-results">${taskCards(shown)}</div>`;
+    $('#drawer-task-search').oninput=event=>{
+      taskQuery=event.target.value;
+      const matches=tasks.filter(t=>(taskFilter==='all'?t.status!=='archived':t.status===taskFilter) && t.name.toLocaleLowerCase().includes(taskQuery.toLocaleLowerCase()));
+      target.querySelector('.drawer-task-results').innerHTML=taskCards(matches);target.querySelector('.panel-count').textContent=matches.length+' 个匹配的任务';
+    };
   }
+}
+function taskCards(tasks) {
+  return tasks.length?tasks.map(t=>`<button type="button" class="task-card" data-open-task="${esc(t.id)}"><div class="task-card-top"><span class="task-card-icon">${icon('task')}</span><strong>${esc(t.name)}</strong>${icon('diagonal')}</div><span class="task-card-state" data-state="${esc(t.status)}"><i></i>${esc(taskStatus(t))}</span><small>${esc(state.projects.find(p=>p.id===t.project_id)?.name || '未绑定项目')}</small></button>`).join(''):'<div class="empty-state"><span class="empty-icon">'+icon('task')+'</span><strong>这里暂时没有任务</strong><span>试试其他筛选，或为想持续研究的课题新建任务。</span></div>';
+}
+function confirmAction({title,description,preview='',label='确认'}) {
+  const dialog=$('#confirm-action-dialog');
+  $('#confirm-action-title').textContent=title;$('#confirm-action-copy').textContent=description;
+  $('#confirm-action-preview').textContent=preview;$('#confirm-action-preview').hidden=!preview;
+  $('#confirm-action-submit').textContent=label;dialog.returnValue='';dialog.showModal();dialog.querySelector('.secondary').focus();
+  $('#confirm-action-submit').onclick=()=>dialog.close('confirmed');
+  return new Promise(resolve=>dialog.addEventListener('close',()=>resolve(dialog.returnValue==='confirmed'),{once:true}));
 }
 function renderNotes() {
   const q = $("#memory-search").value.toLowerCase();
@@ -1012,7 +1096,7 @@ function renderNotes() {
     ? notes
         .map(
           (n) =>
-            `<article class="note-item ${n.status === "disabled" || n.status === "archived" ? "disabled" : ""}${n.id === memoryFocusId ? " is-focused" : ""}" data-memory-note="${esc(n.id)}"><p>${esc(n.content)}</p><div class="source-meta"><span>${memoryStatusLabels[n.status] || esc(n.status)}</span><span>${memoryTierLabels[n.tier] || "长期"} · ${esc(n.priority || "P1")}</span><span>${esc(scopeLabels[n.scope])}${n.project_id ? " · " + esc(state.projects.find((p) => p.id === n.project_id)?.name || "") : n.item_id ? " · " + esc(state.items.find((t) => t.id === n.item_id)?.name || "") : ""}</span><span>${n.reference_date ? `资料 ${esc(n.reference_date)}` : `记录 ${esc(String(n.created_at || "").slice(0, 10))}`}</span><span>${n.source === "conversation" ? "来自对话" : n.source === "legacy" ? "旧记录保留" : "手动保存"}</span>${n.source_message_id ? `<span>消息 #${n.source_message_id}</span>` : ""}</div><div class="note-actions"><button class="subtle" data-note="${n.id}" data-action="edit">编辑</button><button class="subtle" data-note="${n.id}" data-action="toggle">${n.status === "active" ? "停用" : "恢复"}</button><button class="subtle" data-note="${n.id}" data-action="delete">遗忘</button></div></article>`,
+            `<article class="note-item ${n.status === "disabled" || n.status === "archived" ? "disabled" : ""}${n.id === memoryFocusId ? " is-focused" : ""}" data-memory-note="${esc(n.id)}"><p>${esc(n.content)}</p><div class="source-meta"><span>${memoryStatusLabels[n.status] || esc(n.status)}</span><span>${memoryTierLabels[n.tier] || "长期"} · ${esc(n.priority || "P1")}</span><span>${esc(scopeLabels[n.scope])}${n.project_id ? " · " + esc(state.projects.find((p) => p.id === n.project_id)?.name || "") : n.item_id ? " · " + esc(state.items.find((t) => t.id === n.item_id)?.name || "") : ""}</span><span>${n.reference_date ? `资料 ${esc(n.reference_date)}` : `记录 ${esc(String(n.created_at || "").slice(0, 10))}`}</span><span>${n.source === "conversation" ? "来自对话" : n.source === "legacy" ? "旧记录保留" : "手动保存"}</span>${n.source_message_id ? `<span>消息 #${n.source_message_id}</span>` : ""}</div><div class="note-actions"><button class="subtle" data-note="${n.id}" data-action="edit">编辑</button><button class="subtle" data-note="${n.id}" data-action="toggle">${n.status === "active" ? "停用" : "恢复"}</button><button class="subtle danger-text" data-note="${n.id}" data-action="delete">遗忘</button></div></article>`,
         )
         .join("")
     : '<div class="empty-state">' +
@@ -1058,10 +1142,13 @@ $("#note-form").onsubmit = async (e) => {
     await load();
     toast("记忆已保存");
   } catch (error) {
-    toast(error.message);
+    if(!showFormError(error.message)) toast(error.message);
   }
 };
 $("#drawer-content").onclick = async (e) => {
+  if(e.target.closest('[data-create-task]')){$('#new-task').click();return;}
+  const filter=e.target.closest('[data-task-filter]');
+  if(filter){taskFilter=filter.dataset.taskFilter;renderDrawer();$('#drawer-content [data-task-filter="'+taskFilter+'"]').focus();return;}
   const task = e.target.closest("[data-open-task]");
   if (task) { closeDrawer(); return load(task.dataset.openTask); }
   const learningButton = e.target.closest("[data-learning]");
@@ -1075,9 +1162,9 @@ $("#drawer-content").onclick = async (e) => {
       $("#learning-dialog").showModal();
       return;
     }
-    if (!confirm("撤销这条学习证据？掌握情况将按剩余证据重新计算。")) return;
+    if (!await confirmAction({title:'撤销这条学习证据？',description:'后续掌握情况将按剩余证据重新计算。撤销不会删除原始对话。',preview:evidence.evidence,label:'撤销证据'})) return;
     try { await api("/api/learning", {id: evidence.id, action: "revoke"}); await load(); }
-    catch (error) { toast(error.message); }
+    catch (error) { if(!showFormError(error.message)) toast(error.message); }
     return;
   }
   const b = e.target.closest("[data-note]");
@@ -1086,7 +1173,7 @@ $("#drawer-content").onclick = async (e) => {
   if (b.dataset.action === "edit") return editNote(note.id);
   if (
     b.dataset.action === "delete" &&
-    !confirm("遗忘这条记忆？后续对话会跳过变更前的上下文；已有聊天仍保留。")
+    !await confirmAction({title:'遗忘这条记忆？',description:'记忆及其修订正文将被清除，无法在记忆页恢复。已有聊天、备份和已发送的信息不会删除。',preview:note.content,label:'遗忘记忆'})
   )
     return;
   try {
@@ -1103,7 +1190,7 @@ $("#drawer-content").onclick = async (e) => {
     });
     await load();
   } catch (error) {
-    toast(error.message);
+    if(!showFormError(error.message)) toast(error.message);
   }
 };
 $("#messages").onclick = async (e) => {
@@ -1118,6 +1205,11 @@ $("#messages").onclick = async (e) => {
   }
   const b = e.target.closest("button");
   if (!b) return;
+  b.closest(".message-more")?.removeAttribute("open");
+  if(b.hasAttribute('data-followup-retry')){
+    if($('#prompt').value.trim())return toast('先保留当前输入，再重新填写补充。');
+    $('#prompt').value=state.followup.message;$('#prompt').dispatchEvent(new Event('input'));if(state.followup.reference_text)appendReference(state.followup.reference_text);$('#prompt').focus();return;
+  }
   if (b.dataset.nextPrompt) {
     if (busy()) { toast("当前回答尚未结束，请稍后选择下一步"); return; }
     const prompt = $("#prompt");
@@ -1199,7 +1291,7 @@ function updateQuoteSelection() {
   selectedAnswerQuote = text;
   const rect = selection.getRangeAt(0).getBoundingClientRect();
   button.style.left = `${Math.max(10, Math.min(rect.left, window.innerWidth - 156))}px`;
-  button.style.top = `${Math.max(10, rect.bottom + 8)}px`;
+  button.style.top = `${Math.max(10, Math.min(rect.bottom + 8, window.innerHeight - 48))}px`;
   button.hidden = false;
 }
 document.addEventListener("selectionchange", () => requestAnimationFrame(updateQuoteSelection));
@@ -1212,7 +1304,7 @@ $("#insight-board").onclick = (event) => {
     return openContext(latestCitedMessage(state.messages));
   }
   if (action === "context") return openContext();
-  if (action === "learning") return openDrawer("memory");
+  if (action === "learning") {location.href="/papers?tab=learning&item="+encodeURIComponent(itemId);return;}
   if (action === "answers") $("#messages").scrollIntoView({ behavior: "smooth", block: "start" });
 };
 function updateNoteScope() {
@@ -1226,7 +1318,7 @@ $("#project-form").onsubmit = async (e) => {
       allow_model_description:$('#project-description-allow').checked});
     await api("/api/item", {item: itemId, project_id: project.id});
     $("#project-dialog").close(); $("#project-form").reset(); await load();
-  } catch (error) { toast(error.message); }
+  } catch (error) { if(!showFormError(error.message)) toast(error.message); }
 };
 $("#learning-form").onsubmit = async (e) => {
   e.preventDefault();
@@ -1234,7 +1326,7 @@ $("#learning-form").onsubmit = async (e) => {
     await api("/api/learning", {id: learningId, action: "correct", technology: $("#learning-technology").value,
       method: $("#learning-method").value, evidence: $("#learning-evidence").value});
     $("#learning-dialog").close(); await load();
-  } catch (error) { toast(error.message); }
+  } catch (error) { if(!showFormError(error.message)) toast(error.message); }
 };
 $("#close-drawer").onclick = closeDrawer;
 $("#drawer-backdrop").onclick = closeDrawer;
@@ -1266,7 +1358,10 @@ window.addEventListener("resize", () => {
 });
 $("#home-shortcut").textContent = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘ 1" : "Ctrl 1";
 for (const button of document.querySelectorAll("[data-close]"))
-  button.onclick = () => $("#" + button.dataset.close).close();
+  button.onclick = () => {
+    const dialog=$("#" + button.dataset.close);
+    if(!dialog.querySelector('form[aria-busy="true"]')) dialog.close();
+  };
 document.addEventListener("keydown", (e) => {
   // Native dialogs manage their own Escape and focus cycle.
   if (document.querySelector("dialog[open]")) return;
@@ -1290,6 +1385,60 @@ document.addEventListener("keydown", (e) => {
     load("main");
   }
 });
+function chooseAppearanceTab(name) {
+  $('#appearance-dialog').scrollTop=0;
+  for(const tab of document.querySelectorAll('[data-appearance-tab]')) {
+    const active=tab.dataset.appearanceTab===name;tab.setAttribute('aria-selected',String(active));tab.tabIndex=active?0:-1;
+    document.querySelector('#'+tab.getAttribute('aria-controls')).hidden=!active;
+  }
+  $('#appearance-reset').hidden=name!=='colors';
+}
+$('#appearance-settings').addEventListener('click',()=>$('#appearance-dialog').scrollTop=0);
+for(const tab of document.querySelectorAll('[data-appearance-tab]'))tab.onclick=()=>chooseAppearanceTab(tab.dataset.appearanceTab);
+document.addEventListener('keydown',event=>{
+  const tab=event.target.closest('[role="tab"]');
+  if(tab&&['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) {
+    const tabs=[...tab.parentElement.querySelectorAll('[role="tab"]')],index=tabs.indexOf(tab);
+    const next=event.key==='Home'?tabs[0]:event.key==='End'?tabs.at(-1):tabs[(index+(event.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length];
+    event.preventDefault();next.click();next.focus();
+  }
+  if(event.key==='Escape')for(const menu of document.querySelectorAll('.message-more[open]')){menu.open=false;menu.querySelector('summary').focus();}
+});
+document.addEventListener('click',event=>{
+  for(const menu of document.querySelectorAll('.message-more[open]'))if(!menu.contains(event.target))menu.open=false;
+});
+document.addEventListener('toggle',event=>{
+  if(event.target.matches?.('.message-more[open]'))for(const menu of document.querySelectorAll('.message-more[open]'))if(menu!==event.target)menu.open=false;
+},true);
+$('#companion-menu [data-companion="settings"]').onclick=()=>{
+  $('#companion-menu').hidden=true;$('.companion-pet').setAttribute('aria-expanded','false');
+  chooseAppearanceTab('lolo');$('#appearance-settings').click();
+};
+
+for(const [triggerId,dialogId] of [['context','drawer'],['task-center','drawer'],['new-task','task-dialog'],['task-options','manage-dialog'],['model-settings','settings-dialog'],['thinking','settings-dialog'],['appearance-settings','appearance-dialog']]) {
+  const trigger=$('#'+triggerId),dialog=$('#'+dialogId);
+  trigger.setAttribute('aria-haspopup','dialog');trigger.setAttribute('aria-controls',dialogId);
+  if(dialog.tagName==='DIALOG') {
+    const update=()=>trigger.setAttribute('aria-expanded',String(dialog.open));
+    new MutationObserver(update).observe(dialog,{attributes:true,attributeFilter:['open']});update();
+  }
+}
+// One pending state for every dialog save, including task and model settings.
+for(const dialog of document.querySelectorAll('dialog')) {
+  dialog.addEventListener('cancel',e=>{if(dialog.querySelector('form[aria-busy="true"]'))e.preventDefault();});
+  const form=dialog.querySelector('form');
+  if(!form?.onsubmit)continue;
+  const submitHandler=form.onsubmit;
+  form.onsubmit=async event=>{
+    event.preventDefault();if(form.getAttribute('aria-busy')==='true')return;
+    form.setAttribute('aria-busy','true');clearFormError(form);
+    const controls=[...form.querySelectorAll('button,input,select,textarea')],previous=controls.map(c=>c.disabled);
+    const submit=form.querySelector('button[type="submit"],.dialog-actions .primary'),label=submit?.textContent;
+    controls.forEach(c=>c.disabled=true);if(submit)submit.textContent=form.id==='delete-message-form'?'正在删除…':'正在保存…';
+    try{await submitHandler.call(form,event);}
+    finally{controls.forEach((c,i)=>c.disabled=previous[i]);if(submit)submit.textContent=label;form.removeAttribute('aria-busy');}
+  };
+}
 await load();
 await addRequestedPaperReference();
 if (initialQuery.has('new-task')) $("#new-task").click();

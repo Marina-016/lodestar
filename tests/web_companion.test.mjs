@@ -4,10 +4,15 @@ import {companionPreference, companionPose} from '../lodestar/web/static/compani
 
 test('companion preferences recover from invalid storage and constrain saved coordinates', () => {
   for (const value of [undefined, null, false, 'oops', {position: {x: Infinity, y: 0}}, {position: {x: '0.4', y: 0.2}}]) {
-    assert.deepEqual(companionPreference(value), {visible: true, position: null, size: 'auto', motion: true});
+    assert.deepEqual(companionPreference(value), {visible: true, position: null, size: 'auto', motion: true, skin: 'maid'});
   }
-  assert.deepEqual(companionPreference({visible: false, position: {x: -100, y: 100}}), {visible: false, position: {x: 0, y: 1}, size: 'auto', motion: true});
-  assert.deepEqual(companionPreference({position: {x: 0.25, y: 0.75}, extra: 'discard'}), {visible: true, position: {x: 0.25, y: 0.75}, size: 'auto', motion: true});
+  assert.deepEqual(companionPreference({visible: false, position: {x: -100, y: 100}}), {visible: false, position: {x: 0, y: 1}, size: 'auto', motion: true, skin: 'maid'});
+  assert.deepEqual(companionPreference({position: {x: 0.25, y: 0.75}, extra: 'discard'}), {visible: true, position: {x: 0.25, y: 0.75}, size: 'auto', motion: true, skin: 'maid'});
+});
+
+test('costumes preserve old preferences and accept only bundled asset identities', () => {
+  assert.equal(companionPreference({skin:'pajamas'}).skin,'pajamas');
+  for (const skin of ['https://example.com/asset.png','../private','none',null,{}]) assert.equal(companionPreference({skin}).skin,'maid');
 });
 
 test('explicit size survives reload with bounds while invalid and legacy values stay automatic', () => {

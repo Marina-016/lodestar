@@ -195,7 +195,7 @@ def answer_context(context):
             **{k: result[k] for k in ('error', 'query_results', 'effective_query', 'time_window',
                 'failure_kind', 'recovery', 'skipped_queries', 'read_depth', 'coverage',
                 'query_matched', 'truncated', 'full_text_ok', 'note', 'repeat_of', 'previous_source_count') if k in result},
-            **({'result': result} if event['action'] in {'get_paper_impact', 'search_history', 'project_context', 'read_memory', 'manage_memory', 'record_learning', 'list_tasks', 'read_task', 'create_task'} else {})})
+            **({'result': result} if event['action'] in {'get_paper_impact', 'search_history', 'project_context', 'read_memory', 'manage_memory', 'record_learning', 'list_tasks', 'read_task', 'create_task','update_conversation'} else {})})
     from lodestar.memory.learning import model_context
     learning_packet = model_context(context.get('learning', []))
     packet = {'current_time': context['current_time'], 'sources': sources,
@@ -203,6 +203,7 @@ def answer_context(context):
             'execution_policy': context.get('execution_policy', {}),
             'evidence_assessment': assess(sources), 'operations': operations,
             'conversation': context.get('history', []),
+            'conversation_continuity':context.get('conversation_continuity', {}),
             'learning': learning_packet['profiles'], 'learning_context': learning_packet['coverage'],
             'managed_memory': context.get('managed_memory', []),
             'conversation_note': 'Prior assistant replies are conversational context, not verified source evidence.'}

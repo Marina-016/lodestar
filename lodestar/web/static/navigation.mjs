@@ -13,6 +13,9 @@ const icon = name => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${pat
 
 export function initializeNavigation() {
   applyAppearance(readAppearance());
+  for(const dialog of document.querySelectorAll('dialog')) {
+    dialog.addEventListener('close',()=>clearFormError(dialog));
+  }
   const sidebar = document.querySelector('#sidebar');
   if (!sidebar) return;
   const page = location.pathname;
@@ -24,7 +27,8 @@ export function initializeNavigation() {
     <nav aria-label="工作空间"><div class="nav-group" aria-label="常用入口">
       ${chat ? `<button class="nav-item active" id="home" aria-current="page">${icon('home')}<span>主对话</span><kbd class="shortcut" id="home-shortcut">Ctrl 1</kbd></button>` : entry('/?item=main', '', '主对话', 'home', '回到主对话')}
       ${entry('/projects', chat ? 'projects' : 'nav-projects', '项目', 'project', '管理项目、工作区与关联研究')}
-      ${entry('/memory', chat ? 'memory' : 'nav-memory', '记忆与资料', 'memory', '管理个人记忆、收藏论文和学习记录')}
+      ${entry('/papers', 'nav-papers', '论文', 'memory', '阅读进度、关键词和掌握情况')}
+      ${entry('/memory', chat ? 'memory' : 'nav-memory', '记忆', 'memory', '管理个人偏好、项目事实和任务备注')}
     </div><div class="nav-group"><div class="nav-group-label">研究工具</div>
       ${entry('/research', '', '研究收件箱', 'inbox', '查看项目里的候选论文和研究结果')}
       ${entry('/history', '', '搜索对话', 'search', '查找以前的聊天消息和来源')}
@@ -169,4 +173,43 @@ export function initializeChatWidth() {
   window.addEventListener('storage',event=>{
     if(event.key===key) apply(event.newValue);
   });
+}
+
+
+// Keep validation errors inside native dialogs (which render above the page).
+export function showFormError(message) {
+  const dialog=document.querySelector('dialog[open]');
+  if(!dialog) return false;
+  let feedback=dialog.querySelector('.form-feedback');
+  if(!feedback) {
+    feedback=document.createElement('div');
+    feedback.className='form-feedback'; feedback.setAttribute('role','alert');
+    feedback.tabIndex=-1;
+    const actions=dialog.querySelector('.dialog-actions');
+    (actions || dialog).insertAdjacentElement(actions ? 'beforebegin' : 'beforeend',feedback);
+  }
+  feedback.textContent=message; feedback.hidden=!message;
+  if(message) feedback.focus();
+  return true;
+}
+
+export function clearFormError(form) {
+  const feedback=(form.closest('dialog') || form).querySelector('.form-feedback');
+  if(feedback) { feedback.hidden=true; feedback.textContent=''; }
+}
+
+
+export function revealDetail() {
+  const detail=document.querySelector('#entry-detail');
+  if(!detail)return;
+  const back=document.createElement('button');back.type='button';
+  back.className='subtle detail-back';back.textContent='← 返回列表';
+  back.onclick=event=>{
+    event.stopPropagation();
+    const row=document.querySelector('#entry-list .selected') || document.querySelector('#entry-list .library-row');
+    (row || document.querySelector('#entry-list')).scrollIntoView({block:'start'});
+    row?.focus({preventScroll:true});
+  };
+  detail.prepend(back);
+  if(matchMedia('(max-width:1100px)').matches)detail.scrollIntoView({block:'start'});
 }

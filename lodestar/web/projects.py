@@ -9,6 +9,8 @@ from lodestar.web import memory
 
 def initialize(ws):
     ws.conn.executescript(SCHEMA)
+    from lodestar.web.vaults import SCHEMA as VAULT_SCHEMA
+    ws.conn.executescript(VAULT_SCHEMA)
     from lodestar.web.project_files import SCHEMA as FILE_SCHEMA
     ws.conn.executescript(FILE_SCHEMA)
     from lodestar.web.research import SCHEMA as RESEARCH_SCHEMA
@@ -25,7 +27,8 @@ def catalog(ws):
         source = ws.conn.execute('SELECT repository,branch,commit_sha,readme_path,truncated,allow_model_readme,synced_at '
                                  'FROM web_project_sources WHERE project_id=?',(project['id'],)).fetchone()
         revision = ws.conn.execute('SELECT revision,allow_model_description FROM web_project_revisions WHERE project_id=?',(project['id'],)).fetchone()
-        result.append({**project,'revision':revision[0] if revision else 1,
+        from lodestar.web.vaults import info as vault_info
+        result.append({**project,'local_vault':vault_info(ws,project['id']),'revision':revision[0] if revision else 1,
                        'allow_model_description':bool(revision and revision[1]),
                        'has_workspace':bool(ws.conn.execute('SELECT 1 FROM web_project_checkouts WHERE project_id=?',(project['id'],)).fetchone()),
                        'repository':dict(source) if source else None,

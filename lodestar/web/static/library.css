@@ -1,7 +1,7 @@
 /* A durable fact ledger: scope, revision and Git versions carry the visual hierarchy. */
 .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .library-main .topbar { position: relative; flex-shrink: 0; }
-.library-scroll { overflow-y: auto; padding: 30px clamp(22px,4vw,64px) 30px; }
+.library-scroll { flex:1; min-height:0; overflow-y: auto; padding: 30px clamp(22px,4vw,64px) 30px; }
 .library-heading { display: flex; align-items: start; justify-content: space-between; gap: 20px; margin: 0 0 20px; }
 .library-heading h1 { font-size: 31px; font-weight: 600; letter-spacing: -1px; margin: 0 0 7px; }
 .library-heading p { font-size: 13px; line-height: 1.65; color: var(--muted); margin: 0; max-width: 540px; }
@@ -50,7 +50,7 @@
 .library-boundary { color: var(--muted); font-size: 10px; line-height: 1.9; max-width: 800px; margin-top: 35px; }
 .library-pagination { display: flex; justify-content: space-between; margin-top: 18px; font-size: 12px; }
 .library-notice { border-left: 2px solid var(--accent); padding: 12px 15px; background: var(--surface); font-size: 12px; line-height: 1.8; margin-bottom: 20px; overflow-wrap: anywhere; }
-.library-main .fineprint { font-size: 11px; color: var(--muted); line-height: 1.9; }
+.library-main .fineprint { font-size: 12px; color: var(--muted); line-height: 1.9; }
 .paper-form-grid { display: grid; grid-template-columns: minmax(0,.55fr) minmax(0,1fr); gap: 8px 12px; align-items: end; }
 .paper-form-grid label { margin: 6px 0 0; }
 .paper-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 0; }
@@ -72,3 +72,79 @@
 .memory-tags i { font-style: normal; font-size: 10px; color: var(--secondary); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 2px 6px; }
 @media(max-width:1100px) { .library-layout { grid-template-columns: 1fr; gap: 25px; } .library-detail { border-left: 0; border-top: 1px solid var(--line-strong); padding: 25px 0 0; } .library-heading { flex-direction: column; gap: 17px; } }
 @media(max-width:760px) { .library-scroll { padding: 26px 22px 35px; } .library-heading h1 { font-size: 28px; } .library-tools { flex-wrap: wrap; } .library-tools input { flex-basis: 100%; font-size: 16px; } .library-tools select { flex: 1; max-width: none; font-size: 14px; } .library-tabs button { padding: 12px 10px; } .library-row { padding: 18px 12px; } .commit-row { flex-wrap: wrap; } .paper-form-grid { grid-template-columns: 1fr; gap: 5px; } }
+
+
+/* The same working surface for projects, memory, papers and research. */
+.library-scroll { scrollbar-width:thin; scrollbar-gutter:stable; }
+.library-heading { padding-bottom:22px; margin-bottom:22px; border-bottom:1px solid var(--line); }
+.library-heading h1 { font-size:28px; letter-spacing:-.7px; }
+.library-actions .primary, .library-actions .secondary { min-height:40px; font-size:13px; }
+.library-tools { padding:12px; border:1px solid var(--line); border-radius:14px; background:var(--surface); gap:10px; }
+.library-tools input, .library-tools select { background-color:#fff; border-color:var(--line-strong); font-size:13px; }
+.library-tools input:focus, .library-tools select:focus { border-color:var(--focus-border); box-shadow:0 0 0 3px var(--focus); }
+.library-tools label:not(.sr-only) { font-size:12px; color:var(--secondary); flex-shrink:0; }
+.library-tools button { flex-shrink:0; }
+.library-tabs { gap:8px; }
+.library-tabs button { min-height:42px; }
+.library-tabs button[aria-pressed="true"] { color:var(--accent); border-bottom-color:var(--accent); }
+.library-layout > section { min-width:0; }
+.library-row { margin:3px 0; border-radius:10px; border-left-width:3px; }
+.library-row.selected { background:var(--accent-soft); border-left-color:var(--accent); }
+.library-placeholder { border:1px dashed var(--line-strong); border-radius:12px; padding:26px 20px; background:var(--surface); }
+.library-empty .library-actions { margin-top:16px; }
+.library-pagination { align-items:center; gap:12px; }
+.library-pagination button:disabled { color:var(--tertiary); }
+.list-summary { min-height:20px; font-size:12px; line-height:1.7; }
+.detail-heading h2, .library-detail > h2 { font-size:22px; line-height:1.45; letter-spacing:-.4px; overflow-wrap:anywhere; }
+.commit-row { font-size:12px; line-height:1.7; }
+.detail-section h3 { font-size:13px; }
+.library-notice { border:1px solid var(--accent-line); border-left:3px solid var(--accent); border-radius:10px; background:var(--accent-soft); }
+.library-notice[data-tone="error"] { color:var(--danger); background:var(--danger-soft); border-color:#a92f4330; }
+#research-controls { padding:18px; border:1px solid var(--line); border-radius:14px; }
+#research-controls > .fineprint { margin-bottom:0; }
+#research-controls #jobs:empty { display:none; }
+#background-panel, #notifications { border:1px solid var(--line); border-radius:14px; padding:18px; }
+#background-panel .check-row { margin-top:12px; }
+.library-detail label:not(.check-row) { display:block; margin:14px 0 8px; font-size:12px; color:var(--secondary); }
+@media(min-width:1500px) { .library-scroll { padding-inline:max(48px,calc((100% - 1320px)/2)); } }
+@media(max-width:760px) {
+  .library-scroll { padding:24px 16px 32px; }
+  .library-heading { gap:16px; }
+  .library-heading > .library-actions { width:100%; }
+  .library-tools { align-items:stretch; }
+  .library-tools select { flex-basis:calc(50% - 12px); max-width:100%; }
+  #filters > label { flex-basis:100%; }
+  #filters > input, #filters > select { flex-basis:100%; width:100%; }
+  #filters > button { width:100%; }
+  .library-tabs { gap:0; }
+  #research-controls { padding:14px; }
+  #research-controls > .library-actions { gap:8px; }
+}
+
+.detail-back { display:none; margin:0 0 14px; }
+@media(max-width:1100px) { .detail-back { display:inline-flex; } .library-detail { scroll-margin-top:16px; } }
+
+.vault-dialog { width:960px; }
+.vault-layout { display:grid; grid-template-columns:minmax(150px,230px) minmax(0,1fr); gap:24px; }
+.vault-layout>section { min-width:0; }
+.vault-layout input[type=search] { margin-bottom:10px; }
+#vault-files { max-height:480px; overflow:auto; margin-top:14px; }
+.vault-file { display:block; padding:11px 10px; width:100%; text-align:left; overflow-wrap:anywhere; border-radius:8px; font-size:12px; }
+.vault-file:hover,.vault-file.selected { color:var(--accent); background:var(--accent-soft); }
+#vault-content { font:13px/1.8 ui-monospace,Consolas,monospace; tab-size:2; }
+@media(max-width:760px){.vault-layout { grid-template-columns:1fr;gap:16px; }#vault-files{max-height:140px;}}
+
+.vault-dialog>.dialog-heading{position:sticky;top:-28px;background:#fff;z-index:3;padding-bottom:12px;border-bottom:1px solid var(--line)}
+.vault-dialog .dialog-actions{position:sticky;bottom:-28px;background:#fff;padding-bottom:2px;z-index:2;flex-wrap:wrap}
+
+/* Paper study and transcript retrieval share the workspace controls. */
+.paper-study form{display:grid;gap:12px}.paper-study .library-actions{align-items:center}.study-evidence{padding:14px 0;border-bottom:1px solid var(--line)}
+.inbox-overview{grid-template-columns:1fr}.inbox-overview #entry-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:12px}.inbox-overview .library-row{height:100%;box-sizing:border-box;text-decoration:none}
+.conversation-search{display:grid;gap:12px;margin:24px 0}.search-input-row{display:flex;gap:10px}.search-input-row input{flex:1;min-width:0;font-size:16px;padding:14px 16px}.search-filter-row{display:flex;flex-wrap:wrap;gap:8px}.search-filter-row select{max-width:240px;min-width:110px}.search-layout{margin-top:20px}.search-hit-heading{display:flex;align-items:baseline;justify-content:space-between;gap:12px}.search-hit-heading time{font-size:11px;color:var(--muted);white-space:nowrap}.search-hit .row-text{white-space:pre-line;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;line-height:1.65}.search-hit mark{background:#dbebd9;color:inherit;border-radius:3px;padding:0 2px}.search-context-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:20px}.search-context-heading h2{margin:6px 0}.search-context-heading a{white-space:nowrap}.search-context-message{padding:18px 16px;border:1px solid transparent;border-radius:12px;margin-bottom:8px;overflow-wrap:anywhere}.search-context-message.target-message{border-color:var(--line);background:var(--surface)}.search-context-message .row-meta{display:flex;gap:12px;margin-bottom:14px}.search-context-message .markdown{font-size:14px;line-height:1.8}.search-context-message pre{overflow:auto;max-width:100%}.search-context-message table{display:block;overflow:auto}.search-context-message .markdown> :first-child{margin-top:0}
+@media(max-width:760px){.search-filter-row select{flex:1;min-width:40%;max-width:100%}.search-context-heading{align-items:flex-start;flex-direction:column}.search-context-message{padding:14px 8px}.search-input-row input{width:100%}.search-hit-heading{align-items:flex-start}.search-hit-heading time{font-size:10px}}
+
+.surrounding-message{border-bottom:1px solid var(--line);border-radius:0;padding:14px 10px}.surrounding-message summary{display:flex;gap:10px;cursor:pointer;flex-wrap:wrap;font-size:11px;color:var(--muted);list-style:revert}.surrounding-message summary:before{content:'›';font-size:15px}.surrounding-message[open] summary:before{content:'⌄'}.surrounding-message[open] .markdown{margin-top:16px}.context-teaser{flex-basis:100%;font-size:12px;line-height:1.6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+
+.study-fields{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}.study-fields>div{min-width:0}.study-fields select{width:100%}.paper-tags i{max-width:100%;overflow-wrap:anywhere;box-sizing:border-box}
+
+.paper-study label{display:block;font-size:12px;color:var(--secondary);margin:0 0 8px}.paper-study textarea,.study-fields select{box-sizing:border-box;width:100%;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);font:inherit;font-size:13px;line-height:1.65;padding:11px 12px}.paper-study textarea{resize:vertical;min-height:94px}.paper-study textarea:focus-visible,.study-fields select:focus-visible{outline:2px solid var(--focus-border,var(--accent));outline-offset:2px}

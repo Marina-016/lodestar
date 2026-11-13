@@ -658,6 +658,19 @@ def main(argv=None):
     pui.add_argument('--data-dir', type=Path, help='独立本地数据目录（默认 workspace/web）')
     pui.set_defaults(fn=lambda a, c: _cmd_ui(a, c))
 
+    pcomp = sub.add_parser('companion', help='打开独立 Windows 桌面小 lolo')
+    pcomp.add_argument('--port',type=int,default=8124)
+    pcomp.add_argument('--skin',choices=['pajamas','maid'])
+    pcomp.add_argument('--size',type=int)
+    pcomp.add_argument('--no-motion',action='store_true')
+    pcomp.add_argument('--stop',action='store_true')
+    def companion_command(a,c):
+        from lodestar.desktop import launch
+        settings = {**({'skin':a.skin} if a.skin else {}),**({'size':a.size} if a.size is not None else {}),
+                    **({'motion':False} if a.no_motion else {})}
+        print(json.dumps(launch(c.workspace_dir,port=a.port,settings=settings or None,stop=a.stop),ensure_ascii=False))
+    pcomp.set_defaults(fn=companion_command)
+
     pbg=sub.add_parser('background',help='管理独立本地后台服务（不自动开启订阅或模型调用）')
     pbg.add_argument('action',choices=['start','stop','status','run','autostart-on','autostart-off'])
     pbg.add_argument('--data-dir',type=Path,required=True)

@@ -9,7 +9,7 @@
     <link rel="icon" href="/icon.svg" />
     <link rel="stylesheet" href="/style.css" />
   </head>
-  <body>
+  <body class="chat-workspace">
     <svg class="symbols" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
       <defs>
         <symbol id="i-star" viewBox="0 0 24 24">
@@ -74,6 +74,7 @@
         <symbol id="i-lab" viewBox="0 0 24 24"><path d="M9 3h6M10 3v6l-6 10a1.3 1.3 0 0 0 1 2h14a1.3 1.3 0 0 0 1-2L14 9V3M7 15h10"/></symbol>
         <symbol id="i-diagonal" viewBox="0 0 24 24"><path d="M6 18 18 6M7 6h11v11"/></symbol>
         <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V4H4v12h4"/></symbol>
+        <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
         <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
       </defs>
     </svg>
@@ -97,7 +98,7 @@
             <svg><use href="#i-plus" /></svg><span>新建任务</span>
           </button>
           <a class="nav-item" href="/research"><span>研究收件箱</span></a>
-      <a class="nav-item" href="/history"><span>历史检索</span></a>
+      <a class="nav-item" href="/history"><span>搜索对话</span></a>
       <div class="nav-section"><button class="subtle" id="task-center">任务</button><span class="section-count" id="task-count">0</span></div>
           <div id="task-list" class="task-list"></div>
           <p id="tasks-empty" class="sidebar-empty">
@@ -161,9 +162,9 @@
               发现值得读的论文，理解新方法，<br class="mobile-break" />把想法带到正在做的项目中。
             </p>
             <div class="suggestions" aria-label="研究灵感">
-              <button data-prompt="最近 AI Agent 有哪些值得关注的新论文？先介绍三篇。" title="填入论文发现问题">
+              <button data-prompt="推荐一篇值得读的新论文，先简短说明研究问题和为什么值得读。" title="填入论文发现问题">
                 <span class="suggest-icon"><svg><use href="#i-paper" /></svg></span>
-                <span class="suggestion-copy"><strong>发现新论文</strong><span>看看最近值得读的研究</span></span>
+                <span class="suggestion-copy"><strong>推荐一篇论文</strong><span>看看最近值得读的研究</span></span>
                 <svg class="suggestion-arrow"><use href="#i-diagonal" /></svg>
               </button>
               <button data-prompt="用一个简单例子解释 Agent harness，并说明何时需要它。" title="填入技术讲解问题">
@@ -185,6 +186,7 @@
           ></section>
         </div>
         <div class="composer-area">
+          <div class="quick-prompts" id="quick-prompts" aria-label="研究灵感" hidden><button type="button" data-prompt="推荐一篇值得读的新论文，先简短说明研究问题和为什么值得读。">推荐一篇论文</button><button type="button" data-prompt="我想理解一个技术概念。先问我想了解哪个概念，然后用一个具体例子讲解。">理解一个概念</button><button type="button" data-prompt="结合我的项目，帮我找一个值得验证的研究方向。">探索项目思路</button></div>
           <button class="latest-button" id="scroll-latest" hidden aria-label="回到最新消息"><svg><use href="#i-arrow" /></svg>回到最新</button>
           <div
             class="run-status"
@@ -212,7 +214,7 @@
             ></textarea>
             <div class="composer-toolbar">
               <div class="model-controls">
-                <button type="button" class="reference-button" id="add-reference" title="添加引用或参考文本">＋ 参考文本</button>
+                <button type="button" class="reference-button" id="add-reference" title="添加引用或参考文本"><svg aria-hidden="true"><use href="#i-plus" /></svg><span>参考文本</span></button>
                 <button type="button" class="model-button" id="model-settings" aria-haspopup="dialog" title="模型与推理设置">
                   <span class="model-indicator"></span
                   ><span id="model-label">加载模型…</span
@@ -226,14 +228,14 @@
                   <svg><use href="#i-think" /></svg><span>推理强度</span>
                 </button>
               </div>
-              <button
+              <div class="send-controls"><button type="button" id="stop" class="stop-button" hidden aria-label="停止回答" title="停止回答"><svg><use href="#i-stop" /></svg></button><button
                 type="submit"
                 class="send-button" disabled
                 aria-label="发送问题"
                 id="send"
               >
                 <svg><use href="#i-arrow" /></svg>
-              </button>
+              </button></div>
             </div>
           </form>
           <div class="composer-footer">
@@ -271,43 +273,51 @@
       <div class="drawer-content" id="drawer-content"></div>
     </aside>
     <dialog id="appearance-dialog" class="appearance-dialog" aria-labelledby="appearance-title">
-      <div class="dialog-heading"><h2 id="appearance-title">聊天外观</h2><button type="button" class="icon-button" data-close="appearance-dialog" aria-label="关闭外观设置"><svg><use href="#i-close" /></svg></button></div>
-      <p class="appearance-intro">选择后立即生效，保存在当前浏览器。</p>
-      <fieldset class="appearance-group"><legend>重点色</legend><p>用于按钮、链接和选中状态。</p><div class="appearance-swatches" data-appearance-presets="accent"></div><label class="appearance-custom"><input id="appearance-accent" type="color" value="#0071e3" aria-label="自定义重点色"><span>自选颜色</span><output data-appearance-value="accent">默认</output></label></fieldset>
-      <fieldset class="appearance-group"><legend>我的消息气泡</legend><p>只改变你发出的消息，文字会自动适配深浅。</p><div class="appearance-swatches" data-appearance-presets="bubble"></div><label class="appearance-custom"><input id="appearance-bubble" type="color" value="#f5f5f7" aria-label="自定义气泡颜色"><span>自选颜色</span><output data-appearance-value="bubble">默认</output></label></fieldset>
+      <div class="dialog-heading"><div><span class="dialog-eyebrow">让这里更像你的空间</span><h2 id="appearance-title">外观与陪伴</h2></div><button type="button" class="icon-button" data-close="appearance-dialog" aria-label="关闭外观设置"><svg><use href="#i-close" /></svg></button></div>
+      <p class="appearance-intro">配色和小 lolo 都由你决定。调整会立即生效。</p>
+      <div class="panel-tabs" role="tablist" aria-label="外观设置分类"><button type="button" role="tab" id="appearance-tab-colors" aria-controls="appearance-colors" aria-selected="true" data-appearance-tab="colors">聊天配色</button><button type="button" role="tab" id="appearance-tab-lolo" aria-controls="appearance-lolo" aria-selected="false" tabindex="-1" data-appearance-tab="lolo">小 lolo</button></div>
+      <section id="appearance-colors" role="tabpanel" aria-labelledby="appearance-tab-colors">
+      <fieldset class="appearance-group settings-section"><legend>重点色</legend><p>用于按钮、链接和选中状态。</p><div class="appearance-swatches" data-appearance-presets="accent"></div><label class="appearance-custom"><input id="appearance-accent" type="color" value="#0071e3" aria-label="自定义重点色"><span>自选颜色</span><output data-appearance-value="accent">默认</output></label></fieldset>
+      <fieldset class="appearance-group settings-section"><legend>我的消息气泡</legend><p>只改变你发出的消息，文字会自动适配深浅。</p><div class="appearance-swatches" data-appearance-presets="bubble"></div><label class="appearance-custom"><input id="appearance-bubble" type="color" value="#f5f5f7" aria-label="自定义气泡颜色"><span>自选颜色</span><output data-appearance-value="bubble">默认</output></label></fieldset>
       <div class="appearance-preview" aria-label="配色预览"><span>预览一下</span><div class="appearance-sample-user">把想到的问题，都放在这里。</div><div class="appearance-sample-assistant">lolo 在呢，我们一起慢慢想。</div></div>
-      <label class="check-row" for="companion-visible"><span><strong>小 lolo 陪伴</strong><small>可以拖动；窄屏收小，手机上自动隐藏。</small></span><input type="checkbox" id="companion-visible" checked></label>
+      <p class="settings-footnote">仅保存在当前浏览器，不影响其他设备。</p></section>
+      <section id="appearance-lolo" role="tabpanel" aria-labelledby="appearance-tab-lolo" hidden><div class="companion-profile"><img src="/lolo-avatar.png" alt=""><div><strong>给研究留一点陪伴</strong><span>拖动换位置，点击打开小菜单。</span></div></div>
+      <label class="check-row" for="companion-visible"><span><strong>页面里的小 lolo</strong><small>可以拖动；窄屏收小，手机上自动隐藏。</small></span><input type="checkbox" id="companion-visible" checked></label>
       <div class="companion-settings">
+        <label class="companion-size-label" for="companion-skin">今天穿什么</label>
+        <select id="companion-skin"><option value="maid">浅紫女仆装</option><option value="pajamas">紫色睡衣 · 萌萌睡帽</option></select>
         <label class="companion-option"><input type="checkbox" id="companion-auto-size" checked><span>自动适应留白</span></label>
         <label class="companion-size-label" for="companion-size">角色大小 <output id="companion-size-value">自动适应留白</output></label>
         <input type="range" id="companion-size" min="64" max="240" step="4" value="164" disabled aria-label="小 lolo 大小">
         <p>关闭自动后可调为 64–240 px，大尺寸可能覆盖正文；位置仍可拖动。</p>
         <label class="companion-option"><input type="checkbox" id="companion-motion" checked><span>轻轻晃动和招手动画</span></label>
+        <div class="companion-desktop-actions"><button type="button" class="secondary" id="companion-desktop">放到桌面</button><button type="button" class="subtle" id="companion-web">收回页面</button></div>
+        <p>桌面版可拖到屏幕任意位置，右键换装、调大小或退出。关闭网页也会继续陪你。</p>
       </div>
-      <button type="button" class="subtle companion-reset" id="companion-reset">让小 lolo 回到角落</button>
+      <div id="companion-status" class="settings-feedback" role="status" hidden></div><button type="button" class="subtle companion-reset" id="companion-reset">重置位置 · 回到角落</button></section>
       <div class="dialog-actions"><button type="button" class="secondary" id="appearance-reset">恢复默认配色</button><button type="button" class="primary" data-close="appearance-dialog">完成</button></div>
     </dialog>
     <dialog id="delete-message-dialog" aria-labelledby="delete-message-title">
       <form id="delete-message-form">
-        <div class="dialog-heading"><h2 id="delete-message-title">删除这条回答？</h2><button type="button" class="icon-button" data-close="delete-message-dialog" aria-label="取消">×</button></div>
-        <p id="delete-message-description">删除后不再出现在对话、历史搜索和后续上下文中。已保存的记忆和已执行的任务会保留，需要单独管理。</p>
+        <div class="dialog-heading"><h2 id="delete-message-title">删除这条回答？</h2><button type="button" class="icon-button" data-close="delete-message-dialog" aria-label="关闭删除确认"><svg><use href="#i-close" /></svg></button></div>
+        <div class="confirm-symbol" aria-hidden="true"><svg><use href="#i-trash" /></svg></div><div id="delete-message-preview" class="confirm-preview"></div><p id="delete-message-description">删除后不再出现在对话、历史搜索和后续上下文中。已保存的记忆和已执行的任务会保留，需要单独管理。</p>
         <div class="dialog-actions"><button type="button" class="secondary" data-close="delete-message-dialog">保留</button><button type="submit" class="primary danger-action">删除</button></div>
       </form>
     </dialog>
     <dialog id="task-dialog" aria-labelledby="task-title">
       <form id="task-form">
         <div class="dialog-heading">
-          <h2 id="task-title">新建任务</h2>
+          <div><span class="dialog-eyebrow">给一个课题留出专注的空间</span><h2 id="task-title">新建研究任务</h2></div>
           <button
             type="button"
             class="icon-button"
             data-close="task-dialog"
-            aria-label="取消"
+            aria-label="关闭新建任务"
           >
             <svg><use href="#i-close" /></svg>
           </button>
         </div>
-        <p>给一个课题留出专注的空间，分别查看进度与结果。</p>
+        <p class="dialog-intro">每个任务独立保留对话、资料和模型设置，可以随时回来继续。</p>
         <label for="task-name">任务名称</label
         ><input
           id="task-name"
@@ -335,7 +345,7 @@
     <dialog id="settings-dialog" aria-labelledby="settings-title">
       <form id="settings-form">
         <div class="dialog-heading">
-          <h2 id="settings-title">模型设置</h2>
+          <div><span class="dialog-eyebrow">当前对话 · 下一轮生效</span><h2 id="settings-title">模型与推理</h2></div>
           <button
             type="button"
             class="icon-button"
@@ -345,18 +355,18 @@
             <svg><use href="#i-close" /></svg>
           </button>
         </div>
-        <p>仅修改当前空间，下一轮生效。</p>
+        <p class="dialog-intro">选择用哪个模型回答，以及它的思考方式。</p><div class="settings-scope"><span class="scope-dot"></span><span id="settings-space">主对话</span><small>独立保存设置</small></div><section class="settings-section" id="model-section"><div class="settings-section-heading"><span class="section-step">01</span><div><h3>选择模型</h3><p>从当前服务目录选择，或填写模型 ID。</p></div></div>
         <label for="model-select">模型</label>
         <select id="model-select" autofocus aria-describedby="catalog-status"></select>
         <input id="model-id" aria-label="自定义模型 ID" maxlength="200" placeholder="输入模型 ID" hidden />
         <p class="fineprint" id="catalog-status" role="status"></p>
         <details class="model-unavailable" id="hidden-models" hidden></details>
-        <label for="reasoning-setting">推理强度</label>
+        </section><section class="settings-section" id="reasoning-section"><div class="settings-section-heading"><span class="section-step">02</span><div><h3>推理方式</h3><p>可选项随模型变化，沿用服务端能力。</p></div></div><label for="reasoning-setting" class="sr-only">推理强度</label>
         <select id="reasoning-setting" aria-describedby="reasoning-note"></select>
-        <p class="fineprint" id="reasoning-note"></p>
-        <label class="check-row" for="enabled-setting"><span><strong>启用模型调用</strong><small>仅作用于当前空间</small></span><input type="checkbox" id="enabled-setting" /></label>
+        <div id="reasoning-options" class="reasoning-options" role="group" aria-label="推理强度"></div><p class="fineprint" id="reasoning-note"></p></section>
+        <label class="check-row" for="enabled-setting"><span><strong>启用模型调用</strong><small>关闭后保留聊天和设置，暂停发送新的问题。</small></span><input type="checkbox" id="enabled-setting" /></label>
         <p class="fineprint">
-          可用能力与费用以模型服务为准。
+          保存设置不会发起推理请求。可用能力与费用以模型服务为准。
         </p>
         <div class="dialog-actions">
           <button type="button" class="secondary" data-close="settings-dialog">
@@ -368,7 +378,7 @@
     <dialog id="manage-dialog" aria-labelledby="manage-title">
       <form id="manage-form">
         <div class="dialog-heading">
-          <h2 id="manage-title">管理任务</h2>
+          <div><span class="dialog-eyebrow">整理课题，保留研究记录</span><h2 id="manage-title">任务设置</h2></div>
           <button
             type="button"
             class="icon-button"
@@ -388,11 +398,11 @@
           <option value="archived">已归档</option>
         </select>
         <label for="manage-project">所属项目</label><select id="manage-project"></select>
-        <p>归档保留历史与记忆，可随时恢复。</p>
+        <div class="scope-note"><svg><use href="#i-task" /></svg><span>完成：研究告一段落。<br>归档：从常用列表收起，对话与记忆仍保留。</span></div>
         <div class="dialog-actions">
           <button type="button" class="secondary" data-close="manage-dialog">
             取消</button
-          ><button type="submit" class="primary">保存</button>
+          ><button type="submit" class="primary">保存任务</button>
         </div>
       </form>
     </dialog>
@@ -412,9 +422,6 @@
         <p id="note-scope"></p>
         <label for="note-range">使用范围</label><select id="note-range"><option value="personal">个人 · 所有任务可用</option><option value="project">项目 · 同项目任务可用</option><option value="task">仅当前任务</option></select>
         <label for="note-project" id="note-project-label" hidden>所属项目</label><select id="note-project" hidden></select>
-        <div class="memory-form-grid"><label for="note-tier">保留层级</label><label for="note-priority">优先级</label><select id="note-tier"><option value="durable">长期</option><option value="session">短期 · 闲置一天后处理</option></select><select id="note-priority"><option value="P0">P0 · 核心事实</option><option value="P1" selected>P1 · 参考信息</option><option value="P2">P2 · 临时结论</option></select></div>
-        <label for="note-kind">记忆类型</label><select id="note-kind"><option value="preference">偏好</option><option value="fact">事实</option><option value="claim">主张 / 判断</option><option value="reference">参考资料</option><option value="note" selected>普通备注</option></select>
-        <label for="note-reference-date">资料日期（可选）</label><input id="note-reference-date" type="date"><p class="fineprint">论文或网页请填写发布日期；超过其复核时间会提示核验。参考资料只作为检索线索，细节会回到来源确认。</p>
         <label for="note-content">希望保留的偏好或事实</label
         ><textarea
           id="note-content"
@@ -424,7 +431,10 @@
           required
           placeholder="例如：解释新方法时，先给一个具体例子。"
         ></textarea>
-        <p class="fineprint">短期 P0/P1 闲置一天后转为长期；短期 P2 会归档。长期 P1 90 天后待核实；长期 P2 30 天后降级、180 天归档。普通备注不会成为掌握证据。</p>
+        <details class="form-advanced"><summary>更多记忆设置<span>保留时间、类型与资料日期</span></summary>        <div class="memory-form-grid"><label for="note-tier">保留层级</label><label for="note-priority">优先级</label><select id="note-tier"><option value="durable">长期</option><option value="session">短期 · 闲置一天后处理</option></select><select id="note-priority"><option value="P0">P0 · 核心事实</option><option value="P1" selected>P1 · 参考信息</option><option value="P2">P2 · 临时结论</option></select></div>
+        <label for="note-kind">记忆类型</label><select id="note-kind"><option value="preference">偏好</option><option value="fact">事实</option><option value="claim">主张 / 判断</option><option value="reference">参考资料</option><option value="note" selected>普通备注</option></select>
+        <label for="note-reference-date">资料日期（可选）</label><input id="note-reference-date" type="date"><p class="fineprint">论文或网页请填写发布日期；超过其复核时间会提示核验。参考资料只作为检索线索，细节会回到来源确认。</p>
+<p class="fineprint">短期 P0/P1 闲置一天后转为长期；短期 P2 会归档。长期 P1 90 天后待核实；长期 P2 30 天后降级、180 天归档。普通备注不会成为掌握证据。</p></details>
         <div class="dialog-actions">
           <button type="button" class="secondary" data-close="note-dialog">
             取消</button
@@ -434,7 +444,7 @@
     </dialog>
     <dialog id="project-dialog" aria-labelledby="project-title">
       <form id="project-form">
-        <div class="dialog-heading"><h2 id="project-title">登记项目</h2><button type="button" class="icon-button" data-close="project-dialog" aria-label="取消"><svg><use href="#i-close" /></svg></button></div>
+        <div class="dialog-heading"><h2 id="project-title">登记项目</h2><button type="button" class="icon-button" data-close="project-dialog" aria-label="关闭新建项目"><svg><use href="#i-close" /></svg></button></div>
         <p>保存项目名称与说明，供任务归属和记忆使用。</p>
         <label for="project-name">项目名称</label><input id="project-name" maxlength="80" required autofocus />
         <label for="project-description">项目说明</label><textarea id="project-description" maxlength="4000" rows="4"></textarea>
@@ -445,7 +455,7 @@
     </dialog>
     <dialog id="learning-dialog" aria-labelledby="learning-title">
       <form id="learning-form">
-        <div class="dialog-heading"><h2 id="learning-title">纠正学习记录</h2><button type="button" class="icon-button" data-close="learning-dialog" aria-label="取消"><svg><use href="#i-close" /></svg></button></div>
+        <div class="dialog-heading"><h2 id="learning-title">纠正学习记录</h2><button type="button" class="icon-button" data-close="learning-dialog" aria-label="关闭学习记录编辑"><svg><use href="#i-close" /></svg></button></div>
         <label for="learning-technology">技术或知识点</label><input id="learning-technology" maxlength="200" required autofocus />
         <label for="learning-method">具体方法</label><input id="learning-method" maxlength="300" />
         <label for="learning-evidence">你的纠正说明</label><textarea id="learning-evidence" maxlength="2000" rows="4" required></textarea>
@@ -461,10 +471,11 @@
       <div id="companion-menu" class="companion-menu" aria-label="小 lolo" hidden>
         <div><strong>lolo 在呢</strong><small>拖动换位置，也可以按方向键</small></div>
         <button type="button" data-companion="compose">写点什么 <span>↗</span></button>
-        <button type="button" data-companion="reset">回到角落</button>
+        <button type="button" data-companion="settings">外观与陪伴 <span>换装 · 大小 · 动画</span></button><button type="button" data-companion="reset">回到角落</button>
         <button type="button" data-companion="hide">先藏起来 <span>外观中可找回</span></button>
       </div>
     </div>
+<dialog id="confirm-action-dialog" class="confirmation-dialog" aria-labelledby="confirm-action-title" aria-describedby="confirm-action-copy"><div class="dialog-heading"><div><span class="dialog-eyebrow">请确认这个变更</span><h2 id="confirm-action-title"></h2></div><button type="button" class="icon-button" data-close="confirm-action-dialog" aria-label="关闭变更确认"><svg><use href="#i-close" /></svg></button></div><div class="confirm-symbol" aria-hidden="true"><svg><use href="#i-trash" /></svg></div><div id="confirm-action-preview" class="confirm-preview"></div><p id="confirm-action-copy"></p><div class="dialog-actions"><button type="button" class="secondary" data-close="confirm-action-dialog">保留</button><button type="button" class="primary danger-action" id="confirm-action-submit">确认</button></div></dialog>
     <div class="toast" id="toast" role="alert" hidden></div>
     <script type="module" src="/app.mjs"></script>
   </body>

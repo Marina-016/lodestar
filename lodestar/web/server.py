@@ -79,6 +79,11 @@ class WebApp:
             ws.conn.executescript(model_health.SCHEMA)
             memory.initialize(ws)
             projects.initialize(ws)
+            from lodestar.web import paper_hub
+            paper_hub.initialize(ws)
+            from lodestar.web import interruptions
+            interruptions.initialize(ws)
+            ws.conn.execute("UPDATE web_followups SET status='interrupted',error='服务已重启，补充内容保留，请重新发送' WHERE status IN ('pending','starting')")
             from lodestar.web.background import notify
             for pending in ws.conn.execute("SELECT id,project_id FROM web_research_jobs WHERE status IN ('queued','running')").fetchall():
                 notify(ws.conn,'research:'+pending['id'],'research',pending['project_id'],'interrupted')
@@ -224,7 +229,8 @@ class WebApp:
                 # Completion payload can contain every stored evidence body; the
                 # polling endpoint is the only caller that needs it.
                 run_value.pop('result', None)
-            return {'item': item, 'items': self.task_list(ws),
+            from lodestar.web.interruptions import view as followup_view
+            return {'followup':followup_view(ws,item_id),'item': item, 'items': self.task_list(ws),
                     'messages': messages, 'run': run_value, 'notes': notes,
                     'context_notes': context_notes,
                     'learning': learning.profile(ws.conn, user_id=self.user(item_id)),
@@ -304,7 +310,15 @@ class WebApp:
             if self.closing:
                 raise Conflict('服务正在关闭，请稍后再操作资料库')
             if action == 'save':
-                return papers.save(ws.conn, data)
+                from lodestar.web import paper_hub
+                existing_paper=ws.conn.execute('SELECT id FROM library_papers WHERE paper_key=?',(papers.identity(data.get('url',''))[0],)).fetchone()
+                value=papers.save(ws.conn, data)
+                paper_hub.ensure_state(ws.conn,value['paper']['id'])
+                state=ws.conn.execute('SELECT revision FROM paper_study_state WHERE paper_id=?',(value['paper']['id'],)).fetchone()
+                if data.get('study_revision') is not None or not existing_paper:
+                    paper_hub.update(ws,{'id':value['paper']['id'],'revision':data.get('study_revision',state['revision']),
+                        'status':data.get('status','inbox')})
+                return paper_hub.detail(ws,value['paper']['id'],data.get('project_id'))
             if action == 'attach_inbox':
                 return papers.attach_inbox(ws.conn, data.get('project_id'), data.get('recommendation_id'))
             raise ValueError('资料库操作无效')
@@ -521,7 +535,7 @@ class WebApp:
                                        background=background, policy=policy)
 
     def _submit_locked(self, item_id, message, key, *, reference_text, background, policy,
-                       retry_user_message_id=None, continue_message_id=None):
+                       retry_user_message_id=None, continue_message_id=None, internal_followup=False):
         if not isinstance(message, str) or not message.strip() or len(message) > 24000:
             raise ValueError('请输入 1–24000 字的问题')
         if not isinstance(reference_text, str):
@@ -538,6 +552,7 @@ class WebApp:
             existing = ws.conn.execute('SELECT id FROM web_runs WHERE item_id=? AND request_key=?', (item_id,key)).fetchone()
             if existing:
                 return existing['id']
+            if not internal_followup and ws.conn.execute("SELECT 1 FROM web_followups WHERE item_id=? AND status IN ('pending','starting')",(item_id,)).fetchone():raise Conflict('补充已收到，正在接续')
             if item['status'] != 'active':
                 raise Conflict('请先恢复此任务')
             if ws.conn.execute("SELECT 1 FROM web_runs WHERE item_id=? AND status IN ('queued','running','cancelling')", (item_id,)).fetchone():
@@ -550,6 +565,7 @@ class WebApp:
                 raise Conflict('此模型或请求配置已确认不可用，请先在模型设置中选择其他模型；不会自动重试或付费回退')
             if cfg.model_calls_disabled and cfg.llm_mode != 'mock':
                 raise Conflict('模型调用已暂停，请在模型设置中启用后发送')
+            ws.conn.execute("UPDATE web_followups SET status='dismissed' WHERE item_id=? AND status IN ('error','interrupted')",(item_id,))
             run_id = uuid.uuid4().hex
             ws.conn.execute('INSERT INTO web_runs(id,item_id,request_key,status,message,config,policy,retry_user_message_id,continue_message_id) VALUES(?,?,?,?,?,?,?,?,?)',
                             (run_id,item_id,key,'queued',message,json.dumps(snapshot(cfg)),json.dumps(policy or {},ensure_ascii=False),retry_user_message_id,continue_message_id))
@@ -572,6 +588,8 @@ class WebApp:
                 finally:
                     with self.lock:
                         self.workers.pop(run_id, None)
+                    from lodestar.web.interruptions import dispatch
+                    dispatch(self,item['id'])
 
             with self.lock:
                 if self.closing:
@@ -736,6 +754,7 @@ class WebApp:
             raise ValueError('运行标识无效')
         with self.lock, self.workspace() as ws, ws.conn:
             self.item(ws, item_id)
+            ws.conn.execute("UPDATE web_followups SET status='cancelled' WHERE item_id=? AND status='pending'",(item_id,))
             row = ws.conn.execute('SELECT status FROM web_runs WHERE id=? AND item_id=?', (run_id,item_id)).fetchone()
             if row is None:
                 raise LookupError('找不到这次运行')
@@ -987,13 +1006,13 @@ def make_server(app, port=8123):
             path, query = parsed.path, parse_qs(parsed.query)
             try:
                 if not write:
-                    if path in ('/','/memory','/projects','/research','/history'):
-                        template = 'index.html' if path=='/' else 'workbench.html' if path in ('/research','/history') else 'library.html'
+                    if path in ('/','/memory','/papers','/projects','/research','/history'):
+                        template = 'index.html' if path=='/' else 'history.html' if path=='/history' else 'workbench.html' if path=='/research' else 'library.html'
                         page = (STATIC/template).read_text(encoding='utf-8').replace('__TOKEN__',app.token)
                         return self.respond(page.encode(),mime='text/html; charset=utf-8')
                     if path == '/diagram.html':
                         return self.respond((STATIC/'diagram.html').read_bytes(),mime='text/html; charset=utf-8')
-                    if path in ('/lolo-avatar.png','/lolo-companion.png'):
+                    if path in ('/lolo-avatar.png','/lolo-companion.png','/lolo-pajamas.png'):
                         return self.respond((STATIC/path[1:]).read_bytes(),mime='image/png')
                     if path == '/companion.mjs':
                         return self.respond((STATIC/'companion.mjs').read_bytes(),mime='text/javascript; charset=utf-8')
@@ -1004,11 +1023,14 @@ def make_server(app, port=8123):
                     if path in ('/mermaid.bundle.js','/diagram-frame.js','/diagram-frame.css','/diagrams.mjs','/mermaid-notices.txt','/mermaid.bundle.js.LEGAL.txt'):
                         mime = 'text/css' if path.endswith('.css') else 'text/plain' if path.endswith('.txt') else 'text/javascript'
                         return self.respond((STATIC/path[1:]).read_bytes(),mime=mime+'; charset=utf-8')
-                    if path in ('/app.mjs','/navigation.mjs','/markdown.mjs','/sources.mjs','/insights.mjs','/actions.mjs','/quote.mjs','/timeline.mjs','/followups.mjs','/stream.mjs','/models.mjs','/library.mjs','/library-views.mjs','/workbench.mjs','/library.css','/style.css','/icon.svg'):
+                    if path in ('/app.mjs','/history.mjs','/paper-study.mjs','/navigation.mjs','/markdown.mjs','/sources.mjs','/insights.mjs','/actions.mjs','/quote.mjs','/timeline.mjs','/followups.mjs','/stream.mjs','/models.mjs','/library.mjs','/library-views.mjs','/workbench.mjs','/library.css','/style.css','/icon.svg'):
                         mime = 'text/css' if path.endswith('.css') else 'image/svg+xml' if path.endswith('.svg') else 'text/javascript'
                         return self.respond((STATIC/path[1:]).read_bytes(),mime=mime+'; charset=utf-8')
                     if path == '/api/service':
                         return self.respond({'instance_id':app.instance_id,'pid':os.getpid()})
+                    if path == '/api/companion/status':
+                        from lodestar.desktop import status
+                        with app.workspace() as ws:return self.respond(status(ws.conn))
                     if path == '/api/background':
                         from lodestar.web.background import view
                         with app.workspace() as ws:return self.respond(view(ws))
@@ -1017,6 +1039,21 @@ def make_server(app, port=8123):
                     if path == '/api/message-inspection':
                         return self.respond(app.message_inspection(query.get('item',['main'])[0],
                                                                      int(query.get('message',['0'])[0])))
+                    if path in ('/api/conversation-search','/api/conversation-context'):
+                        from lodestar.web import conversation_search
+                        with app.workspace() as ws,ws.conn:
+                            if path.endswith('context'):
+                                return self.respond(conversation_search.context(ws,query.get('item',['main'])[0],int(query.get('message',['0'])[0])))
+                            return self.respond(conversation_search.search(ws,query=query.get('query',[''])[0],project_id=query.get('project',[None])[0],
+                                item_id=query.get('item',[''])[0],role=query.get('role',[''])[0],days=query.get('days',[''])[0],page=int(query.get('page',['1'])[0])))
+                    if path == '/api/papers':
+                        from lodestar.web import paper_hub
+                        with app.lock,app.workspace() as ws,ws.conn:
+                            paper_hub.sync(ws)
+                            if query.get('id'):
+                                return self.respond(paper_hub.detail(ws,int(query['id'][0]),int(query['project'][0]) if query.get('project') else None))
+                            return self.respond(paper_hub.catalog(ws,query=query.get('query',[''])[0],status=query.get('status',[''])[0],mastery=query.get('mastery',[''])[0],
+                                project_id=query.get('project',[None])[0],page=int(query.get('page',['1'])[0])))
                     if path in ('/api/history','/api/history-message'):
                         from lodestar.web import history
                         with app.workspace() as ws,ws.conn:
@@ -1030,6 +1067,11 @@ def make_server(app, port=8123):
                             project_id=int(query.get('project',['0'])[0]);research.project(ws,project_id)
                             return self.respond(research.detail(ws,project_id,int(query.get('paper',['0'])[0])) if path.endswith('paper') else
                                 research.catalog(ws,project_id,query.get('state',[''])[0],int(query.get('page',['1'])[0])))
+                    if path in ('/api/vault-notes','/api/vault-note'):
+                        from lodestar.web import vaults
+                        with app.lock,app.workspace() as ws:
+                            project_id=int(query.get('id',['0'])[0]);projects.detail(ws,project_id)
+                            return self.respond(vaults.catalog(ws,project_id,query.get('q',[''])[0]) if path.endswith('notes') else vaults.read(ws,project_id,query.get('path',[''])[0]))
                     if path == '/api/library':
                         return self.respond(app.library())
                     if path == '/api/paper-library':
@@ -1075,11 +1117,18 @@ def make_server(app, port=8123):
                         return self.respond(app.events(query.get('run',[''])[0],int(query.get('after',['0'])[0])))
                     return self.respond({'error':'页面不存在'},404)
                 length = int(self.headers.get('Content-Length','0'))
-                if not 0 < length <= 100000:
+                if not 0 < length <= (220000 if path=='/api/vault-note' else 100000):
                     return self.respond({'error':'请求大小无效'},413)
                 data = json.loads(self.rfile.read(length))
                 if not isinstance(data,dict):
                     raise ValueError('请求格式无效')
+                if path == '/api/companion/desktop':
+                    from lodestar.desktop import launch
+                    action = data.pop('action', 'show')
+                    if action not in ('show','stop'):
+                        raise ValueError('无效的桌面操作')
+                    return self.respond(launch(app.config.workspace_dir,port=self.server.server_port,
+                        settings=data or None,stop=action=='stop'))
                 if path == '/api/service-stop':
                     if data.get('instance_id')!=app.instance_id:raise ValueError('实例标识不匹配')
                     self.respond({'stopping':True})
@@ -1132,13 +1181,27 @@ def make_server(app, port=8123):
                         projects.check_revision(ws,project_id,data.get('revision'))
                         if f'project:{project_id}' in app.project_operations: raise Conflict('项目同步中，请稍后再修改许可')
                         return self.respond(project_files.save(ws,project_id,data))
+                if path in ('/api/project-local','/api/vault-note'):
+                    from lodestar.web import vaults
+                    with app.lock,app.workspace() as ws,ws.conn:
+                        if app.closing:raise Conflict('服务正在关闭')
+                        if path.endswith('project-local'):return self.respond({'id':vaults.connect(ws,data)},201)
+                        project_id=data.get('id');projects.detail(ws,project_id)
+                        return self.respond(vaults.save(ws,project_id,data))
                 if path == '/api/project-import':
                     return self.respond({'id':app.import_project(data)})
+                if path == '/api/paper-study':
+                    from lodestar.web import paper_hub
+                    with app.lock,app.workspace() as ws,ws.conn:
+                        return self.respond(paper_hub.update(ws,data))
                 if path == '/api/paper-library':
                     return self.respond(app.paper_library(data))
                 item_id = data.get('item','main')
                 if not isinstance(item_id,str):
                     raise ValueError('空间标识无效')
+                if path == '/api/interrupt':
+                    from lodestar.web.interruptions import accept
+                    return self.respond(accept(app,item_id,data.get('message'),data.get('key'),data.get('reference',''),data.get('run')),202)
                 if path == '/api/models':
                     return self.respond(app.models(item_id))
                 if path == '/api/model-restore':

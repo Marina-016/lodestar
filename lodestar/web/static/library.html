@@ -23,7 +23,7 @@
       <a class="nav-item" id="nav-projects" href="/projects"><svg><use href="#i-project" /></svg><span>项目</span></a>
       <a class="nav-item" id="nav-memory" href="/memory"><svg><use href="#i-book" /></svg><span>记忆</span></a>
       <a class="nav-item" href="/research"><span>研究收件箱</span></a>
-      <a class="nav-item" href="/history"><span>历史检索</span></a>
+      <a class="nav-item" href="/history"><span>搜索对话</span></a>
       <div class="nav-section"><span>任务</span><span id="task-count" class="section-count">0</span></div>
       <div id="task-list" class="task-list"></div>
       <p id="tasks-empty" class="sidebar-empty">研究任务的对话和来源，各自保留。</p>
@@ -31,9 +31,9 @@
     <div class="sidebar-bottom"><div class="account"><span class="avatar">L</span><span>我的工作空间<small>本地 · 私人</small></span><span class="local-dot"></span></div></div>
   </aside>
   <main id="main" class="library-main">
-    <header class="topbar"><button class="icon-button mobile-menu" id="menu" aria-label="打开导航" aria-expanded="false"><svg><use href="#i-menu" /></svg></button><div class="breadcrumb"><span id="page-name"></span><span class="divider">/</span><span id="space-subtitle">我的工作空间</span></div><a id="return-chat" class="subtle" href="/">回到对话 ↗</a></header>
+    <header class="topbar"><button class="icon-button mobile-menu" id="menu" aria-label="打开导航" aria-expanded="false"><svg><use href="#i-menu" /></svg></button><div class="breadcrumb"><span id="page-name"></span><span class="divider">/</span><span id="space-subtitle">我的工作空间</span></div><a id="return-chat" class="subtle" href="/">回到对话</a></header>
     <div class="library-scroll">
-      <div class="library-heading"><div><h1 id="page-title"></h1><p id="page-description"></p></div><div class="library-actions"><button id="import-project" class="secondary" hidden>从 GitHub 导入</button><button id="add-entry" class="primary"></button></div></div>
+      <div class="library-heading"><div><h1 id="page-title"></h1><p id="page-description"></p></div><div class="library-actions"><button id="connect-local" class="secondary" hidden>连接本地</button><button id="import-project" class="secondary" hidden>从 GitHub 导入</button><button id="add-entry" class="primary"></button></div></div>
       <div id="page-notice" class="library-notice" role="status" hidden></div>
       <div class="library-tools"><label class="sr-only" for="library-search">搜索</label><input id="library-search" type="search" maxlength="200" placeholder="搜索内容…" /><label class="sr-only" for="status-filter">状态</label><select id="status-filter"></select><label class="sr-only" for="project-filter">所属项目</label><select id="project-filter" hidden></select></div>
       <div class="library-tabs" id="library-tabs" aria-label="记忆分类" hidden></div>
@@ -52,7 +52,7 @@
   <div class="paper-form-grid"><label for="paper-year">年份</label><label for="paper-venue">会议或期刊</label><input id="paper-year" type="number" min="1000" max="3000" placeholder="可选" /><input id="paper-venue" maxlength="240" placeholder="可选" /></div>
   <label for="paper-keywords">关键词</label><input id="paper-keywords" maxlength="2000" placeholder="用逗号分隔（可选）" />
   <label for="paper-project">关联项目</label><select id="paper-project"></select>
-  <div class="paper-form-grid"><label for="paper-status">阅读状态</label><label for="paper-priority">优先级</label><select id="paper-status"><option value="inbox">收件箱</option><option value="later">稍后读</option><option value="reading">在读</option><option value="read">已读</option><option value="archived">归档</option></select><select id="paper-priority"><option value="high">高</option><option value="normal" selected>普通</option><option value="low">低</option></select></div>
+  <div class="paper-form-grid"><label for="paper-status">阅读状态</label><label for="paper-priority">优先级</label><select id="paper-status"><option value="inbox">待整理</option><option value="later">待学</option><option value="reading">在学</option><option value="read">已读</option><option value="archived">归档</option></select><select id="paper-priority"><option value="high">高</option><option value="normal" selected>普通</option><option value="low">低</option></select></div>
   <label for="paper-relevance">项目相关性</label><select id="paper-relevance"><option value="unassessed">待判断</option><option value="high">高</option><option value="medium">中</option><option value="low">低</option><option value="adopted">已采用</option><option value="rejected">不采用</option></select>
   <label for="paper-tags">项目标签</label><input id="paper-tags" maxlength="2000" placeholder="用逗号分隔（可选）" />
   <label for="paper-note">项目笔记</label><textarea id="paper-note" rows="4" maxlength="6000" placeholder="为什么收藏、想验证什么、与项目有什么关系（可选）"></textarea>
@@ -89,7 +89,7 @@
   <div class="dialog-actions"><button type="button" class="secondary" data-close="import-dialog">取消</button><button type="submit" class="primary">导入并建立工作区</button></div>
 </form></dialog>
 <dialog id="learning-editor" aria-labelledby="learning-title"><form id="learning-form">
-  <div class="dialog-heading"><h2 id="learning-title">纠正学习证据</h2><button type="button" class="subtle" data-close="learning-editor">关闭</button></div>
+  <div class="dialog-heading"><h2 id="learning-title">纠正学习记录</h2><button type="button" class="subtle" data-close="learning-editor">关闭</button></div>
   <label for="learning-technology">技术或知识点</label><input id="learning-technology" maxlength="200" required />
   <label for="learning-method">具体方法</label><input id="learning-method" maxlength="300" />
   <label for="learning-evidence">纠正说明</label><textarea id="learning-evidence" rows="5" maxlength="2000" required></textarea>
@@ -99,11 +99,13 @@
 <dialog id="files-dialog" aria-labelledby="files-title"><form id="files-form">
 <div class="dialog-heading"><h2 id="files-title">项目文件读取许可</h2><button type="button" class="subtle" data-close="files-dialog">关闭</button></div>
 <p>先在本地预览，再单独授权这份文件片段。仅绑定此项目的对话可按需读取；文件或 Git 提交变化后旧许可不再适用。</p>
-<label for="file-path">已跟踪的文本文件</label><select id="file-path"></select><button type="button" class="secondary" id="preview-file">本地预览</button>
+<label for="file-path">项目文本文件</label><select id="file-path"></select><button type="button" class="secondary" id="preview-file">本地预览</button>
 <p class="fineprint" id="file-status" role="status"></p><pre class="readme-preview" id="file-preview"></pre>
 <label class="check-row"><span>允许模型按需读取上方预览片段（最多4000字符）</span><input type="checkbox" id="file-approve" /></label>
 <div class="dialog-actions"><button type="button" class="secondary" id="revoke-file">撤销所选文件许可</button><button class="primary" id="grant-file" disabled>保存本版本许可</button></div>
 </form></dialog>
+<dialog id="local-project-dialog" aria-labelledby="local-project-title"><form id="local-project-form"><div class="dialog-heading"><h2 id="local-project-title">连接本地目录</h2><button type="button" class="subtle" data-close="local-project-dialog">关闭</button></div><label for="local-root">Obsidian Vault 或笔记目录</label><input id="local-root" required maxlength="1000" placeholder="例如 D:\Notes\Research"><label for="local-name">项目名称（可选）</label><input id="local-name" maxlength="80"><p class="fineprint">连接后可浏览和编辑笔记。模型只读取你单独授权的文件片段。</p><div class="dialog-actions"><button type="button" class="secondary" data-close="local-project-dialog">取消</button><button class="primary" type="submit">连接</button></div></form></dialog>
+<dialog id="vault-dialog" class="vault-dialog" aria-labelledby="vault-title"><div class="dialog-heading"><h2 id="vault-title">项目笔记</h2><button type="button" class="subtle" data-close="vault-dialog">关闭</button></div><div class="vault-layout"><section><input type="search" id="vault-search" placeholder="搜索笔记…" aria-label="搜索本地笔记"><button type="button" class="secondary" id="vault-new">新建笔记</button><div id="vault-files"></div></section><form id="vault-form"><label for="vault-path">笔记路径</label><input id="vault-path" required maxlength="300" placeholder="例如 研究/想法.md"><label for="vault-content">内容</label><textarea id="vault-content" rows="16" aria-label="笔记内容"></textarea><p id="vault-status" class="fineprint" role="status">选择一篇笔记，或新建笔记。</p><div class="dialog-actions"><a class="secondary" id="vault-open" hidden>在 Obsidian 打开</a><button type="button" class="secondary" id="vault-save-as">另存为</button><button type="submit" class="primary" id="vault-save" disabled>保存到本地</button></div></form></div></dialog>
 <div id="toast" class="toast" role="alert" hidden></div>
 <script type="module" src="/library.mjs"></script>
 </body></html>

@@ -27,6 +27,10 @@ def valid(path):
 
 def preview(ws,project_id,path):
     if not valid(path): raise ValueError('文件路径不允许预览或外发')
+    from lodestar.web import vaults
+    if vaults.info(ws,project_id):
+        value=vaults.read(ws,project_id,path);text=value['content']
+        return {**value,'content':text[:4000],'truncated':len(text)>4000}
     base=root(ws,project_id)
     target=base/path
     if any(p.is_symlink() or getattr(p,'is_junction',lambda:False)() for p in [target,*target.parents] if p!=base.parent):
@@ -43,6 +47,11 @@ def preview(ws,project_id,path):
 
 
 def catalog(ws,project_id):
+    from lodestar.web import vaults
+    if vaults.info(ws,project_id):
+        value=vaults.catalog(ws,project_id)
+        saved={r['path']:bool(r['approved']) for r in ws.conn.execute('SELECT path,approved FROM web_project_files WHERE project_id=?',(project_id,))}
+        return {**value,'files':[{**f,'approved':saved.get(f['path'],False)} for f in value['files']]}
     base=root(ws,project_id)
     paths=[p for p in git._run(base,'ls-files','-z').split('\0') if valid(p)]
     saved={r['path']:dict(r) for r in ws.conn.execute('SELECT path,approved,commit_sha,digest FROM web_project_files WHERE project_id=?',(project_id,))}

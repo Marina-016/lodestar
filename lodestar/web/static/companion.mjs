@@ -1,3 +1,4 @@
+import {showFormError} from './navigation.mjs';
 // Browser-local companion. It never submits prompts or calls a model.
 const KEY = 'lodestar-companion-v1';
 export function companionPreference(value) {
@@ -5,7 +6,8 @@ export function companionPreference(value) {
   const position = point && Number.isFinite(point.x) && Number.isFinite(point.y)
     ? {x: Math.max(0, Math.min(1, point.x)), y: Math.max(0, Math.min(1, point.y))} : null;
   const size = Number.isFinite(value?.size) ? Math.max(64, Math.min(240, Math.round(value.size))) : 'auto';
-  return {visible: value?.visible !== false, position, size, motion: value?.motion !== false};
+  return {visible: value?.visible !== false, position, size, motion: value?.motion !== false,
+    skin: value?.skin === 'pajamas' ? 'pajamas' : 'maid'};
 }
 export function companionPose(text, busy) {
   if (!busy || /停/.test(text)) return 'idle';
@@ -13,13 +15,14 @@ export function companionPose(text, busy) {
   if (/阅读|读取|检索|搜索|核查|引用|资料|记忆/.test(text)) return 'reading';
   return 'thinking';
 }
-export function initializeCompanion() {
+export function initializeCompanion({notify = () => {}} = {}) {
   const root = document.querySelector('#lolo-companion');
   if (!root) return {status() {}};
   const pet = root.querySelector('.companion-pet'), menu = root.querySelector('.companion-menu');
   const toggle = document.querySelector('#companion-visible');
   const sizeControl = document.querySelector('#companion-size'), autoSize = document.querySelector('#companion-auto-size');
   const motion = document.querySelector('#companion-motion'), sizeLabel = document.querySelector('#companion-size-value');
+  const skin = document.querySelector('#companion-skin');
   const read = () => {try {return companionPreference(JSON.parse(localStorage.getItem(KEY) || '{}'));} catch {return companionPreference();}};
   let preference = read(), drag = null, suppressClick = false, frame = null, greetingTimer;
   let pose = 'idle', wasBusy = false;
@@ -64,6 +67,8 @@ export function initializeCompanion() {
     sizeControl.value = preference.size === 'auto' ? 164 : preference.size;
     sizeLabel.textContent = preference.size === 'auto' ? '自动适应留白' : `${preference.size} px`;
     motion.checked = preference.motion;
+    skin.value = preference.skin;
+    root.dataset.skin = preference.skin;
     root.classList.toggle('motion-off', !preference.motion);
     if (!preference.visible) {closeMenu(); return;}
     const area = bounds(), point = preference.position;
@@ -130,6 +135,28 @@ export function initializeCompanion() {
   sizeControl.addEventListener('input', () => {preference.size = Number(sizeControl.value); save(); layout();});
   autoSize.addEventListener('change', () => {preference.size = autoSize.checked ? 'auto' : Number(sizeControl.value); save(); layout();});
   motion.addEventListener('change', () => {preference.motion = motion.checked; save(); layout();});
+  skin.addEventListener('change', () => {preference.skin = skin.value; save(); layout();});
+  async function desktop(action, button) {
+    const buttons=[document.querySelector('#companion-desktop'),document.querySelector('#companion-web')];
+    if(buttons.some(b=>b.disabled))return;
+    buttons.forEach(b=>b.disabled=true);
+    const status=document.querySelector('#companion-status');status.hidden=false;status.dataset.tone='info';status.textContent=action==='show'?'正在打开桌面小 lolo…':'正在收回页面…';
+    const label = button.textContent;
+    button.textContent = action === 'show' ? '正在叫 lolo 出来…' : '正在回到页面…';
+    try {
+      const response = await fetch('/api/companion/desktop', {method:'POST', headers:{
+        'Content-Type':'application/json','X-Lodestar-Token':document.querySelector('meta[name="lodestar-token"]').content},
+        body:JSON.stringify({action,skin:preference.skin,size:preference.size === 'auto' ? 180 : preference.size,motion:preference.motion})});
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || '这次没能打开桌面小 lolo');
+      visibility(action !== 'show');
+      status.textContent=action==='show'?'小 lolo 已到桌面，右键可换装和调大小。':'小 lolo 已回到页面。';
+      notify(action === 'show' ? '小 lolo 到桌面啦，拖动换位置，右键换装和调大小～' : '小 lolo 回到页面啦～');
+    } catch (error) {status.hidden=true;if(!showFormError(error.message))notify(error.message);}
+    finally {button.textContent = label; buttons.forEach(b=>b.disabled=false);}
+  }
+  document.querySelector('#companion-desktop').onclick = event => desktop('show',event.currentTarget);
+  document.querySelector('#companion-web').onclick = event => desktop('stop',event.currentTarget);
   document.addEventListener('pointerdown', event => {if (!root.contains(event.target)) closeMenu();});
   document.addEventListener('focusin', event => {if (!root.contains(event.target)) closeMenu();});
   document.addEventListener('visibilitychange', () => {root.classList.toggle('is-paused', document.hidden); if (document.hidden) closeMenu();});

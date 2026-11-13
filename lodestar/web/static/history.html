@@ -1,0 +1,29 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="lodestar-token" content="__TOKEN__"><title>Lodestar · 搜索对话</title><link rel="icon" href="/icon.svg"><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/library.css"></head><body><svg class="symbols" aria-hidden="true"><defs>
+  <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 2 2.6 7.4L22 12l-7.4 2.6L12 22l-2.6-7.4L2 12l7.4-2.6Z" /></symbol>
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 10 9-7 9 7v10H15v-7H9v7H3Z" /></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M12 5C9 3 5 3 3 4v15c3-1 6-1 9 1 3-2 6-2 9-1V4c-2-1-6-1-9 1Zm0 0v15" /></symbol>
+  <symbol id="i-project" viewBox="0 0 24 24"><path d="M3 6h7l2 3h9v12H3Z" /></symbol>
+  <symbol id="i-task" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2" /><path d="M9 8h6M9 12h6M9 16h3" /></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" /></symbol>
+</defs></svg>
+<div class="app">
+  <aside class="sidebar" id="sidebar" aria-label="工作空间导航">
+    <a class="brand" href="/"><span class="brand-mark"><svg><use href="#i-star" /></svg></span><span>Lodestar<span class="brand-caption">个人研究工作台</span></span></a>
+    <nav>
+      <a class="nav-item" href="/?item=main"><svg><use href="#i-home" /></svg><span>主对话</span></a>
+      <a class="nav-item" id="nav-projects" href="/projects"><svg><use href="#i-project" /></svg><span>项目</span></a>
+      <a class="nav-item" id="nav-memory" href="/memory"><svg><use href="#i-book" /></svg><span>记忆</span></a>
+      <a class="nav-item" href="/research"><span>研究收件箱</span></a>
+      <a class="nav-item" href="/history"><span>搜索对话</span></a>
+      <div class="nav-section"><span>任务</span><span id="task-count" class="section-count">0</span></div>
+      <div id="task-list" class="task-list"></div>
+      <p id="tasks-empty" class="sidebar-empty">研究任务的对话和来源，各自保留。</p>
+    </nav>
+    <div class="sidebar-bottom"><div class="account"><span class="avatar">L</span><span>我的工作空间<small>本地 · 私人</small></span><span class="local-dot"></span></div></div>
+  </aside>
+<main id="main" class="library-main"><header class="topbar"><button class="icon-button mobile-menu" id="menu" aria-label="打开导航" aria-expanded="false" aria-controls="sidebar"><svg><use href="#i-menu" /></svg></button><div class="breadcrumb">搜索对话</div><a class="subtle" href="/">回到对话</a></header><div class="library-scroll">
+<div class="library-heading"><div><h1>搜索对话</h1><p>找回讨论过的论文、方法和决定。</p></div></div>
+<div id="page-notice" class="library-notice" role="status" hidden></div>
+<form id="search-form" class="conversation-search"><div class="search-input-row"><label class="sr-only" for="search-query">搜索对话内容</label><input type="search" id="search-query" maxlength="200" placeholder="论文名、关键词，或记得的一句话…" autocomplete="off"><button class="primary" type="submit">搜索</button></div><div class="search-filter-row"><select id="search-project" aria-label="按项目筛选"></select><select id="search-item" aria-label="按对话筛选"></select><select id="search-role" aria-label="按发言者筛选"><option value="">所有发言</option><option value="user">我说的</option><option value="assistant">Lodestar 说的</option></select><select id="search-days" aria-label="按时间筛选"><option value="">全部时间</option><option value="7">最近 7 天</option><option value="30">最近 30 天</option></select><button type="button" class="subtle" id="clear-filters">清除筛选</button></div></form>
+<div class="library-layout search-layout"><section><div id="list-summary" class="list-summary" role="status"></div><div id="entry-list"></div><div id="pagination" class="library-pagination"></div></section><section id="entry-detail" class="library-detail" aria-label="对话上下文"></section></div>
+</div></main></div><div id="nav-backdrop" class="nav-backdrop" hidden></div><script type="module" src="/history.mjs"></script></body></html>
